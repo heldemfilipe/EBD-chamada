@@ -1,0 +1,446 @@
+/**
+ * API de Chamada - Exemplo de integração com Supabase
+ *
+ * Este arquivo mostra como integrar as páginas de chamada com o Supabase.
+ * Renomeie para `chamada-api.ts` quando estiver pronto para usar.
+ */
+
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import type { Database } from '@/types/database.types'
+import type {
+  PresencaAluno,
+  VisitantePresenca,
+  Visitante,
+  ResumoDia,
+  ResumoTurma
+} from '@/types'
+
+const supabase = createClientComponentClient<Database>()
+
+// =============================================
+// CHAMADAS
+// =============================================
+
+/**
+ * Busca resumo de todas as chamadas de um dia específico
+ */
+export async function buscarResumoDia(data: string): Promise<ResumoDia> {
+  const { data: resumoData, error } = await supabase
+    .from('vw_resumo_chamadas_dia')
+    .select('*')
+    .eq('data', data)
+    .maybeSingle()
+
+  if (error) throw error
+
+  // Calcular total de matriculados (soma de todas as turmas)
+  const { count: totalMatriculados } = await supabase
+    .from('matriculas')
+    .select('*', { count: 'exact', head: true })
+    .eq('ativa', true)
+
+  const resumo = resumoData as any
+
+  return {
+    total_matriculados: totalMatriculados || 0,
+    total_presentes: Number(resumo?.total_presentes) || 0,
+    total_faltas: Number(resumo?.total_faltas) || 0,
+    total_visitantes: Number(resumo?.total_visitantes) || 0,
+    total_biblias: (Number(resumo?.total_biblias_alunos) || 0) + (Number(resumo?.total_biblias_visitantes) || 0),
+    total_revistas: (Number(resumo?.total_revistas_alunos) || 0) + (Number(resumo?.total_revistas_visitantes) || 0),
+    total_oferta: Number(resumo?.total_oferta) || 0,
+  }
+}
+
+/**
+ * Busca ou cria uma chamada para uma turma em uma data específica
+ */
+export async function buscarOuCriarChamada(
+  turmaId: string,
+  data: string,
+  professorId: string
+) {
+  // Tentar buscar chamada existente
+  const { data: chamadaExistente, error: errorBusca } = await supabase
+    .from('chamadas')
+    .select('*')
+    .eq('turma_id', turmaId)
+    .eq('data', data)
+    .single()
+
+  if (chamadaExistente) return chamadaExistente
+
+  // Se não existe, criar nova
+  const { data: novaChamada, error: errorCriacao } = await supabase
+    .from('chamadas')
+    .insert({
+      turma_id: turmaId,
+      professor_id: professorId,
+      data,
+      oferta: 0,
+    })
+    .select()
+    .single()
+
+  if (errorCriacao) throw errorCriacao
+  return novaChamada
+}
+
+/**
+ * Salva uma chamada completa com presenças, visitantes, oferta e anotações
+ */
+export async function salvarChamada(
+  turmaId: string,
+  data: string,
+  professorId: string,
+  presencas: PresencaAluno[],
+  visitantes: VisitantePresenca[],
+  oferta: number,
+  anotacoes: string
+) {
+  // 1. Buscar ou criar chamada
+  const chamada = await buscarOuCriarChamada(turmaId, data, professorId)
+
+  // 2. Atualizar oferta e anotações
+  const { error: errorUpdate } = await supabase
+    .from('chamadas')
+    .update({
+      oferta,
+      anotacoes,
+    })
+    .eq('id', chamada.id)
+
+  if (errorUpdate) throw errorUpdate
+
+  // 3. Deletar presenças antigas
+  await supabase
+    .from('presencas')
+    .delete()
+    .eq('chamada_id', chamada.id)
+
+  // 4. Inserir novas presenças
+  const presencasParaInserir = presencas.map((p) => ({
+    chamada_id: chamada.id,
+    aluno_id: p.aluno_id,
+    presente: p.presente,
+    trouxe_biblia: p.trouxe_biblia,
+    trouxe_revista: p.trouxe_revista,
+    justificativa: p.justificativa,
+  }))
+
+  const { error: errorPresencas } = await supabase
+    .from('presencas')
+    .insert(presencasParaInserir)
+
+  if (errorPresencas) throw errorPresencas
+
+  // 5. Deletar histórico de visitantes antigo para esta chamada
+  await supabase
+    .from('historico_visitantes')
+    .delete()
+    .eq('chamada_id', chamada.id)
+
+  // 6. Inserir histórico de visitantes
+  const historicoParaInserir = visitantes.map((v) => ({
+    visitante_id: v.visitante_id,
+    turma_id: turmaId,
+    chamada_id: chamada.id,
+    data,
+    presente: v.presente,
+    trouxe_biblia: v.trouxe_biblia,
+    trouxe_revista: v.trouxe_revista,
+  }))
+
+  if (historicoParaInserir.length > 0) {
+    const { error: errorHistorico } = await supabase
+      .from('historico_visitantes')
+      .insert(historicoParaInserir)
+
+    if (errorHistorico) throw errorHistorico
+  }
+
+  return chamada
+}
+
+// =============================================
+// ALUNOS
+// =============================================
+
+/**
+ * Busca alunos matriculados em uma turma
+ */
+export async function buscarAlunosDaTurma(turmaId: string) {
+  const { data, error } = await supabase
+    .from('vw_alunos_por_turma')
+    .select('*')
+    .eq('turma_id', turmaId)
+    .eq('ativa', true)
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Busca presenças de alunos para uma chamada específica
+ */
+export async function buscarPresencasDaChamada(chamadaId: string) {
+  const { data, error } = await supabase
+    .from('presencas')
+    .select('*')
+    .eq('chamada_id', chamadaId)
+
+  if (error) throw error
+  return data
+}
+
+// =============================================
+// VISITANTES
+// =============================================
+
+/**
+ * Busca visitantes de uma turma
+ */
+export async function buscarVisitantesDaTurma(turmaId: string) {
+  const { data, error } = await supabase
+    .from('historico_visitantes')
+    .select(`
+      visitante_id,
+      visitantes (*)
+    `)
+    .eq('turma_id', turmaId)
+    .eq('visitantes.convertido_em_aluno', false)
+
+  if (error) throw error
+
+  // Remover duplicatas
+  const visitantesUnicos = new Map()
+  data.forEach((item: any) => {
+    if (item.visitantes && !visitantesUnicos.has(item.visitante_id)) {
+      visitantesUnicos.set(item.visitante_id, item.visitantes)
+    }
+  })
+
+  return Array.from(visitantesUnicos.values())
+}
+
+/**
+ * Busca histórico de um visitante em uma turma
+ */
+export async function buscarHistoricoVisitante(
+  visitanteId: string,
+  turmaId: string
+) {
+  const { data, error } = await supabase
+    .from('historico_visitantes')
+    .select('data, presente')
+    .eq('visitante_id', visitanteId)
+    .eq('turma_id', turmaId)
+    .order('data', { ascending: false })
+    .limit(3)
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Adiciona um novo visitante
+ */
+export async function adicionarVisitante(
+  nome: string,
+  telefone: string,
+  email?: string,
+  observacao?: string
+) {
+  const { data, error } = await supabase
+    .from('visitantes')
+    .insert({
+      nome,
+      telefone,
+      email,
+      observacao,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Converte um visitante em aluno usando a função do banco
+ */
+export async function converterVisitanteEmAluno(
+  visitanteId: string,
+  turmaId: string
+) {
+  const { data, error } = await supabase.rpc('converter_visitante_em_aluno', {
+    p_visitante_id: visitanteId,
+    p_turma_id: turmaId,
+  })
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Calcula presenças seguidas de um visitante usando a função do banco
+ */
+export async function calcularPresencasSeguidas(
+  visitanteId: string,
+  turmaId: string
+) {
+  const { data, error } = await supabase.rpc(
+    'calcular_presencas_seguidas_visitante',
+    {
+      p_visitante_id: visitanteId,
+      p_turma_id: turmaId,
+    }
+  )
+
+  if (error) throw error
+  return data
+}
+
+// =============================================
+// TURMAS
+// =============================================
+
+/**
+ * Busca todas as turmas ativas
+ */
+export async function buscarTurmasAtivas() {
+  const { data, error } = await supabase
+    .from('turmas')
+    .select('*')
+    .eq('ativa', true)
+    .order('nome')
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Busca uma turma por ID
+ */
+export async function buscarTurma(turmaId: string) {
+  const { data, error } = await supabase
+    .from('turmas')
+    .select('*')
+    .eq('id', turmaId)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/**
+ * Busca turma com contagem de alunos
+ */
+export async function buscarTurmaComAlunos(turmaId: string) {
+  const turma = await buscarTurma(turmaId)
+
+  const { count } = await supabase
+    .from('matriculas')
+    .select('*', { count: 'exact', head: true })
+    .eq('turma_id', turmaId)
+    .eq('ativa', true)
+
+  return {
+    ...turma,
+    total_alunos: count || 0,
+  }
+}
+
+// =============================================
+// PROFESSORES
+// =============================================
+
+/**
+ * Busca professor de uma turma em uma data específica (via escala)
+ */
+export async function buscarProfessorDaTurma(turmaId: string, data: string) {
+  const { data: escala, error } = await supabase
+    .from('escalas')
+    .select(`
+      professor_id,
+      professores (*)
+    `)
+    .eq('turma_id', turmaId)
+    .eq('data', data)
+    .single()
+
+  if (error) {
+    // Se não houver escala, buscar professor padrão da turma
+    // (você precisaria adicionar um campo professor_id na tabela turmas)
+    return null
+  }
+
+  return escala.professores
+}
+
+// =============================================
+// UTILITÁRIOS
+// =============================================
+
+/**
+ * Verifica se já existe chamada para uma turma em uma data
+ */
+export async function existeChamada(turmaId: string, data: string) {
+  const { data: chamada, error } = await supabase
+    .from('chamadas')
+    .select('id')
+    .eq('turma_id', turmaId)
+    .eq('data', data)
+    .single()
+
+  return !!chamada
+}
+
+/**
+ * Busca resumo de uma turma para uma chamada específica
+ */
+export async function buscarResumoTurma(
+  turmaId: string,
+  chamadaId: string
+): Promise<ResumoTurma> {
+  // Buscar matriculados
+  const { count: matriculados } = await supabase
+    .from('matriculas')
+    .select('*', { count: 'exact', head: true })
+    .eq('turma_id', turmaId)
+    .eq('ativa', true)
+
+  // Buscar presenças
+  const { data: presencas } = await supabase
+    .from('presencas')
+    .select('*')
+    .eq('chamada_id', chamadaId)
+
+  // Buscar visitantes
+  const { data: visitantes } = await supabase
+    .from('historico_visitantes')
+    .select('*')
+    .eq('chamada_id', chamadaId)
+
+  const totalPresentes = presencas?.filter((p) => p.presente).length || 0
+  const totalFaltas = presencas?.filter((p) => !p.presente).length || 0
+  const totalBiblias =
+    (presencas?.filter((p) => p.trouxe_biblia).length || 0) +
+    (visitantes?.filter((v) => v.trouxe_biblia).length || 0)
+  const totalRevistas =
+    (presencas?.filter((p) => p.trouxe_revista).length || 0) +
+    (visitantes?.filter((v) => v.trouxe_revista).length || 0)
+
+  return {
+    matriculados: matriculados || 0,
+    presentes: totalPresentes,
+    faltas: totalFaltas,
+    visitantes: visitantes?.length || 0,
+    biblias: totalBiblias,
+    revistas: totalRevistas,
+    percentual_presenca:
+      matriculados && matriculados > 0
+        ? Math.round((totalPresentes / matriculados) * 100)
+        : 0,
+  }
+}
