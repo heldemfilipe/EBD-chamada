@@ -11,6 +11,9 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
+import { supabase } from '@/lib/supabase'
+import { format, parseISO } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Periodo = 'mensal' | 'trimestral' | 'anual'
@@ -31,15 +34,8 @@ const TRIMESTRES = [
   { label: '4º Trim', desc: 'Out – Dez', meses: [9, 10, 11] },
 ]
 
-// Constante estática — apenas cores e nomes de salas (sem dados de presença)
-const salasMock = [
-  { sala: 'Pequeninos', cor: '#EAB308' },
-  { sala: 'Juniores', cor: '#F97316' },
-  { sala: 'Adolescentes', cor: '#3B82F6' },
-  { sala: 'Jovens', cor: '#A855F7' },
-  { sala: 'Adultos Casais', cor: '#22C55E' },
-  { sala: 'Maturidade', cor: '#14B8A6' },
-]
+// Cores para turmas (fallback por índice se não tiver cor cadastrada)
+const CORES_FALLBACK = ['#EAB308', '#F97316', '#3B82F6', '#A855F7', '#22C55E', '#14B8A6', '#EF4444', '#EC4899']
 
 const corSalaBg: Record<string, string> = {
   'Pequeninos': 'bg-yellow-500', 'Juniores': 'bg-orange-500',
@@ -67,10 +63,10 @@ const TooltipPresenca = ({ active, payload, label }: any) => {
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [periodo, setPeriodo] = useState<Periodo>('mensal')
-  const [anoSelecionado, setAnoSelecionado] = useState(2026)
-  const [trimestreSelecionado, setTrimestreSelecionado] = useState(0) // índice 0–3
-  const [mesSelecionado, setMesSelecionado] = useState(1) // índice 0–11 (fev = 1)
-  const [salaSelecionada, setSalaSelecionada] = useState('Jovens')
+  const [anoSelecionado, setAnoSelecionado] = useState(new Date().getFullYear())
+  const [trimestreSelecionado, setTrimestreSelecionado] = useState(Math.floor(new Date().getMonth() / 3))
+  const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth())
+  const [salaSelecionada, setSalaSelecionada] = useState('')
 
   // Estados de dados — inicializados vazios
   const [stats, setStats] = useState({ totalAlunos: 0, totalProfessores: 0, totalTurmas: 0, presencaMedia: 0 })
@@ -79,50 +75,366 @@ export default function DashboardPage() {
   const [dadosPorSala, setDadosPorSala] = useState<{ sala: string; cor: string; presencaMedia: number }[]>([])
   const [topAlunosPorSala, setTopAlunosPorSala] = useState<Record<string, { nome: string; presenca: number; total: number }[]>>({})
   const [top10Geral, setTop10Geral] = useState<{ nome: string; sala: string; presenca: number; total: number; pct: number }[]>([])
-  const [recentActivities, setRecentActivities] = useState<{ id: number; description: string; time: string; status: string }[]>([])
-  const [upcomingClasses, setUpcomingClasses] = useState<{ id: number; turma: string; professor: string; horario: string; alunos: number }[]>([])
+  const [upcomingClasses, setUpcomingClasses] = useState<{ id: string; turma: string; professor: string; alunos: number }[]>([])
+  const [recentActivities, setRecentActivities] = useState<{ id: string; description: string; time: string; status: string }[]>([])
 
+  // ── Efeito 1: Stats gerais (totais) ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const [turmas, professores, alunos, chamadas] = await Promise.all([...])
-    // setStats({ totalAlunos: ..., totalProfessores: ..., totalTurmas: ..., presencaMedia: ... })
+    async function fetchStats() {
+      const db = supabase as any
+
+      const [
+        { count: totalAlunos },
+        { count: totalProfessores },
+        { count: totalTurmas },
+      ] = await Promise.all([
+        db.from('alunos').select('id', { count: 'exact', head: true }).eq('ativo', true),
+        db.from('professores').select('id', { count: 'exact', head: true }).eq('ativo', true),
+        db.from('turmas').select('id', { count: 'exact', head: true }).eq('ativa', true),
+      ])
+
+      // Presença média do ano atual: soma presentes / soma total
+      const anoAtual = new Date().getFullYear()
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id')
+        .eq('ano', anoAtual)
+
+      let presencaMedia = 0
+      if (chamadas && chamadas.length > 0) {
+        const chamadaIds = chamadas.map((c: any) => c.id)
+        const { data: presencas } = await db
+          .from('presencas')
+          .select('presente')
+          .in('chamada_id', chamadaIds)
+
+        if (presencas && presencas.length > 0) {
+          const presentes = presencas.filter((p: any) => p.presente === true).length
+          presencaMedia = Math.round((presentes / presencas.length) * 100)
+        }
+      }
+
+      setStats({
+        totalAlunos: totalAlunos ?? 0,
+        totalProfessores: totalProfessores ?? 0,
+        totalTurmas: totalTurmas ?? 0,
+        presencaMedia,
+      })
+    }
+    fetchStats()
   }, [])
 
+  // ── Efeito 2: Gráfico anual (por mês) ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // Buscar dados de presença por mês para o ano selecionado
-    // const { data } = await supabase.rpc('get_presenca_mensal', { ano: anoSelecionado })
-    // setDadosGraficoAnual(data ?? [])
+    async function fetchGraficoAnual() {
+      const db = supabase as any
+
+      // Buscar todas chamadas do ano com presenças
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, data, presencas(presente)')
+        .eq('ano', anoSelecionado)
+
+      if (!chamadas || chamadas.length === 0) {
+        setDadosGraficoAnual([])
+        return
+      }
+
+      // Agrupar por mês
+      const porMes: Record<number, { presentes: number; total: number }> = {}
+      for (let i = 0; i < 12; i++) porMes[i] = { presentes: 0, total: 0 }
+
+      for (const chamada of chamadas) {
+        const mes = parseISO(chamada.data).getMonth()
+        const presencas = chamada.presencas ?? []
+        porMes[mes].total += presencas.length
+        porMes[mes].presentes += presencas.filter((p: any) => p.presente === true).length
+      }
+
+      const dados = MESES_CURTOS.map((label, i) => ({
+        periodo: label,
+        presentes: porMes[i].presentes,
+        total: porMes[i].total,
+        pct: porMes[i].total > 0 ? Math.round((porMes[i].presentes / porMes[i].total) * 100) : 0,
+      }))
+
+      setDadosGraficoAnual(dados)
+    }
+    fetchGraficoAnual()
   }, [anoSelecionado])
 
+  // ── Efeito 3: Gráfico mensal (por domingo) ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // Buscar dados de presença por domingo para o mês selecionado
-    // const { data } = await supabase.rpc('get_presenca_domingos', { ano: anoSelecionado, mes: mesSelecionado })
-    // setDadosGraficoDomingos(prev => ({ ...prev, [anoSelecionado]: { ...prev[anoSelecionado], [mesSelecionado]: data ?? [] } }))
+    async function fetchGraficoDomingos() {
+      const db = supabase as any
+
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, data, presencas(presente)')
+        .eq('ano', anoSelecionado)
+        .gte('data', `${anoSelecionado}-${String(mesSelecionado + 1).padStart(2, '0')}-01`)
+        .lte('data', `${anoSelecionado}-${String(mesSelecionado + 1).padStart(2, '0')}-31`)
+
+      if (!chamadas || chamadas.length === 0) {
+        setDadosGraficoDomingos(prev => ({
+          ...prev,
+          [anoSelecionado]: { ...(prev[anoSelecionado] ?? {}), [mesSelecionado]: [] },
+        }))
+        return
+      }
+
+      const dados = chamadas.map((c: any) => {
+        const presencas = c.presencas ?? []
+        const presentes = presencas.filter((p: any) => p.presente === true).length
+        const total = presencas.length
+        return {
+          periodo: format(parseISO(c.data), 'dd/MM', { locale: ptBR }),
+          presentes,
+          total,
+          pct: total > 0 ? Math.round((presentes / total) * 100) : 0,
+        }
+      })
+
+      setDadosGraficoDomingos(prev => ({
+        ...prev,
+        [anoSelecionado]: { ...(prev[anoSelecionado] ?? {}), [mesSelecionado]: dados },
+      }))
+    }
+    fetchGraficoDomingos()
   }, [anoSelecionado, mesSelecionado])
 
+  // ── Efeito 4: Presença por sala ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // Buscar presença média por sala no período selecionado
-    // const { data } = await supabase.rpc('get_presenca_por_sala', { ano: anoSelecionado, periodo })
-    // setDadosPorSala(data ?? [])
+    async function fetchPorSala() {
+      const db = supabase as any
+
+      // Buscar turmas ativas
+      const { data: turmas } = await db
+        .from('turmas')
+        .select('id, nome, cor')
+        .eq('ativa', true)
+
+      if (!turmas || turmas.length === 0) {
+        setDadosPorSala([])
+        return
+      }
+
+      // Definir filtro de data baseado no período
+      let dataInicio = `${anoSelecionado}-01-01`
+      let dataFim = `${anoSelecionado}-12-31`
+
+      if (periodo === 'trimestral') {
+        const mesInicio = TRIMESTRES[trimestreSelecionado].meses[0] + 1
+        const mesFim = TRIMESTRES[trimestreSelecionado].meses[2] + 1
+        dataInicio = `${anoSelecionado}-${String(mesInicio).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mesFim).padStart(2, '0')}-31`
+      } else if (periodo === 'mensal') {
+        const mes = mesSelecionado + 1
+        dataInicio = `${anoSelecionado}-${String(mes).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mes).padStart(2, '0')}-31`
+      }
+
+      const resultado: { sala: string; cor: string; presencaMedia: number }[] = []
+
+      for (let idx = 0; idx < turmas.length; idx++) {
+        const turma = turmas[idx]
+        const { data: chamadas } = await db
+          .from('chamadas')
+          .select('id, presencas(presente)')
+          .eq('turma_id', turma.id)
+          .gte('data', dataInicio)
+          .lte('data', dataFim)
+
+        let total = 0
+        let presentes = 0
+        if (chamadas) {
+          for (const c of chamadas) {
+            const ps = c.presencas ?? []
+            total += ps.length
+            presentes += ps.filter((p: any) => p.presente === true).length
+          }
+        }
+
+        resultado.push({
+          sala: turma.nome,
+          cor: turma.cor?.startsWith('bg-')
+            ? CORES_FALLBACK[idx % CORES_FALLBACK.length]
+            : (turma.cor || CORES_FALLBACK[idx % CORES_FALLBACK.length]),
+          presencaMedia: total > 0 ? Math.round((presentes / total) * 100) : 0,
+        })
+      }
+
+      setDadosPorSala(resultado)
+    }
+    fetchPorSala()
   }, [anoSelecionado, periodo, trimestreSelecionado, mesSelecionado])
 
+  // ── Efeito 5: Top alunos por sala e top 10 geral ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.rpc('get_top_alunos_por_sala', { ano: anoSelecionado })
-    // setTopAlunosPorSala(data ?? {})
-    // const { data: top10 } = await supabase.rpc('get_top10_alunos', { ano: anoSelecionado })
-    // setTop10Geral(top10 ?? [])
+    async function fetchTopAlunos() {
+      const db = supabase as any
+
+      // Buscar chamadas do ano
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, turma_id')
+        .eq('ano', anoSelecionado)
+
+      if (!chamadas || chamadas.length === 0) {
+        setTopAlunosPorSala({})
+        setTop10Geral([])
+        return
+      }
+
+      // Buscar alunos ativos com turma
+      const { data: alunos } = await db
+        .from('alunos')
+        .select('id, nome, turma_id, turmas(nome)')
+        .eq('ativo', true)
+
+      if (!alunos || alunos.length === 0) {
+        setTopAlunosPorSala({})
+        setTop10Geral([])
+        return
+      }
+
+      // Buscar presenças de todas as chamadas do ano
+      const chamadaIds = chamadas.map((c: any) => c.id)
+      const { data: presencas } = await db
+        .from('presencas')
+        .select('aluno_id, chamada_id, presente')
+        .in('chamada_id', chamadaIds)
+
+      if (!presencas) {
+        setTopAlunosPorSala({})
+        setTop10Geral([])
+        return
+      }
+
+      // Mapear chamada_id → turma_id
+      const chamadaTurma: Record<string, string> = {}
+      for (const c of chamadas) chamadaTurma[c.id] = c.turma_id
+
+      // Calcular presença por aluno
+      const presencaPorAluno: Record<string, { presentes: number; total: number }> = {}
+      for (const p of presencas) {
+        if (!presencaPorAluno[p.aluno_id]) presencaPorAluno[p.aluno_id] = { presentes: 0, total: 0 }
+        presencaPorAluno[p.aluno_id].total++
+        if (p.presente === true) presencaPorAluno[p.aluno_id].presentes++
+      }
+
+      // Montar lista de alunos com dados
+      const listaAlunos = alunos.map((a: any) => ({
+        id: a.id,
+        nome: a.nome,
+        sala: a.turmas?.nome ?? 'Sem turma',
+        presenca: presencaPorAluno[a.id]?.presentes ?? 0,
+        total: presencaPorAluno[a.id]?.total ?? 0,
+        pct: presencaPorAluno[a.id]?.total > 0
+          ? Math.round((presencaPorAluno[a.id].presentes / presencaPorAluno[a.id].total) * 100)
+          : 0,
+      })).filter((a: any) => a.total > 0)
+
+      // Top 10 geral
+      const top10 = [...listaAlunos]
+        .sort((a, b) => b.pct - a.pct || b.presenca - a.presenca)
+        .slice(0, 10)
+      setTop10Geral(top10)
+
+      // Top 3 por sala
+      const porSala: Record<string, typeof listaAlunos> = {}
+      for (const a of listaAlunos) {
+        if (!porSala[a.sala]) porSala[a.sala] = []
+        porSala[a.sala].push(a)
+      }
+      const topPorSala: Record<string, { nome: string; presenca: number; total: number }[]> = {}
+      for (const sala in porSala) {
+        topPorSala[sala] = porSala[sala]
+          .sort((a, b) => b.pct - a.pct || b.presenca - a.presenca)
+          .slice(0, 3)
+          .map(a => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
+      }
+      setTopAlunosPorSala(topPorSala)
+
+      // Definir sala inicial
+      if (!salaSelecionada && Object.keys(topPorSala).length > 0) {
+        setSalaSelecionada(Object.keys(topPorSala)[0])
+      }
+    }
+    fetchTopAlunos()
   }, [anoSelecionado])
 
+  // ── Efeito 6: Próximas aulas (turmas do próximo domingo) ──
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data: activities } = await supabase.from('audit_log').select('*').order('created_at', { ascending: false }).limit(4)
-    // setRecentActivities(activities ?? [])
-    // const { data: upcoming } = await supabase.rpc('get_proximas_aulas')
-    // setUpcomingClasses(upcoming ?? [])
+    async function fetchProximasAulas() {
+      const db = supabase as any
+
+      // Buscar turmas ativas com professores vinculados
+      const { data: turmas } = await db
+        .from('turmas')
+        .select(`
+          id, nome,
+          professor_turmas(
+            professores(nome)
+          ),
+          alunos(id)
+        `)
+        .eq('ativa', true)
+
+      if (!turmas) {
+        setUpcomingClasses([])
+        return
+      }
+
+      const aulas = turmas.map((t: any) => {
+        const professoresTurma = (t.professor_turmas ?? [])
+          .map((pt: any) => pt.professores?.nome)
+          .filter(Boolean)
+        const alunos = (t.alunos ?? []).length
+        return {
+          id: t.id,
+          turma: t.nome,
+          professor: professoresTurma.length > 0 ? professoresTurma.join(', ') : 'Sem professor',
+          alunos,
+        }
+      })
+
+      setUpcomingClasses(aulas)
+    }
+    fetchProximasAulas()
+  }, [])
+
+  // ── Efeito 7: Atividades recentes (últimas chamadas realizadas) ──
+  useEffect(() => {
+    async function fetchAtividades() {
+      const db = supabase as any
+
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, data, turmas(nome), presencas(presente)')
+        .order('data', { ascending: false })
+        .limit(5)
+
+      if (!chamadas) {
+        setRecentActivities([])
+        return
+      }
+
+      const atividades = chamadas.map((c: any) => {
+        const presentes = (c.presencas ?? []).filter((p: any) => p.presente === true).length
+        const total = (c.presencas ?? []).length
+        const dataFormatada = format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR })
+        return {
+          id: c.id,
+          description: `Chamada "${c.turmas?.nome ?? 'Turma'}" — ${presentes}/${total} presentes`,
+          time: dataFormatada,
+          status: 'success',
+        }
+      })
+
+      setRecentActivities(atividades)
+    }
+    fetchAtividades()
   }, [])
 
   // ── Calcula dados do gráfico de linha conforme período ──
@@ -425,19 +737,7 @@ export default function DashboardPage() {
                     </button>
                   ))
                 ) : (
-                  salasMock.map((s) => (
-                    <button
-                      key={s.sala}
-                      onClick={() => setSalaSelecionada(s.sala)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${
-                        salaSelecionada === s.sala
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                      }`}
-                    >
-                      {s.sala}
-                    </button>
-                  ))
+                  <span className="text-xs text-muted-foreground">Nenhuma turma com dados</span>
                 )}
               </div>
             </CardHeader>
@@ -524,8 +824,8 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <Card className="col-span-4">
           <CardHeader>
-            <CardTitle>Próximas Aulas</CardTitle>
-            <CardDescription>Programação das aulas para o próximo domingo</CardDescription>
+            <CardTitle>Turmas Ativas</CardTitle>
+            <CardDescription>Turmas cadastradas e seus professores</CardDescription>
           </CardHeader>
           <CardContent>
             {upcomingClasses.length > 0 ? (
@@ -540,10 +840,6 @@ export default function DashboardPage() {
                       <p className="text-sm text-muted-foreground">{aula.professor}</p>
                     </div>
                     <div className="text-right space-y-1">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Calendar className="h-4 w-4" />
-                        {aula.horario}
-                      </div>
                       <Badge variant="secondary">{aula.alunos} alunos</Badge>
                     </div>
                   </div>
@@ -551,7 +847,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-                Nenhuma aula programada
+                Nenhuma turma cadastrada
               </div>
             )}
           </CardContent>
@@ -559,16 +855,16 @@ export default function DashboardPage() {
 
         <Card className="col-span-3">
           <CardHeader>
-            <CardTitle>Atividades Recentes</CardTitle>
-            <CardDescription>Últimas atualizações no sistema</CardDescription>
+            <CardTitle>Chamadas Recentes</CardTitle>
+            <CardDescription>Últimas chamadas registradas no sistema</CardDescription>
           </CardHeader>
           <CardContent>
             {recentActivities.length > 0 ? (
               <div className="space-y-4">
                 {recentActivities.map((activity) => (
                   <div key={activity.id} className="flex items-start gap-4">
-                    <div className={`p-2 rounded-lg ${activity.status === 'success' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                      {activity.status === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+                    <div className="p-2 rounded-lg bg-green-500/10 text-green-500">
+                      <CheckCircle2 className="h-4 w-4" />
                     </div>
                     <div className="flex-1 space-y-1">
                       <p className="text-sm font-medium leading-none">{activity.description}</p>
@@ -579,7 +875,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
-                Nenhuma atividade recente
+                Nenhuma chamada registrada ainda
               </div>
             )}
           </CardContent>

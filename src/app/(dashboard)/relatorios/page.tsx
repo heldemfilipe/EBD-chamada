@@ -17,6 +17,9 @@ import {
   DollarSign, UserPlus, Trophy, AlertTriangle, ChevronLeft, ChevronRight,
   BarChart3, Star,
 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { format, parseISO } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Granularidade = 'dia' | 'mes' | 'trimestre' | 'ano'
@@ -85,6 +88,8 @@ const TRIMESTRES = [
   { label: '4º Trim', meses: 'Out – Dez', idx: [9,10,11] },
 ]
 
+const CORES_FALLBACK = ['#EAB308', '#F97316', '#3B82F6', '#A855F7', '#22C55E', '#14B8A6', '#EF4444', '#EC4899']
+
 const corSalaBg: Record<string, string> = {
   'Crianças - Pequeninos': 'bg-yellow-500',
   'Crianças - Juniores': 'bg-orange-500',
@@ -131,7 +136,7 @@ export default function RelatoriosPage() {
   const [granularidade, setGranularidade] = useState<Granularidade>('mes')
   const [anoSelecionado, setAnoSelecionado] = useState(new Date().getFullYear())
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth())
-  const [trimSelecionado, setTrimSelecionado] = useState(0)
+  const [trimSelecionado, setTrimSelecionado] = useState(Math.floor(new Date().getMonth() / 3))
   const [domingoSelecionado, setDomingoSelecionado] = useState(0)
 
   // ── Dados do Supabase ──
@@ -142,40 +147,370 @@ export default function RelatoriosPage() {
   const [alunosAtencao, setAlunosAtencao] = useState<AlunoFrequente[]>([])
   const [professores, setProfessores] = useState<ProfessorDesempenho[]>([])
 
+  // ── Efeito principal: busca todas chamadas + presenças do ano ──
   useEffect(() => {
-    // TODO: buscar domingos/chamadas do Supabase
-    // Exemplo:
-    // const { data } = await supabase
-    //   .from('chamadas')
-    //   .select('data, presencas(*), oferta')
-    //   .eq('ano', anoSelecionado)
-    // Agrupar por mês e construir DadosDomingo[]
-    setDomingosPorMes({})
+    async function fetchDadosAno() {
+      const db = supabase as any
+
+      // 1) Buscar chamadas do ano com presenças e visitantes
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select(`
+          id, data, turma_id, oferta,
+          presencas(presente, trouxe_biblia, trouxe_revista),
+          historico_visitantes(id)
+        `)
+        .eq('ano', anoSelecionado)
+        .order('data', { ascending: true })
+
+      if (!chamadas || chamadas.length === 0) {
+        setDomingosPorMes({})
+        setResumoMensal([])
+        return
+      }
+
+      // 2) Construir DadosDomingo por mês
+      const porMes: Record<number, DadosDomingo[]> = {}
+
+      for (const c of chamadas) {
+        const mes = parseISO(c.data).getMonth()
+        if (!porMes[mes]) porMes[mes] = []
+
+        const presencas = c.presencas ?? []
+        const visitantes = c.historico_visitantes ?? []
+
+        const presentes = presencas.filter((p: any) => p.presente === true).length
+        const faltas = presencas.filter((p: any) => p.presente === false).length
+        const biblias = presencas.filter((p: any) => p.trouxe_biblia === true).length
+        const revistas = presencas.filter((p: any) => p.trouxe_revista === true).length
+
+        porMes[mes].push({
+          data: format(parseISO(c.data), 'dd/MM', { locale: ptBR }),
+          presentes,
+          faltas,
+          visitantes: visitantes.length,
+          biblias,
+          revistas,
+          oferta: Number(c.oferta) || 0,
+          total: presencas.length,
+        })
+      }
+
+      setDomingosPorMes(porMes)
+
+      // 3) Agregar por mês para resumoMensal (12 posições, índice = mês)
+      const mensal: DadosMes[] = Array.from({ length: 12 }, (_, i) => ({
+        mes: MESES_NOMES[i],
+        presentes: 0,
+        faltas: 0,
+        visitantes: 0,
+        biblias: 0,
+        revistas: 0,
+        oferta: 0,
+        total: 0,
+        domingos: 0,
+      }))
+
+      for (const c of chamadas) {
+        const mes = parseISO(c.data).getMonth()
+        const presencas = c.presencas ?? []
+        const visitantes = c.historico_visitantes ?? []
+
+        mensal[mes].domingos++
+        mensal[mes].total = presencas.length // matriculados na turma (proxy)
+        mensal[mes].presentes += presencas.filter((p: any) => p.presente === true).length
+        mensal[mes].faltas += presencas.filter((p: any) => p.presente === false).length
+        mensal[mes].biblias += presencas.filter((p: any) => p.trouxe_biblia === true).length
+        mensal[mes].revistas += presencas.filter((p: any) => p.trouxe_revista === true).length
+        mensal[mes].visitantes += visitantes.length
+        mensal[mes].oferta += Number(c.oferta) || 0
+      }
+
+      setResumoMensal(mensal)
+    }
+
+    fetchDadosAno()
   }, [anoSelecionado])
 
+  // ── Efeito: presença por sala (depende do período selecionado) ──
   useEffect(() => {
-    // TODO: buscar resumo mensal do Supabase
-    // Agregar chamadas + presenças por mês para o ano selecionado
-    setResumoMensal([])
-  }, [anoSelecionado])
+    async function fetchDadosSala() {
+      const db = supabase as any
 
-  useEffect(() => {
-    // TODO: buscar presença por sala do Supabase para o período selecionado
-    // Usar vw_alunos_por_turma + presencas filtrados pelo período
-    setDadosSala([])
+      // Definir filtro de datas
+      let dataInicio = `${anoSelecionado}-01-01`
+      let dataFim = `${anoSelecionado}-12-31`
+
+      if (granularidade === 'mes') {
+        const mes = mesSelecionado + 1
+        dataInicio = `${anoSelecionado}-${String(mes).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mes).padStart(2, '0')}-31`
+      } else if (granularidade === 'trimestre') {
+        const mesInicio = TRIMESTRES[trimSelecionado].idx[0] + 1
+        const mesFim = TRIMESTRES[trimSelecionado].idx[2] + 1
+        dataInicio = `${anoSelecionado}-${String(mesInicio).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mesFim).padStart(2, '0')}-31`
+      } else if (granularidade === 'dia') {
+        const mes = mesSelecionado + 1
+        dataInicio = `${anoSelecionado}-${String(mes).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mes).padStart(2, '0')}-31`
+      }
+
+      // Buscar turmas ativas
+      const { data: turmas } = await db
+        .from('turmas')
+        .select('id, nome, cor')
+        .eq('ativa', true)
+
+      if (!turmas || turmas.length === 0) {
+        setDadosSala([])
+        return
+      }
+
+      const resultado: DadosSala[] = []
+
+      for (let idx = 0; idx < turmas.length; idx++) {
+        const turma = turmas[idx]
+
+        // Contar matriculados
+        const { count: matriculados } = await db
+          .from('alunos')
+          .select('id', { count: 'exact', head: true })
+          .eq('turma_id', turma.id)
+          .eq('ativo', true)
+
+        // Buscar chamadas da turma no período
+        const { data: chamadas } = await db
+          .from('chamadas')
+          .select(`
+            id, oferta,
+            presencas(presente, trouxe_biblia, trouxe_revista),
+            historico_visitantes(id)
+          `)
+          .eq('turma_id', turma.id)
+          .gte('data', dataInicio)
+          .lte('data', dataFim)
+
+        let presentes = 0, faltas = 0, biblias = 0, revistas = 0, visitantes = 0, oferta = 0, totalRegistros = 0
+
+        if (chamadas) {
+          for (const c of chamadas) {
+            const ps = c.presencas ?? []
+            const vs = c.historico_visitantes ?? []
+            totalRegistros += ps.length
+            presentes += ps.filter((p: any) => p.presente === true).length
+            faltas += ps.filter((p: any) => p.presente === false).length
+            biblias += ps.filter((p: any) => p.trouxe_biblia === true).length
+            revistas += ps.filter((p: any) => p.trouxe_revista === true).length
+            visitantes += vs.length
+            oferta += Number(c.oferta) || 0
+          }
+        }
+
+        const presencaMedia = totalRegistros > 0 ? Math.round((presentes / totalRegistros) * 100) : 0
+
+        // Converter cor bg- para hex
+        const corHex = turma.cor?.startsWith('bg-')
+          ? CORES_FALLBACK[idx % CORES_FALLBACK.length]
+          : (turma.cor || CORES_FALLBACK[idx % CORES_FALLBACK.length])
+
+        resultado.push({
+          sala: turma.nome,
+          cor: corHex,
+          matriculados: matriculados ?? 0,
+          presencaMedia,
+          presentes,
+          faltas,
+          visitantes,
+          biblias,
+          revistas,
+          oferta,
+        })
+      }
+
+      setDadosSala(resultado)
+    }
+
+    fetchDadosSala()
   }, [anoSelecionado, mesSelecionado, trimSelecionado, granularidade])
 
+  // ── Efeito: top alunos e alunos com atenção ──
   useEffect(() => {
-    // TODO: buscar top alunos frequentes do Supabase
-    // Usar vw_frequencia_alunos filtrado pelo período
-    setTopAlunos([])
-    setAlunosAtencao([])
+    async function fetchAlunos() {
+      const db = supabase as any
+
+      // Definir filtro de datas
+      let dataInicio = `${anoSelecionado}-01-01`
+      let dataFim = `${anoSelecionado}-12-31`
+
+      if (granularidade === 'mes' || granularidade === 'dia') {
+        const mes = mesSelecionado + 1
+        dataInicio = `${anoSelecionado}-${String(mes).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mes).padStart(2, '0')}-31`
+      } else if (granularidade === 'trimestre') {
+        const mesInicio = TRIMESTRES[trimSelecionado].idx[0] + 1
+        const mesFim = TRIMESTRES[trimSelecionado].idx[2] + 1
+        dataInicio = `${anoSelecionado}-${String(mesInicio).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mesFim).padStart(2, '0')}-31`
+      }
+
+      // Buscar chamadas do período
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id')
+        .gte('data', dataInicio)
+        .lte('data', dataFim)
+
+      if (!chamadas || chamadas.length === 0) {
+        setTopAlunos([])
+        setAlunosAtencao([])
+        return
+      }
+
+      const chamadaIds = chamadas.map((c: any) => c.id)
+
+      // Buscar presenças
+      const { data: presencas } = await db
+        .from('presencas')
+        .select('aluno_id, presente')
+        .in('chamada_id', chamadaIds)
+
+      if (!presencas || presencas.length === 0) {
+        setTopAlunos([])
+        setAlunosAtencao([])
+        return
+      }
+
+      // Agregar por aluno
+      const porAluno: Record<string, { presentes: number; total: number }> = {}
+      for (const p of presencas) {
+        if (!porAluno[p.aluno_id]) porAluno[p.aluno_id] = { presentes: 0, total: 0 }
+        porAluno[p.aluno_id].total++
+        if (p.presente === true) porAluno[p.aluno_id].presentes++
+      }
+
+      // Buscar nomes dos alunos
+      const alunoIds = Object.keys(porAluno)
+      const { data: alunos } = await db
+        .from('alunos')
+        .select('id, nome, turmas(nome)')
+        .in('id', alunoIds)
+        .eq('ativo', true)
+
+      if (!alunos) {
+        setTopAlunos([])
+        setAlunosAtencao([])
+        return
+      }
+
+      const lista: AlunoFrequente[] = alunos.map((a: any) => {
+        const dados = porAluno[a.id] ?? { presentes: 0, total: 0 }
+        const pct = dados.total > 0 ? Math.round((dados.presentes / dados.total) * 100) : 0
+        return {
+          nome: a.nome,
+          sala: a.turmas?.nome ?? 'Sem turma',
+          presentes: dados.presentes,
+          total: dados.total,
+          pct,
+          faltas: dados.total - dados.presentes,
+        }
+      }).filter((a: AlunoFrequente) => a.total > 0)
+
+      // Top 10 (maior %)
+      const top = [...lista].sort((a, b) => b.pct - a.pct || b.presentes - a.presentes).slice(0, 10)
+      setTopAlunos(top)
+
+      // Atenção (< 75%)
+      const atencao = [...lista].filter(a => a.pct < 75).sort((a, b) => a.pct - b.pct)
+      setAlunosAtencao(atencao)
+    }
+
+    fetchAlunos()
   }, [anoSelecionado, mesSelecionado, trimSelecionado, granularidade])
 
+  // ── Efeito: desempenho dos professores ──
   useEffect(() => {
-    // TODO: buscar desempenho de professores do Supabase
-    // Cruzar escalas + presenças por turma no período
-    setProfessores([])
+    async function fetchProfessores() {
+      const db = supabase as any
+
+      // Definir filtro de datas
+      let dataInicio = `${anoSelecionado}-01-01`
+      let dataFim = `${anoSelecionado}-12-31`
+
+      if (granularidade === 'mes' || granularidade === 'dia') {
+        const mes = mesSelecionado + 1
+        dataInicio = `${anoSelecionado}-${String(mes).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mes).padStart(2, '0')}-31`
+      } else if (granularidade === 'trimestre') {
+        const mesInicio = TRIMESTRES[trimSelecionado].idx[0] + 1
+        const mesFim = TRIMESTRES[trimSelecionado].idx[2] + 1
+        dataInicio = `${anoSelecionado}-${String(mesInicio).padStart(2, '0')}-01`
+        dataFim = `${anoSelecionado}-${String(mesFim).padStart(2, '0')}-31`
+      }
+
+      // Buscar professores ativos com suas turmas
+      const { data: profsList } = await db
+        .from('professores')
+        .select(`
+          id, nome,
+          professor_turmas(turma_id, turmas(nome))
+        `)
+        .eq('ativo', true)
+
+      if (!profsList || profsList.length === 0) {
+        setProfessores([])
+        return
+      }
+
+      const resultado: ProfessorDesempenho[] = []
+
+      for (const prof of profsList) {
+        const turmasDoProf = (prof.professor_turmas ?? []).map((pt: any) => pt.turmas?.nome).filter(Boolean)
+        const turmaIds = (prof.professor_turmas ?? []).map((pt: any) => pt.turma_id).filter(Boolean)
+
+        if (turmaIds.length === 0) {
+          resultado.push({ nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 })
+          continue
+        }
+
+        // Buscar chamadas das turmas do professor no período
+        const { data: chamadas } = await db
+          .from('chamadas')
+          .select(`id, presencas(presente, trouxe_biblia)`)
+          .in('turma_id', turmaIds)
+          .gte('data', dataInicio)
+          .lte('data', dataFim)
+
+        let totalPresentes = 0, totalAlunos = 0, totalBiblias = 0, aulas = 0
+
+        if (chamadas) {
+          for (const c of chamadas) {
+            aulas++
+            const ps = c.presencas ?? []
+            totalAlunos += ps.length
+            totalPresentes += ps.filter((p: any) => p.presente === true).length
+            totalBiblias += ps.filter((p: any) => p.trouxe_biblia === true).length
+          }
+        }
+
+        const presMedia = totalAlunos > 0 ? Math.round((totalPresentes / totalAlunos) * 100) : 0
+        const pctBiblias = totalPresentes > 0 ? Math.round((totalBiblias / totalPresentes) * 100) : 0
+
+        resultado.push({
+          nome: prof.nome,
+          turmas: turmasDoProf,
+          aulas,
+          presMedia,
+          biblias: pctBiblias,
+        })
+      }
+
+      // Ordenar por presença média decrescente
+      resultado.sort((a, b) => b.presMedia - a.presMedia)
+      setProfessores(resultado)
+    }
+
+    fetchProfessores()
   }, [anoSelecionado, mesSelecionado, trimSelecionado, granularidade])
 
   // Índice do ano para navegação
@@ -496,7 +831,7 @@ export default function RelatoriosPage() {
                           <TableCell className="text-center text-blue-600">{s.visitantes}</TableCell>
                           <TableCell className="text-center text-purple-600">{s.biblias}</TableCell>
                           <TableCell className="text-center text-orange-600">{s.revistas}</TableCell>
-                          <TableCell className="text-center text-emerald-600">R$ {s.oferta}</TableCell>
+                          <TableCell className="text-center text-emerald-600">R$ {s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
                           <TableCell className="text-center">
                             <div className="flex items-center gap-1.5 justify-center">
                               <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
@@ -652,9 +987,12 @@ export default function RelatoriosPage() {
                       <TableCell className="font-medium">{p.nome}</TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-0.5">
-                          {p.turmas.map((t, j) => (
-                            <span key={j} className="text-xs text-muted-foreground">{t}</span>
-                          ))}
+                          {p.turmas.length > 0
+                            ? p.turmas.map((t, j) => (
+                                <span key={j} className="text-xs text-muted-foreground">{t}</span>
+                              ))
+                            : <span className="text-xs text-muted-foreground">Sem turma</span>
+                          }
                         </div>
                       </TableCell>
                       <TableCell className="text-center font-semibold">{p.aulas}</TableCell>
@@ -670,7 +1008,9 @@ export default function RelatoriosPage() {
                         <span className="text-xs font-semibold text-purple-600">{p.biblias}%</span>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-xs border ${barBadge(p.presMedia)}`}>{barLabel(p.presMedia)}</Badge>
+                        <Badge className={`text-xs border ${p.aulas > 0 ? barBadge(p.presMedia) : 'bg-muted text-muted-foreground border-muted'}`}>
+                          {p.aulas > 0 ? barLabel(p.presMedia) : 'Sem aulas'}
+                        </Badge>
                       </TableCell>
                     </TableRow>
                   ))}
