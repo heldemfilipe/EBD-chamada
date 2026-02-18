@@ -52,6 +52,15 @@ const coresDisponiveis = [
   { value: 'bg-pink-500', label: 'Rosa' },
 ]
 
+// Faixas etárias pré-definidas da EBD
+const faixasEtarias = [
+  { value: 'Até 5 anos',       label: 'Cordeirinhos de Cristo — Até 5 anos' },
+  { value: '6 a 11 anos',      label: 'Guerreiros de Cristo — 6 a 11 anos' },
+  { value: '11 a 15 anos',     label: 'Adolescentes — 11 a 15 anos' },
+  { value: 'A partir de 16 anos', label: 'Jovens — A partir de 16 anos' },
+  { value: 'A partir de 18 anos', label: 'Adultos — A partir de 18 anos' },
+]
+
 export default function TurmasPage() {
   const [turmasData, setTurmasData] = useState<Turma[]>([])
   const [professoresMock, setProfessoresMock] = useState<Professor[]>([])
@@ -380,12 +389,21 @@ export default function TurmasPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="faixaEtaria">Faixa Etária</Label>
-              <Input
-                id="faixaEtaria"
+              <Select
                 value={formData.faixaEtaria}
-                onChange={(e) => setFormData({ ...formData, faixaEtaria: e.target.value })}
-                placeholder="Ex: 3-6 anos, 13-15 anos"
-              />
+                onValueChange={(value) => setFormData({ ...formData, faixaEtaria: value })}
+              >
+                <SelectTrigger id="faixaEtaria">
+                  <SelectValue placeholder="Selecione a faixa etária" />
+                </SelectTrigger>
+                <SelectContent>
+                  {faixasEtarias.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="sala">Sala</Label>
