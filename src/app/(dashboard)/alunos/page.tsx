@@ -50,6 +50,7 @@ interface Aluno {
 interface Turma {
   id: string
   nome: string
+  faixaEtaria: string
 }
 
 export default function AlunosPage() {
@@ -72,8 +73,8 @@ export default function AlunosPage() {
 
   useEffect(() => {
     async function fetchTurmas() {
-      const { data } = await supabase.from('turmas').select('id, nome').eq('ativa', true).order('nome')
-      setTurmasDisponiveis(data ?? [])
+      const { data } = await (supabase as any).from('turmas').select('id, nome, faixa_etaria').eq('ativa', true).order('nome') as { data: { id: string; nome: string; faixa_etaria: string | null }[] | null }
+      setTurmasDisponiveis((data ?? []).map(t => ({ id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '' })))
     }
     async function fetchAlunos() {
       const { data } = await supabase
@@ -218,54 +219,82 @@ export default function AlunosPage() {
         </Button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Alunos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{alunosData.length}</div>
-            <p className="text-xs text-muted-foreground">Ativos no sistema</p>
-          </CardContent>
-        </Card>
+      {/* Stats Cards — contagem por faixa etária da turma */}
+      {(() => {
+        // Mapear turmaId → faixaEtaria
+        const faixaPorTurma: Record<string, string> = {}
+        for (const t of turmasDisponiveis) faixaPorTurma[t.id] = t.faixaEtaria
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Crianças</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {alunosData.filter(a => a.turma === 'Crianças').length}
-            </div>
-            <p className="text-xs text-muted-foreground">Até 12 anos</p>
-          </CardContent>
-        </Card>
+        const totalCordeirinhos   = alunosData.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === 'Até 5 anos').length
+        const totalGuerreiros     = alunosData.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === '6 a 11 anos').length
+        const totalAdolescentes   = alunosData.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === '11 a 15 anos').length
+        const totalJovens         = alunosData.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === 'A partir de 16 anos').length
+        const totalAdultos        = alunosData.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === 'A partir de 18 anos').length
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Adolescentes/Jovens</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {alunosData.filter(a => a.turma === 'Adolescentes' || a.turma === 'Jovens').length}
-            </div>
-            <p className="text-xs text-muted-foreground">13 a 18 anos</p>
-          </CardContent>
-        </Card>
+        return (
+          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Total</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{alunosData.length}</div>
+                <p className="text-xs text-muted-foreground">Ativos no sistema</p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Adultos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {alunosData.filter(a => a.turma === 'Adultos').length}
-            </div>
-            <p className="text-xs text-muted-foreground">Acima de 18 anos</p>
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Cordeirinhos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-purple-500">{totalCordeirinhos}</div>
+                <p className="text-xs text-muted-foreground">Até 5 anos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Guerreiros</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-500">{totalGuerreiros}</div>
+                <p className="text-xs text-muted-foreground">6 a 11 anos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Adolescentes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-yellow-500">{totalAdolescentes}</div>
+                <p className="text-xs text-muted-foreground">11 a 15 anos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Jovens</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-500">{totalJovens}</div>
+                <p className="text-xs text-muted-foreground">A partir de 16 anos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Adultos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-500">{totalAdultos}</div>
+                <p className="text-xs text-muted-foreground">A partir de 18 anos</p>
+              </CardContent>
+            </Card>
+          </div>
+        )
+      })()}
 
       {/* Filters and Search */}
       <Card>
