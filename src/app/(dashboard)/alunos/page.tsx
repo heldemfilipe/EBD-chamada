@@ -44,6 +44,7 @@ interface Aluno {
   responsavel: string
   presenca: number
   status: string
+  isProfessor: boolean
 }
 
 interface Turma {
@@ -92,6 +93,7 @@ export default function AlunosPage() {
           presenca: 0,
           status: 'ativo',
           idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+          isProfessor: (a.responsavel ?? '').startsWith('professor:'),
         })))
       }
     }
@@ -164,7 +166,7 @@ export default function AlunosPage() {
       if (error) { alert('Erro ao atualizar aluno.'); return }
       setAlunosData(alunosData.map(a =>
         a.id === selectedAluno.id
-          ? { ...a, nome: formData.nome, dataNascimento: formData.dataNascimento, telefone: formData.telefone, email: formData.email, responsavel: formData.responsavel, turmaId: formData.turmaId || null, turma: turmaNome, idade }
+          ? { ...a, nome: formData.nome, dataNascimento: formData.dataNascimento, telefone: formData.telefone, email: formData.email, responsavel: formData.responsavel, turmaId: formData.turmaId || null, turma: turmaNome, idade, isProfessor: false }
           : a
       ))
       alert('Aluno atualizado com sucesso!')
@@ -178,7 +180,7 @@ export default function AlunosPage() {
         turma_id: formData.turmaId || null,
       }).select('id').single()
       if (error || !data) { alert('Erro ao cadastrar aluno.'); return }
-      setAlunosData([...alunosData, { id: data.id, nome: formData.nome, idade, turma: turmaNome, turmaId: formData.turmaId || null, telefone: formData.telefone, email: formData.email, dataNascimento: formData.dataNascimento, responsavel: formData.responsavel, presenca: 0, status: 'ativo' }])
+      setAlunosData([...alunosData, { id: data.id, nome: formData.nome, idade, turma: turmaNome, turmaId: formData.turmaId || null, telefone: formData.telefone, email: formData.email, dataNascimento: formData.dataNascimento, responsavel: formData.responsavel, presenca: 0, status: 'ativo', isProfessor: false }])
       alert('Aluno cadastrado com sucesso!')
     }
     handleCloseDialog()
@@ -316,9 +318,16 @@ export default function AlunosPage() {
                   filteredAlunos.map((aluno) => (
                     <TableRow key={aluno.id}>
                       <TableCell>
-                        <div className="font-medium">{aluno.nome}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium">{aluno.nome}</div>
+                          {aluno.isProfessor && (
+                            <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">
+                              Professor
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell>{aluno.idade} anos</TableCell>
+                      <TableCell>{aluno.idade > 0 ? `${aluno.idade} anos` : '—'}</TableCell>
                       <TableCell>
                         <Badge variant="secondary">
                           {turmasDisponiveis.find(t => t.id === aluno.turmaId)?.nome ?? '—'}
@@ -328,11 +337,11 @@ export default function AlunosPage() {
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2 text-sm">
                             <Phone className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-muted-foreground">{aluno.telefone}</span>
+                            <span className="text-muted-foreground">{aluno.telefone || '—'}</span>
                           </div>
                           <div className="flex items-center gap-2 text-sm">
                             <Mail className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-muted-foreground">{aluno.email}</span>
+                            <span className="text-muted-foreground">{aluno.email || '—'}</span>
                           </div>
                         </div>
                       </TableCell>
@@ -355,12 +364,18 @@ export default function AlunosPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(aluno)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleOpenDeleteDialog(aluno)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {aluno.isProfessor ? (
+                            <span className="text-xs text-muted-foreground italic">Gerenciar em Professores</span>
+                          ) : (
+                            <>
+                              <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(aluno)}>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleOpenDeleteDialog(aluno)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

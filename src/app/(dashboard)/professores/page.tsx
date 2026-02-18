@@ -173,6 +173,33 @@ export default function ProfessoresPage() {
     }
 
     const db = supabase as any
+
+    // Função auxiliar: sincroniza o professor como aluno na tabela alunos
+    const sincronizarComoAluno = async (professorId: string, nome: string, turmaAluno: string | null) => {
+      const marcador = `professor:${professorId}`
+      // Buscar se já existe um aluno vinculado a este professor
+      const { data: alunoExistente } = await db
+        .from('alunos')
+        .select('id')
+        .eq('responsavel', marcador)
+        .maybeSingle()
+
+      if (turmaAluno) {
+        if (alunoExistente) {
+          // Atualizar nome e turma do aluno existente
+          await db.from('alunos').update({ nome, turma_id: turmaAluno, ativo: true }).eq('id', alunoExistente.id)
+        } else {
+          // Criar novo aluno vinculado a este professor
+          await db.from('alunos').insert({ nome, turma_id: turmaAluno, responsavel: marcador, ativo: true })
+        }
+      } else {
+        // Sem turma aluno: remover o aluno vinculado se existir
+        if (alunoExistente) {
+          await db.from('alunos').delete().eq('id', alunoExistente.id)
+        }
+      }
+    }
+
     if (editMode && selectedProfessor) {
       const { error } = await db
         .from('professores')
@@ -190,6 +217,8 @@ export default function ProfessoresPage() {
       if (formData.turmas.length > 0) {
         await db.from('professor_turmas').insert(formData.turmas.map((tid: string) => ({ professor_id: selectedProfessor.id, turma_id: tid })))
       }
+      // Sincronizar como aluno
+      await sincronizarComoAluno(selectedProfessor.id, formData.nome, formData.turmaAluno)
       setProfessoresData(professoresData.map(p =>
         p.id === selectedProfessor.id
           ? { ...p, nome: formData.nome, telefone: formData.telefone, email: formData.email, especialidade: formData.especialidade, turmas: formData.turmas, turmaAluno: formData.turmaAluno }
@@ -213,6 +242,8 @@ export default function ProfessoresPage() {
       if (formData.turmas.length > 0) {
         await db.from('professor_turmas').insert(formData.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       }
+      // Sincronizar como aluno
+      await sincronizarComoAluno(data.id, formData.nome, formData.turmaAluno)
       setProfessoresData([...professoresData, {
         id: data.id, nome: formData.nome, telefone: formData.telefone, email: formData.email,
         especialidade: formData.especialidade, turmas: formData.turmas, turmaAluno: formData.turmaAluno,
@@ -232,6 +263,8 @@ export default function ProfessoresPage() {
   const handleDeleteProfessor = async () => {
     if (selectedProfessor) {
       const db = supabase as any
+      // Remover aluno vinculado (se existir)
+      await db.from('alunos').delete().eq('responsavel', `professor:${selectedProfessor.id}`)
       const { error } = await db.from('professores').delete().eq('id', selectedProfessor.id)
       if (error) { alert('Erro ao excluir professor.'); return }
       setProfessoresData(professoresData.filter(p => p.id !== selectedProfessor.id))
