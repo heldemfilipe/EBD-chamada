@@ -37,6 +37,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { formatarDomingo, getUltimosDomingos, converterParaISO, calcularPresencasSeguidas } from '@/lib/chamada-utils'
+import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 
 // Interfaces
@@ -87,40 +88,87 @@ export default function ChamadaTurmaPage() {
   })
   const [salvando, setSalvando] = useState(false)
 
-  // Inicializar alunos da turma
   useEffect(() => {
-    // TODO: buscar alunos da turma do Supabase
-    // const { data } = await supabase
-    //   .from('alunos')
-    //   .select('id, nome')
-    //   .eq('turma_id', turmaId)
-    // setAlunos(
-    //   (data ?? []).map((aluno) => ({
-    //     aluno_id: aluno.id,
-    //     nome: aluno.nome,
-    //     presente: 'pendente' as const,
-    //     trouxe_biblia: false,
-    //     trouxe_revista: false,
-    //     justificativa: '',
-    //   }))
-    // )
+    async function fetchTurmaEAlunos() {
+      // Buscar dados da turma
+      const { data: turmaData } = await (supabase.from('turmas') as any)
+        .select('id, nome, sala')
+        .eq('id', turmaId)
+        .single() as { data: { id: string; nome: string; sala: string | null } | null }
+      if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-    setAlunos([])
+      // Buscar alunos da turma
+      const { data: alunosData } = await (supabase.from('alunos') as any)
+        .select('id, nome')
+        .eq('turma_id', turmaId)
+        .eq('ativo', true)
+        .order('nome') as { data: { id: string; nome: string }[] | null }
 
-    // Visitantes começam vazios (serão adicionados manualmente)
-    setVisitantes([])
-  }, [turmaId])
+      // Verificar se já existe chamada para esta data
+      const { data: chamadaExistente } = await (supabase.from('chamadas') as any)
+        .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
+        .eq('turma_id', turmaId)
+        .eq('data', dataSelecionada)
+        .single() as { data: { id: string; oferta: number; anotacoes: string | null; presencas: any[] } | null }
 
-  // Carregar dados da turma
-  useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase
-    //   .from('turmas')
-    //   .select('id, nome, sala, professor')
-    //   .eq('id', turmaId)
-    //   .single()
-    // if (data) setTurma(data)
-  }, [turmaId])
+      if (chamadaExistente) {
+        setOferta(String(chamadaExistente.oferta || ''))
+        setAnotacoes(chamadaExistente.anotacoes ?? '')
+        const presencasMap = new Map(
+          (chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p])
+        )
+        setAlunos(
+          (alunosData ?? []).map(a => {
+            const p = presencasMap.get(a.id)
+            return {
+              aluno_id: a.id,
+              nome: a.nome,
+              presente: p ? (p.presente ? 'presente' : 'ausente') : 'pendente',
+              trouxe_biblia: p?.trouxe_biblia ?? false,
+              trouxe_revista: p?.trouxe_revista ?? false,
+              justificativa: p?.justificativa ?? '',
+            }
+          })
+        )
+      } else {
+        setAlunos(
+          (alunosData ?? []).map(a => ({
+            aluno_id: a.id,
+            nome: a.nome,
+            presente: 'pendente' as const,
+            trouxe_biblia: false,
+            trouxe_revista: false,
+            justificativa: '',
+          }))
+        )
+      }
+
+      // Carregar visitantes do dia
+      const { data: histData } = await (supabase.from('historico_visitantes') as any)
+        .select('id, visitante_id, visitantes(id, nome, telefone, observacao)')
+        .eq('turma_id', turmaId)
+        .eq('data', dataSelecionada)
+        .eq('presente', true) as { data: { id: string; visitante_id: string; visitantes: any }[] | null }
+      if (histData) {
+        setVisitantes(histData.map(h => {
+          const v = h.visitantes as { id: string; nome: string; telefone: string | null; observacao: string | null } | null
+          return {
+            id: h.visitante_id,
+            nome: v?.nome ?? '',
+            telefone: v?.telefone ?? '',
+            observacao: v?.observacao ?? '',
+            historico: [{ data: dataSelecionada, presente: true }],
+            presencas_seguidas: 1,
+            trouxe_biblia: false,
+            trouxe_revista: false,
+          }
+        }))
+      } else {
+        setVisitantes([])
+      }
+    }
+    fetchTurmaEAlunos()
+  }, [turmaId, dataSelecionada])
 
   // Handlers
   const handleMarcarPresenca = (alunoId: string, status: 'presente' | 'ausente') => {
@@ -221,22 +269,65 @@ export default function ChamadaTurmaPage() {
 
   const handleSalvarChamada = async () => {
     setSalvando(true)
-    // Simular salvamento
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    try {
+      const db = supabase as any
 
-    // Aqui você salvaria no banco de dados
-    console.log('Salvando chamada:', {
-      turma_id: turmaId,
-      data: dataSelecionada,
-      alunos,
-      visitantes,
-      oferta: parseFloat(oferta) || 0,
-      anotacoes,
-    })
+      // Upsert da chamada (cria ou atualiza)
+      const { data: chamada, error: errChamada } = await db
+        .from('chamadas')
+        .upsert({ turma_id: turmaId, data: dataSelecionada, oferta: parseFloat(oferta) || 0, anotacoes }, { onConflict: 'turma_id,data' })
+        .select('id')
+        .single()
 
-    setSalvando(false)
-    alert('Chamada salva com sucesso!')
-    router.push('/chamada')
+      if (errChamada || !chamada) {
+        alert('Erro ao salvar chamada.')
+        setSalvando(false)
+        return
+      }
+
+      // Upsert de presenças
+      const presencasPayload = alunos
+        .filter(a => a.presente !== 'pendente')
+        .map(a => ({
+          chamada_id: chamada.id,
+          aluno_id: a.aluno_id,
+          presente: a.presente === 'presente',
+          trouxe_biblia: a.trouxe_biblia,
+          trouxe_revista: a.trouxe_revista,
+          justificativa: a.justificativa || null,
+        }))
+
+      if (presencasPayload.length > 0) {
+        await db.from('presencas').upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
+      }
+
+      // Salvar visitantes novos
+      for (const v of visitantes) {
+        const { data: visitante } = await db
+          .from('visitantes')
+          .upsert({ ...(v.id.startsWith('v') ? {} : { id: v.id }), nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
+          .select('id')
+          .single()
+        if (visitante) {
+          await db.from('historico_visitantes').upsert({
+            visitante_id: visitante.id,
+            turma_id: turmaId,
+            chamada_id: chamada.id,
+            data: dataSelecionada,
+            presente: true,
+            trouxe_biblia: v.trouxe_biblia,
+            trouxe_revista: v.trouxe_revista,
+          }, { onConflict: 'visitante_id,data,turma_id' })
+        }
+      }
+
+      alert('Chamada salva com sucesso!')
+      router.push('/chamada')
+    } catch {
+      alert('Erro inesperado ao salvar chamada.')
+    } finally {
+      setSalvando(false)
+    }
   }
 
   // Calcular resumo

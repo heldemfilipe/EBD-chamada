@@ -22,24 +22,24 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Calendar, Filter, Plus, Edit, Trash2, GraduationCap, BookOpen } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
-// Interfaces
 interface Escala {
-  id: number
+  id: string
   data: string
-  turmaId: number
-  professorId: number
+  turmaId: string
+  professorId: string
   trimestre: number
   observacao: string
 }
 
 interface Professor {
-  id: number
+  id: string
   nome: string
 }
 
 interface Turma {
-  id: number
+  id: string
   nome: string
   cor: string
 }
@@ -67,32 +67,53 @@ export default function EscalaPage() {
   })
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('escalas').select('*')
-    // setEscalasData(data ?? [])
+    async function fetchEscalas() {
+      const db = supabase as any
+      const { data } = await db
+        .from('escalas')
+        .select('id, data, turma_id, professor_id, trimestre, observacoes')
+        .order('data') as { data: { id: string; data: string; turma_id: string; professor_id: string; trimestre: number | null; observacoes: string | null }[] | null }
+      if (data) {
+        setEscalasData(data.map(e => ({
+          id: e.id,
+          data: e.data,
+          turmaId: e.turma_id,
+          professorId: e.professor_id,
+          trimestre: e.trimestre ?? calcularTrimestre(e.data),
+          observacao: e.observacoes ?? '',
+        })))
+      }
+    }
+    fetchEscalas()
   }, [])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('professores').select('id, nome')
-    // setProfessoresData(data ?? [])
+    async function fetchProfessores() {
+      const db = supabase as any
+      const { data } = await db.from('professores').select('id, nome').eq('ativo', true).order('nome') as { data: { id: string; nome: string }[] | null }
+      setProfessoresData(data ?? [])
+    }
+    fetchProfessores()
   }, [])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('turmas').select('id, nome, cor')
-    // setTurmasData(data ?? [])
+    async function fetchTurmas() {
+      const db = supabase as any
+      const { data } = await db.from('turmas').select('id, nome, cor').eq('ativa', true).order('nome') as { data: { id: string; nome: string; cor: string }[] | null }
+      setTurmasData(data ?? [])
+    }
+    fetchTurmas()
   }, [])
 
-  const getProfessorNome = (id: number) => {
+  const getProfessorNome = (id: string) => {
     return professoresData.find(p => p.id === id)?.nome || 'Não definido'
   }
 
-  const getTurmaNome = (id: number) => {
+  const getTurmaNome = (id: string) => {
     return turmasData.find(t => t.id === id)?.nome || 'Não definida'
   }
 
-  const getTurmaCor = (id: number) => {
+  const getTurmaCor = (id: string) => {
     return turmasData.find(t => t.id === id)?.cor || 'bg-gray-500'
   }
 
@@ -106,26 +127,20 @@ export default function EscalaPage() {
 
   const filtrarEscalas = () => {
     let escalas = [...escalasData]
-
     switch (filtroTipo) {
       case 'ano':
         escalas = escalas.filter(e => e.data.startsWith(anoSelecionado))
         break
       case 'trimestre':
-        escalas = escalas.filter(e => e.trimestre === parseInt(trimestreSelecionado))
+        escalas = escalas.filter(e => e.data.startsWith(anoSelecionado) && e.trimestre === parseInt(trimestreSelecionado))
         break
       case 'data':
-        if (dataSelecionada) {
-          escalas = escalas.filter(e => e.data === dataSelecionada)
-        }
+        if (dataSelecionada) escalas = escalas.filter(e => e.data === dataSelecionada)
         break
       case 'professor':
-        if (professorSelecionado) {
-          escalas = escalas.filter(e => e.professorId === parseInt(professorSelecionado))
-        }
+        if (professorSelecionado) escalas = escalas.filter(e => e.professorId === professorSelecionado)
         break
     }
-
     return escalas.sort((a, b) => a.data.localeCompare(b.data))
   }
 
@@ -176,44 +191,39 @@ export default function EscalaPage() {
     })
   }
 
-  const handleSaveEscala = () => {
-    // Validação
+  const handleSaveEscala = async () => {
     if (!formData.data || !formData.turmaId || !formData.professorId) {
       alert('Por favor, preencha todos os campos obrigatórios (Data, Turma e Professor).')
       return
     }
-
     const trimestre = calcularTrimestre(formData.data)
 
+    const db = supabase as any
     if (editMode && selectedEscala) {
-      // Editar escala existente
-      setEscalasData(escalasData.map(escala =>
-        escala.id === selectedEscala.id
-          ? {
-              ...escala,
-              data: formData.data,
-              turmaId: parseInt(formData.turmaId),
-              professorId: parseInt(formData.professorId),
-              trimestre: trimestre,
-              observacao: formData.observacao
-            }
-          : escala
+      const { error } = await db.from('escalas').update({
+        data: formData.data,
+        turma_id: formData.turmaId,
+        professor_id: formData.professorId,
+        observacoes: formData.observacao,
+      }).eq('id', selectedEscala.id)
+      if (error) { alert('Erro ao atualizar escala.'); return }
+      setEscalasData(escalasData.map(e =>
+        e.id === selectedEscala.id
+          ? { ...e, data: formData.data, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }
+          : e
       ))
       alert('Escala atualizada com sucesso!')
     } else {
-      // Adicionar nova escala
-      const novaEscala: Escala = {
-        id: escalasData.length > 0 ? Math.max(...escalasData.map(e => e.id)) + 1 : 1,
+      const { data, error } = await db.from('escalas').insert({
         data: formData.data,
-        turmaId: parseInt(formData.turmaId),
-        professorId: parseInt(formData.professorId),
-        trimestre: trimestre,
-        observacao: formData.observacao
-      }
-      setEscalasData([...escalasData, novaEscala])
+        turma_id: formData.turmaId,
+        professor_id: formData.professorId,
+        observacoes: formData.observacao,
+      }).select('id').single()
+      if (error || !data) { alert('Erro ao cadastrar escala.'); return }
+      setEscalasData([...escalasData, { id: data.id, data: formData.data, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }])
       alert('Escala cadastrada com sucesso!')
     }
-
     handleCloseDialog()
   }
 
@@ -222,9 +232,12 @@ export default function EscalaPage() {
     setDeleteDialogOpen(true)
   }
 
-  const handleDeleteEscala = () => {
+  const handleDeleteEscala = async () => {
     if (selectedEscala) {
-      setEscalasData(escalasData.filter(escala => escala.id !== selectedEscala.id))
+      const db = supabase as any
+      const { error } = await db.from('escalas').delete().eq('id', selectedEscala.id)
+      if (error) { alert('Erro ao excluir escala.'); return }
+      setEscalasData(escalasData.filter(e => e.id !== selectedEscala.id))
       alert('Escala excluída com sucesso!')
       setDeleteDialogOpen(false)
       setSelectedEscala(null)
@@ -367,7 +380,7 @@ export default function EscalaPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {professoresData.map(professor => (
-                      <SelectItem key={professor.id} value={professor.id.toString()}>
+                      <SelectItem key={professor.id} value={professor.id}>
                         {professor.nome}
                       </SelectItem>
                     ))}
@@ -530,7 +543,7 @@ export default function EscalaPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {turmasData.map((turma) => (
-                    <SelectItem key={turma.id} value={turma.id.toString()}>
+                    <SelectItem key={turma.id} value={turma.id}>
                       <div className="flex items-center gap-2">
                         <div className={`w-3 h-3 rounded-full ${turma.cor}`} />
                         {turma.nome}
@@ -548,7 +561,7 @@ export default function EscalaPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {professoresData.map((professor) => (
-                    <SelectItem key={professor.id} value={professor.id.toString()}>
+                    <SelectItem key={professor.id} value={professor.id}>
                       {professor.nome}
                     </SelectItem>
                   ))}

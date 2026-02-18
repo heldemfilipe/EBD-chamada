@@ -179,10 +179,10 @@ export interface Database {
         Row: {
           id: string
           turma_id: string
-          professor_id: string
+          professor_id: string | null
           data: string
-          trimestre: number
-          ano: number
+          trimestre: number | null
+          ano: number | null
           oferta: number
           anotacoes: string | null
           created_at: string
@@ -191,10 +191,8 @@ export interface Database {
         Insert: {
           id?: string
           turma_id: string
-          professor_id: string
+          professor_id?: string | null
           data: string
-          trimestre?: number
-          ano?: number
           oferta?: number
           anotacoes?: string | null
           created_at?: string
@@ -203,10 +201,8 @@ export interface Database {
         Update: {
           id?: string
           turma_id?: string
-          professor_id?: string
+          professor_id?: string | null
           data?: string
-          trimestre?: number
-          ano?: number
           oferta?: number
           anotacoes?: string | null
           created_at?: string

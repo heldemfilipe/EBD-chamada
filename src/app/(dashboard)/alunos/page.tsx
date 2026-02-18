@@ -30,13 +30,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
-// Interface para Aluno
 interface Aluno {
-  id: number
+  id: string
   nome: string
   idade: number
   turma: string
+  turmaId: string | null
   telefone: string
   email: string
   dataNascimento: string
@@ -45,11 +46,14 @@ interface Aluno {
   status: string
 }
 
-// Constantes estáticas — categorias de turma para filtro e seleção
-const turmas = ['Crianças', 'Adolescentes', 'Jovens', 'Adultos']
+interface Turma {
+  id: string
+  nome: string
+}
 
 export default function AlunosPage() {
   const [alunosData, setAlunosData] = useState<Aluno[]>([])
+  const [turmasDisponiveis, setTurmasDisponiveis] = useState<Turma[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [turmaFilter, setTurmaFilter] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -62,20 +66,43 @@ export default function AlunosPage() {
     telefone: '',
     email: '',
     responsavel: '',
-    turma: ''
+    turmaId: '',
   })
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('alunos').select('*')
-    // setAlunosData(data ?? [])
+    async function fetchTurmas() {
+      const { data } = await supabase.from('turmas').select('id, nome').eq('ativa', true).order('nome')
+      setTurmasDisponiveis(data ?? [])
+    }
+    async function fetchAlunos() {
+      const { data } = await supabase
+        .from('alunos')
+        .select('id, nome, data_nascimento, telefone, email, responsavel, turma_id')
+        .order('nome') as { data: { id: string; nome: string; data_nascimento: string | null; telefone: string | null; email: string | null; responsavel: string | null; turma_id: string | null }[] | null; error: any }
+      if (data) {
+        setAlunosData(data.map(a => ({
+          id: a.id,
+          nome: a.nome,
+          turmaId: a.turma_id ?? null,
+          turma: '', // será resolvido a partir de turmasDisponiveis no render
+          telefone: a.telefone ?? '',
+          email: a.email ?? '',
+          dataNascimento: a.data_nascimento ?? '',
+          responsavel: a.responsavel ?? '',
+          presenca: 0,
+          status: 'ativo',
+          idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+        })))
+      }
+    }
+    fetchTurmas()
+    fetchAlunos()
   }, [])
 
   const filteredAlunos = alunosData.filter(aluno => {
     const matchesSearch = aluno.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          aluno.email.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesTurma = turmaFilter === 'all' || aluno.turma === turmaFilter
-
+    const matchesTurma = turmaFilter === 'all' || aluno.turmaId === turmaFilter
     return matchesSearch && matchesTurma
   })
 
@@ -100,19 +127,12 @@ export default function AlunosPage() {
         telefone: aluno.telefone,
         email: aluno.email,
         responsavel: aluno.responsavel,
-        turma: aluno.turma
+        turmaId: aluno.turmaId ?? '',
       })
     } else {
       setEditMode(false)
       setSelectedAluno(null)
-      setFormData({
-        nome: '',
-        dataNascimento: '',
-        telefone: '',
-        email: '',
-        responsavel: '',
-        turma: ''
-      })
+      setFormData({ nome: '', dataNascimento: '', telefone: '', email: '', responsavel: '', turmaId: '' })
     }
     setDialogOpen(true)
   }
@@ -121,60 +141,46 @@ export default function AlunosPage() {
     setDialogOpen(false)
     setEditMode(false)
     setSelectedAluno(null)
-    setFormData({
-      nome: '',
-      dataNascimento: '',
-      telefone: '',
-      email: '',
-      responsavel: '',
-      turma: ''
-    })
+    setFormData({ nome: '', dataNascimento: '', telefone: '', email: '', responsavel: '', turmaId: '' })
   }
 
-  const handleSaveAluno = () => {
-    // Validação - apenas nome é obrigatório
+  const handleSaveAluno = async () => {
     if (!formData.nome) {
       alert('Por favor, preencha o nome do aluno.')
       return
     }
-
     const idade = formData.dataNascimento ? calcularIdade(formData.dataNascimento) : 0
+    const turmaNome = turmasDisponiveis.find(t => t.id === formData.turmaId)?.nome ?? ''
 
     if (editMode && selectedAluno) {
-      // Editar aluno existente
-      setAlunosData(alunosData.map(aluno =>
-        aluno.id === selectedAluno.id
-          ? {
-              ...aluno,
-              nome: formData.nome,
-              dataNascimento: formData.dataNascimento,
-              telefone: formData.telefone,
-              email: formData.email,
-              responsavel: formData.responsavel,
-              turma: formData.turma,
-              idade: idade
-            }
-          : aluno
+      const { error } = await (supabase.from('alunos') as any).update({
+        nome: formData.nome,
+        data_nascimento: formData.dataNascimento || null,
+        telefone: formData.telefone,
+        email: formData.email,
+        responsavel: formData.responsavel,
+        turma_id: formData.turmaId || null,
+      }).eq('id', selectedAluno.id)
+      if (error) { alert('Erro ao atualizar aluno.'); return }
+      setAlunosData(alunosData.map(a =>
+        a.id === selectedAluno.id
+          ? { ...a, nome: formData.nome, dataNascimento: formData.dataNascimento, telefone: formData.telefone, email: formData.email, responsavel: formData.responsavel, turmaId: formData.turmaId || null, turma: turmaNome, idade }
+          : a
       ))
       alert('Aluno atualizado com sucesso!')
     } else {
-      // Adicionar novo aluno
-      const novoAluno: Aluno = {
-        id: alunosData.length > 0 ? Math.max(...alunosData.map(a => a.id)) + 1 : 1,
+      const { data, error } = await (supabase.from('alunos') as any).insert({
         nome: formData.nome,
-        idade: idade,
-        turma: formData.turma,
+        data_nascimento: formData.dataNascimento || null,
         telefone: formData.telefone,
         email: formData.email,
-        dataNascimento: formData.dataNascimento,
         responsavel: formData.responsavel,
-        presenca: 0,
-        status: 'ativo'
-      }
-      setAlunosData([...alunosData, novoAluno])
+        turma_id: formData.turmaId || null,
+      }).select('id').single()
+      if (error || !data) { alert('Erro ao cadastrar aluno.'); return }
+      setAlunosData([...alunosData, { id: data.id, nome: formData.nome, idade, turma: turmaNome, turmaId: formData.turmaId || null, telefone: formData.telefone, email: formData.email, dataNascimento: formData.dataNascimento, responsavel: formData.responsavel, presenca: 0, status: 'ativo' }])
       alert('Aluno cadastrado com sucesso!')
     }
-
     handleCloseDialog()
   }
 
@@ -183,9 +189,11 @@ export default function AlunosPage() {
     setDeleteDialogOpen(true)
   }
 
-  const handleDeleteAluno = () => {
+  const handleDeleteAluno = async () => {
     if (selectedAluno) {
-      setAlunosData(alunosData.filter(aluno => aluno.id !== selectedAluno.id))
+      const { error } = await (supabase.from('alunos') as any).delete().eq('id', selectedAluno.id)
+      if (error) { alert('Erro ao excluir aluno.'); return }
+      setAlunosData(alunosData.filter(a => a.id !== selectedAluno.id))
       alert('Aluno excluído com sucesso!')
       setDeleteDialogOpen(false)
       setSelectedAluno(null)
@@ -282,9 +290,9 @@ export default function AlunosPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas as turmas</SelectItem>
-                {turmas.map((turma) => (
-                  <SelectItem key={turma} value={turma}>
-                    {turma}
+                {turmasDisponiveis.map((turma) => (
+                  <SelectItem key={turma.id} value={turma.id}>
+                    {turma.nome}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -312,7 +320,9 @@ export default function AlunosPage() {
                       </TableCell>
                       <TableCell>{aluno.idade} anos</TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{aluno.turma}</Badge>
+                        <Badge variant="secondary">
+                          {turmasDisponiveis.find(t => t.id === aluno.turmaId)?.nome ?? '—'}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
@@ -426,14 +436,14 @@ export default function AlunosPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="turma">Turma</Label>
-              <Select value={formData.turma} onValueChange={(value) => setFormData({ ...formData, turma: value })}>
+              <Select value={formData.turmaId} onValueChange={(value) => setFormData({ ...formData, turmaId: value })}>
                 <SelectTrigger id="turma">
                   <SelectValue placeholder="Selecione uma turma" />
                 </SelectTrigger>
                 <SelectContent>
-                  {turmas.map((turma) => (
-                    <SelectItem key={turma} value={turma}>
-                      {turma}
+                  {turmasDisponiveis.map((turma) => (
+                    <SelectItem key={turma.id} value={turma.id}>
+                      {turma.nome}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -22,10 +22,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Users, GraduationCap, Edit, Trash2 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
-// Interfaces
 interface Turma {
-  id: number
+  id: string
   nome: string
   faixaEtaria: string
   totalAlunos: number
@@ -34,11 +34,10 @@ interface Turma {
   descricao: string
 }
 
-// Interface para Professor (apenas para buscar professores que lecionam na turma)
 interface Professor {
-  id: number
+  id: string
   nome: string
-  turmas: number[]
+  professor_turmas: { turma_id: string }[]
 }
 
 // Constantes estáticas — cores disponíveis para identificação visual
@@ -69,21 +68,53 @@ export default function TurmasPage() {
   })
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('turmas').select('*')
-    // setTurmasData(data ?? [])
+    async function fetchTurmas() {
+      const db = supabase as any
+      const { data } = await db
+        .from('turmas')
+        .select('id, nome, descricao, faixa_etaria, sala, cor')
+        .eq('ativa', true)
+        .order('nome') as { data: { id: string; nome: string; descricao: string | null; faixa_etaria: string | null; sala: string | null; cor: string }[] | null }
+      if (data) {
+        const turmasComContagem = await Promise.all(
+          data.map(async (t) => {
+            const { count } = await db
+              .from('alunos')
+              .select('id', { count: 'exact', head: true })
+              .eq('turma_id', t.id)
+              .eq('ativo', true)
+            return {
+              id: t.id,
+              nome: t.nome,
+              descricao: t.descricao ?? '',
+              faixaEtaria: t.faixa_etaria ?? '',
+              sala: t.sala ?? '',
+              cor: t.cor ?? 'bg-blue-500',
+              totalAlunos: count ?? 0,
+            }
+          })
+        )
+        setTurmasData(turmasComContagem)
+      }
+    }
+    fetchTurmas()
   }, [])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('professores').select('id, nome, turmas')
-    // setProfessoresMock(data ?? [])
+    async function fetchProfessores() {
+      const db = supabase as any
+      const { data } = await db
+        .from('professores')
+        .select('id, nome, professor_turmas(turma_id)')
+        .eq('ativo', true) as { data: { id: string; nome: string; professor_turmas: { turma_id: string }[] }[] | null }
+      setProfessoresMock(data ?? [])
+    }
+    fetchProfessores()
   }, [])
 
-  // Função para buscar professores de uma turma
-  const getProfessoresDaTurma = (turmaId: number): string[] => {
+  const getProfessoresDaTurma = (turmaId: string): string[] => {
     return professoresMock
-      .filter(prof => prof.turmas.includes(turmaId))
+      .filter(prof => prof.professor_turmas.some(pt => pt.turma_id === turmaId))
       .map(prof => prof.nome)
   }
 
@@ -128,40 +159,45 @@ export default function TurmasPage() {
     })
   }
 
-  const handleSaveTurma = () => {
-    // Validação - apenas nome é obrigatório
+  const handleSaveTurma = async () => {
     if (!formData.nome) {
       alert('Por favor, preencha o nome da turma.')
       return
     }
 
+    const db = supabase as any
     if (editMode && selectedTurma) {
-      // Editar turma existente
-      setTurmasData(turmasData.map(turma =>
-        turma.id === selectedTurma.id
-          ? {
-              ...turma,
-              nome: formData.nome,
-              descricao: formData.descricao,
-              faixaEtaria: formData.faixaEtaria,
-              sala: formData.sala,
-              cor: formData.cor
-            }
-          : turma
+      const { error } = await db
+        .from('turmas')
+        .update({
+          nome: formData.nome,
+          descricao: formData.descricao,
+          faixa_etaria: formData.faixaEtaria,
+          sala: formData.sala,
+          cor: formData.cor,
+        })
+        .eq('id', selectedTurma.id)
+      if (error) { alert('Erro ao atualizar turma.'); return }
+      setTurmasData(turmasData.map(t =>
+        t.id === selectedTurma.id
+          ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor }
+          : t
       ))
       alert('Turma atualizada com sucesso!')
     } else {
-      // Adicionar nova turma
-      const novaTurma: Turma = {
-        id: turmasData.length > 0 ? Math.max(...turmasData.map(t => t.id)) + 1 : 1,
-        nome: formData.nome,
-        descricao: formData.descricao,
-        faixaEtaria: formData.faixaEtaria,
-        sala: formData.sala,
-        cor: formData.cor,
-        totalAlunos: 0
-      }
-      setTurmasData([...turmasData, novaTurma])
+      const { data, error } = await db
+        .from('turmas')
+        .insert({
+          nome: formData.nome,
+          descricao: formData.descricao,
+          faixa_etaria: formData.faixaEtaria,
+          sala: formData.sala,
+          cor: formData.cor,
+        })
+        .select('id')
+        .single()
+      if (error || !data) { alert('Erro ao cadastrar turma.'); return }
+      setTurmasData([...turmasData, { id: data.id, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor, totalAlunos: 0 }])
       alert('Turma cadastrada com sucesso!')
     }
 
@@ -173,9 +209,12 @@ export default function TurmasPage() {
     setDeleteDialogOpen(true)
   }
 
-  const handleDeleteTurma = () => {
+  const handleDeleteTurma = async () => {
     if (selectedTurma) {
-      setTurmasData(turmasData.filter(turma => turma.id !== selectedTurma.id))
+      const db = supabase as any
+      const { error } = await db.from('turmas').delete().eq('id', selectedTurma.id)
+      if (error) { alert('Erro ao excluir turma.'); return }
+      setTurmasData(turmasData.filter(t => t.id !== selectedTurma.id))
       alert('Turma excluída com sucesso!')
       setDeleteDialogOpen(false)
       setSelectedTurma(null)

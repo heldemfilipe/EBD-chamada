@@ -31,22 +31,21 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
-// Interface para Professor
 interface Professor {
-  id: number
+  id: string
   nome: string
   especialidade: string
-  turmas: number[]      // Turmas que leciona (pode ser várias)
-  turmaAluno: number | null  // Turma em que é aluno (apenas uma)
+  turmas: string[]
+  turmaAluno: string | null
   telefone: string
   email: string
   dataIngresso: string
 }
 
-// Interface para Turma
 interface Turma {
-  id: number
+  id: string
   nome: string
 }
 
@@ -63,37 +62,55 @@ export default function ProfessoresPage() {
     telefone: '',
     email: '',
     especialidade: '',
-    turmas: [] as number[],
-    turmaAluno: null as number | null,
+    turmas: [] as string[],
+    turmaAluno: null as string | null,
   })
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('professores').select('*')
-    // setProfessoresData(data ?? [])
+    async function fetchProfessores() {
+      const db = supabase as any
+      const { data } = await db
+        .from('professores')
+        .select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, professor_turmas(turma_id)')
+        .eq('ativo', true)
+        .order('nome') as { data: { id: string; nome: string; especialidade: string | null; telefone: string | null; email: string | null; data_ingresso: string | null; turma_aluno_id: string | null; professor_turmas: { turma_id: string }[] }[] | null }
+      if (data) {
+        setProfessoresData(data.map(p => ({
+          id: p.id,
+          nome: p.nome,
+          especialidade: p.especialidade ?? '',
+          telefone: p.telefone ?? '',
+          email: p.email ?? '',
+          dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
+          turmaAluno: p.turma_aluno_id ?? null,
+          turmas: p.professor_turmas.map(pt => pt.turma_id),
+        })))
+      }
+    }
+    fetchProfessores()
   }, [])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('turmas').select('id, nome')
-    // setTurmasDisponiveis(data ?? [])
+    async function fetchTurmas() {
+      const db = supabase as any
+      const { data } = await db.from('turmas').select('id, nome').eq('ativa', true).order('nome') as { data: { id: string; nome: string }[] | null }
+      setTurmasDisponiveis(data ?? [])
+    }
+    fetchTurmas()
   }, [])
 
-  // Obter nomes das turmas por IDs
-  const getTurmasNomes = (turmaIds: number[]): string[] => {
+  const getTurmasNomes = (turmaIds: string[]): string[] => {
     return turmasDisponiveis
       .filter(turma => turmaIds.includes(turma.id))
       .map(turma => turma.nome)
   }
 
-  // Obter nome de uma turma por ID
-  const getTurmaNome = (turmaId: number | null): string => {
+  const getTurmaNome = (turmaId: string | null): string => {
     if (!turmaId) return '—'
     return turmasDisponiveis.find(t => t.id === turmaId)?.nome ?? '—'
   }
 
-  // Alternar seleção de turma que leciona
-  const toggleTurmaLeciona = (turmaId: number) => {
+  const toggleTurmaLeciona = (turmaId: string) => {
     setFormData(prev => ({
       ...prev,
       turmas: prev.turmas.includes(turmaId)
@@ -149,39 +166,58 @@ export default function ProfessoresPage() {
     })
   }
 
-  const handleSaveProfessor = () => {
+  const handleSaveProfessor = async () => {
     if (!formData.nome) {
       alert('Por favor, preencha o nome do professor.')
       return
     }
 
+    const db = supabase as any
     if (editMode && selectedProfessor) {
-      setProfessoresData(professoresData.map(professor =>
-        professor.id === selectedProfessor.id
-          ? {
-              ...professor,
-              nome: formData.nome,
-              telefone: formData.telefone,
-              email: formData.email,
-              especialidade: formData.especialidade,
-              turmas: formData.turmas,
-              turmaAluno: formData.turmaAluno,
-            }
-          : professor
+      const { error } = await db
+        .from('professores')
+        .update({
+          nome: formData.nome,
+          telefone: formData.telefone,
+          email: formData.email,
+          especialidade: formData.especialidade,
+          turma_aluno_id: formData.turmaAluno,
+        })
+        .eq('id', selectedProfessor.id)
+      if (error) { alert('Erro ao atualizar professor.'); return }
+      // Atualizar professor_turmas
+      await db.from('professor_turmas').delete().eq('professor_id', selectedProfessor.id)
+      if (formData.turmas.length > 0) {
+        await db.from('professor_turmas').insert(formData.turmas.map((tid: string) => ({ professor_id: selectedProfessor.id, turma_id: tid })))
+      }
+      setProfessoresData(professoresData.map(p =>
+        p.id === selectedProfessor.id
+          ? { ...p, nome: formData.nome, telefone: formData.telefone, email: formData.email, especialidade: formData.especialidade, turmas: formData.turmas, turmaAluno: formData.turmaAluno }
+          : p
       ))
       alert('Professor atualizado com sucesso!')
     } else {
-      const novoProfessor: Professor = {
-        id: professoresData.length > 0 ? Math.max(...professoresData.map(p => p.id)) + 1 : 1,
-        nome: formData.nome,
-        telefone: formData.telefone,
-        email: formData.email,
-        especialidade: formData.especialidade,
-        turmas: formData.turmas,
-        turmaAluno: formData.turmaAluno,
-        dataIngresso: new Date().toISOString().split('T')[0]
+      const { data, error } = await db
+        .from('professores')
+        .insert({
+          nome: formData.nome,
+          telefone: formData.telefone,
+          email: formData.email,
+          especialidade: formData.especialidade,
+          turma_aluno_id: formData.turmaAluno,
+          data_ingresso: new Date().toISOString().split('T')[0],
+        })
+        .select('id')
+        .single()
+      if (error || !data) { alert('Erro ao cadastrar professor.'); return }
+      if (formData.turmas.length > 0) {
+        await db.from('professor_turmas').insert(formData.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       }
-      setProfessoresData([...professoresData, novoProfessor])
+      setProfessoresData([...professoresData, {
+        id: data.id, nome: formData.nome, telefone: formData.telefone, email: formData.email,
+        especialidade: formData.especialidade, turmas: formData.turmas, turmaAluno: formData.turmaAluno,
+        dataIngresso: new Date().toISOString().split('T')[0],
+      }])
       alert('Professor cadastrado com sucesso!')
     }
 
@@ -193,9 +229,12 @@ export default function ProfessoresPage() {
     setDeleteDialogOpen(true)
   }
 
-  const handleDeleteProfessor = () => {
+  const handleDeleteProfessor = async () => {
     if (selectedProfessor) {
-      setProfessoresData(professoresData.filter(professor => professor.id !== selectedProfessor.id))
+      const db = supabase as any
+      const { error } = await db.from('professores').delete().eq('id', selectedProfessor.id)
+      if (error) { alert('Erro ao excluir professor.'); return }
+      setProfessoresData(professoresData.filter(p => p.id !== selectedProfessor.id))
       alert('Professor excluído com sucesso!')
       setDeleteDialogOpen(false)
       setSelectedProfessor(null)
@@ -477,7 +516,7 @@ export default function ProfessoresPage() {
                 onValueChange={(value) =>
                   setFormData({
                     ...formData,
-                    turmaAluno: value === 'nenhuma' ? null : Number(value),
+                    turmaAluno: value === 'nenhuma' ? null : value,
                   })
                 }
               >

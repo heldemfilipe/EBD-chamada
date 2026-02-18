@@ -21,6 +21,7 @@ import {
   ClipboardList,
 } from 'lucide-react'
 import { getDomingoAtual, getProximoDomingo, getUltimosDomingos, formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
+import { supabase } from '@/lib/supabase'
 import { format, addDays, subDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -94,61 +95,90 @@ export default function ChamadaPage() {
   }, [dataSelecionada, semanaOffset])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // const { data } = await supabase.from('turmas').select('id, nome, faixa_etaria, total_alunos, sala, cor')
-    // setTurmasData(data ?? [])
+    async function fetchTurmas() {
+      const db = supabase as any
+      const { data } = await db
+        .from('turmas')
+        .select('id, nome, faixa_etaria, sala, cor')
+        .eq('ativa', true)
+        .order('nome') as { data: { id: string; nome: string; faixa_etaria: string | null; sala: string | null; cor: string }[] | null }
+      if (data) {
+        const turmasComContagem = await Promise.all(
+          data.map(async (t) => {
+            const { count } = await db
+              .from('alunos')
+              .select('id', { count: 'exact', head: true })
+              .eq('turma_id', t.id)
+              .eq('ativo', true)
+            return {
+              id: t.id,
+              nome: t.nome,
+              faixaEtaria: t.faixa_etaria ?? '',
+              totalAlunos: count ?? 0,
+              sala: t.sala ?? '',
+              cor: t.cor ?? 'bg-blue-500',
+            }
+          })
+        )
+        setTurmasData(turmasComContagem)
+      }
+    }
+    fetchTurmas()
   }, [])
 
   useEffect(() => {
-    // TODO: buscar do Supabase
-    // Buscar resumo de chamadas para a data selecionada
-    // const dataISO = converterParaISO(dataSelecionada)
-    // const { data } = await supabase.from('chamadas').select('*').eq('data', dataISO)
-    // Calcular resumos por turma e totais gerais a partir dos dados reais
+    async function fetchResumoDia() {
+      const dataISO = converterParaISO(dataSelecionada)
+      const totalMatriculados = turmasData.reduce((acc, t) => acc + t.totalAlunos, 0)
 
-    // Calcular totais de matriculados a partir das turmas carregadas
-    const totalMatriculados = turmasData.reduce((acc, t) => acc + t.totalAlunos, 0)
+      // Buscar chamadas do dia com presenças
+      const db = supabase as any
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista)')
+        .eq('data', dataISO) as { data: { id: string; turma_id: string; oferta: number; presencas: any[] }[] | null }
 
-    // Calcular resumos por turma (vazios enquanto não há dados do Supabase)
-    const resumos: Record<string, ResumoTurma> = {}
-    turmasData.forEach((turma) => {
-      resumos[turma.id] = {
-        presentes: 0,
-        faltas: 0,
-        visitantes: 0,
-        biblias: 0,
-        revistas: 0,
-        oferta: 0,
+      const resumos: Record<string, ResumoTurma> = {}
+      turmasData.forEach(t => { resumos[t.id] = { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 } })
+
+      if (chamadas) {
+        for (const c of chamadas) {
+          const presencas = c.presencas as { presente: boolean; trouxe_biblia: boolean; trouxe_revista: boolean }[]
+          resumos[c.turma_id] = {
+            presentes: presencas.filter(p => p.presente).length,
+            faltas: presencas.filter(p => !p.presente).length,
+            biblias: presencas.filter(p => p.trouxe_biblia).length,
+            revistas: presencas.filter(p => p.trouxe_revista).length,
+            oferta: Number(c.oferta) || 0,
+            visitantes: 0,
+          }
+        }
+        // Buscar visitantes do dia
+        const { data: visitantes } = await db
+          .from('historico_visitantes')
+          .select('turma_id')
+          .eq('data', dataISO)
+          .eq('presente', true) as { data: { turma_id: string }[] | null }
+        if (visitantes) {
+          visitantes.forEach((v: { turma_id: string }) => {
+            if (resumos[v.turma_id]) resumos[v.turma_id].visitantes++
+          })
+        }
       }
-    })
-    setResumosPorTurma(resumos)
 
-    // Calcular totais gerais
-    let totalPresentes = 0
-    let totalFaltas = 0
-    let totalVisitantes = 0
-    let totalBiblias = 0
-    let totalRevistas = 0
-    let totalOferta = 0
-
-    Object.values(resumos).forEach((resumo) => {
-      totalPresentes += resumo.presentes
-      totalFaltas += resumo.faltas
-      totalVisitantes += resumo.visitantes
-      totalBiblias += resumo.biblias
-      totalRevistas += resumo.revistas
-      totalOferta += resumo.oferta
-    })
-
-    setResumoDia({
-      total_matriculados: totalMatriculados,
-      total_presentes: totalPresentes,
-      total_faltas: totalFaltas,
-      total_visitantes: totalVisitantes,
-      total_biblias: totalBiblias,
-      total_revistas: totalRevistas,
-      total_oferta: totalOferta,
-    })
+      setResumosPorTurma(resumos)
+      const vals = Object.values(resumos)
+      setResumoDia({
+        total_matriculados: totalMatriculados,
+        total_presentes: vals.reduce((a, r) => a + r.presentes, 0),
+        total_faltas: vals.reduce((a, r) => a + r.faltas, 0),
+        total_visitantes: vals.reduce((a, r) => a + r.visitantes, 0),
+        total_biblias: vals.reduce((a, r) => a + r.biblias, 0),
+        total_revistas: vals.reduce((a, r) => a + r.revistas, 0),
+        total_oferta: vals.reduce((a, r) => a + r.oferta, 0),
+      })
+    }
+    fetchResumoDia()
   }, [dataSelecionada, turmasData])
 
   // Gera a lista de domingos da "semana de visualização" (5 domingos centrados no offset)
