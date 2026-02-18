@@ -18,13 +18,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   ArrowLeft,
   Save,
   UserPlus,
@@ -32,15 +25,15 @@ import {
   BookOpen,
   CheckCircle2,
   XCircle,
-  Clock,
   PartyPopper,
   Trash2,
 } from 'lucide-react'
-import { formatarDomingo, getUltimosDomingos, converterParaISO, calcularPresencasSeguidas } from '@/lib/chamada-utils'
+import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 
-// Interfaces
+// ─── Interfaces ───────────────────────────────────────────────────────────────
+
 interface AlunoPresenca {
   aluno_id: string
   nome: string
@@ -50,15 +43,25 @@ interface AlunoPresenca {
   justificativa: string
 }
 
+interface HistoricoItem {
+  data: string         // ISO 'YYYY-MM-DD'
+  presente: boolean | null  // null = sem registro
+}
+
 interface Visitante {
+  // id real do banco (UUID) ou id temporário 'new_<timestamp>' para novos
   id: string
+  isNovo: boolean       // true = ainda não salvo no banco
   nome: string
   telefone: string
   observacao: string
-  historico: Array<{ data: string; presente: boolean | null }>
-  presencas_seguidas: number
+  // presença no dia atual (o que o usuário marcou na tela)
+  presenteHoje: 'presente' | 'ausente' | 'pendente'
   trouxe_biblia: boolean
   trouxe_revista: boolean
+  // histórico das últimas visitas (sem o dia atual)
+  historico: HistoricoItem[]
+  totalVisitas: number  // contagem total de visitas confirmadas
 }
 
 interface TurmaInfo {
@@ -67,6 +70,29 @@ interface TurmaInfo {
   sala: string
   professor: string
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Últimos N domingos a partir de uma data base (sem incluir ela) */
+function getUltimosDomingosAntesde(dataISO: string, n: number): string[] {
+  const base = new Date(dataISO + 'T12:00:00')
+  const domingos: string[] = []
+  let cursor = new Date(base)
+  cursor.setDate(cursor.getDate() - 7) // começa no domingo anterior
+  while (domingos.length < n) {
+    // garante que é domingo (0)
+    const dow = cursor.getDay()
+    if (dow !== 0) {
+      // ajusta para o domingo mais próximo anterior
+      cursor.setDate(cursor.getDate() - dow)
+    }
+    domingos.push(converterParaISO(cursor))
+    cursor.setDate(cursor.getDate() - 7)
+  }
+  return domingos
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function ChamadaTurmaPage() {
   const router = useRouter()
@@ -81,31 +107,33 @@ export default function ChamadaTurmaPage() {
   const [oferta, setOferta] = useState<string>('')
   const [anotacoes, setAnotacoes] = useState<string>('')
   const [dialogVisitanteOpen, setDialogVisitanteOpen] = useState(false)
-  const [novoVisitante, setNovoVisitante] = useState({
-    nome: '',
-    telefone: '',
-    observacao: '',
-  })
+  const [novoVisitante, setNovoVisitante] = useState({ nome: '', telefone: '', observacao: '' })
   const [salvando, setSalvando] = useState(false)
 
+  // ── Busca inicial ────────────────────────────────────────────────────────────
   useEffect(() => {
-    async function fetchTurmaEAlunos() {
-      // Buscar dados da turma
-      const { data: turmaData } = await (supabase.from('turmas') as any)
+    async function fetchDados() {
+      const db = supabase as any
+
+      // 1. Dados da turma
+      const { data: turmaData } = await db
+        .from('turmas')
         .select('id, nome, sala')
         .eq('id', turmaId)
         .single() as { data: { id: string; nome: string; sala: string | null } | null }
       if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-      // Buscar alunos da turma
-      const { data: alunosData } = await (supabase.from('alunos') as any)
+      // 2. Alunos da turma
+      const { data: alunosData } = await db
+        .from('alunos')
         .select('id, nome')
         .eq('turma_id', turmaId)
         .eq('ativo', true)
         .order('nome') as { data: { id: string; nome: string }[] | null }
 
-      // Verificar se já existe chamada para esta data
-      const { data: chamadaExistente } = await (supabase.from('chamadas') as any)
+      // 3. Chamada existente para o dia
+      const { data: chamadaExistente } = await db
+        .from('chamadas')
         .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
         .eq('turma_id', turmaId)
         .eq('data', dataSelecionada)
@@ -114,9 +142,7 @@ export default function ChamadaTurmaPage() {
       if (chamadaExistente) {
         setOferta(String(chamadaExistente.oferta || ''))
         setAnotacoes(chamadaExistente.anotacoes ?? '')
-        const presencasMap = new Map(
-          (chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p])
-        )
+        const presencasMap = new Map((chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p]))
         setAlunos(
           (alunosData ?? []).map(a => {
             const p = presencasMap.get(a.id)
@@ -143,149 +169,188 @@ export default function ChamadaTurmaPage() {
         )
       }
 
-      // Carregar visitantes do dia
-      const { data: histData } = await (supabase.from('historico_visitantes') as any)
-        .select('id, visitante_id, visitantes(id, nome, telefone, observacao)')
+      // 4. Visitantes: buscar TODOS que já visitaram esta turma antes + os do dia atual
+      //    Busca todos os historico_visitantes desta turma (sem filtro de data)
+      const { data: todoHistorico } = await db
+        .from('historico_visitantes')
+        .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
         .eq('turma_id', turmaId)
-        .eq('data', dataSelecionada)
-        .eq('presente', true) as { data: { id: string; visitante_id: string; visitantes: any }[] | null }
-      if (histData) {
-        setVisitantes(histData.map(h => {
-          const v = h.visitantes as { id: string; nome: string; telefone: string | null; observacao: string | null } | null
-          return {
-            id: h.visitante_id,
-            nome: v?.nome ?? '',
-            telefone: v?.telefone ?? '',
-            observacao: v?.observacao ?? '',
-            historico: [{ data: dataSelecionada, presente: true }],
-            presencas_seguidas: 1,
-            trouxe_biblia: false,
-            trouxe_revista: false,
-          }
-        }))
+        .order('data', { ascending: false }) as {
+          data: {
+            visitante_id: string
+            data: string
+            presente: boolean
+            trouxe_biblia: boolean
+            trouxe_revista: boolean
+            visitantes: { id: string; nome: string; telefone: string | null; observacao: string | null } | null
+          }[] | null
+        }
+
+      if (todoHistorico && todoHistorico.length > 0) {
+        // Agrupar por visitante_id
+        const porVisitante = new Map<string, typeof todoHistorico>()
+        for (const h of todoHistorico) {
+          if (!porVisitante.has(h.visitante_id)) porVisitante.set(h.visitante_id, [])
+          porVisitante.get(h.visitante_id)!.push(h)
+        }
+
+        const visitantesCarregados: Visitante[] = []
+        for (const [visitanteId, registros] of porVisitante.entries()) {
+          const dadosVisitante = registros[0].visitantes
+          if (!dadosVisitante) continue
+
+          // Registro do dia atual (se existir)
+          const registroDia = registros.find(r => r.data === dataSelecionada)
+          // Histórico sem o dia atual (para mostrar visitas anteriores)
+          const historicoAnterior = registros
+            .filter(r => r.data !== dataSelecionada)
+            .slice(0, 3) // últimas 3 visitas anteriores
+            .map(r => ({ data: r.data, presente: r.presente }))
+
+          const totalVisitas = registros.filter(r => r.presente).length
+
+          visitantesCarregados.push({
+            id: visitanteId,
+            isNovo: false,
+            nome: dadosVisitante.nome,
+            telefone: dadosVisitante.telefone ?? '',
+            observacao: dadosVisitante.observacao ?? '',
+            presenteHoje: registroDia
+              ? (registroDia.presente ? 'presente' : 'ausente')
+              : 'pendente',
+            trouxe_biblia: registroDia?.trouxe_biblia ?? false,
+            trouxe_revista: registroDia?.trouxe_revista ?? false,
+            historico: historicoAnterior,
+            totalVisitas,
+          })
+        }
+
+        setVisitantes(visitantesCarregados)
       } else {
         setVisitantes([])
       }
     }
-    fetchTurmaEAlunos()
+
+    fetchDados()
   }, [turmaId, dataSelecionada])
 
-  // Handlers
+  // ── Handlers Alunos ──────────────────────────────────────────────────────────
+
   const handleMarcarPresenca = (alunoId: string, status: 'presente' | 'ausente') => {
-    setAlunos(
-      alunos.map((aluno) =>
-        aluno.aluno_id === alunoId
-          ? {
-              ...aluno,
-              presente: status,
-              trouxe_biblia: status === 'ausente' ? false : aluno.trouxe_biblia,
-              trouxe_revista: status === 'ausente' ? false : aluno.trouxe_revista,
-            }
-          : aluno
-      )
-    )
+    setAlunos(alunos.map(a =>
+      a.aluno_id === alunoId
+        ? { ...a, presente: status, trouxe_biblia: status === 'ausente' ? false : a.trouxe_biblia, trouxe_revista: status === 'ausente' ? false : a.trouxe_revista }
+        : a
+    ))
   }
 
-  const handleToggleBiblia = (alunoId: string) => {
-    setAlunos(
-      alunos.map((aluno) =>
-        aluno.aluno_id === alunoId ? { ...aluno, trouxe_biblia: !aluno.trouxe_biblia } : aluno
-      )
-    )
+  const handleToggleBiblia = (alunoId: string) =>
+    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, trouxe_biblia: !a.trouxe_biblia } : a))
+
+  const handleToggleRevista = (alunoId: string) =>
+    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, trouxe_revista: !a.trouxe_revista } : a))
+
+  const handleJustificativaChange = (alunoId: string, justificativa: string) =>
+    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, justificativa } : a))
+
+  // ── Handlers Visitantes ──────────────────────────────────────────────────────
+
+  const handleMarcarPresencaVisitante = (visitanteId: string, status: 'presente' | 'ausente') => {
+    setVisitantes(visitantes.map(v =>
+      v.id === visitanteId
+        ? { ...v, presenteHoje: status, trouxe_biblia: status === 'ausente' ? false : v.trouxe_biblia, trouxe_revista: status === 'ausente' ? false : v.trouxe_revista }
+        : v
+    ))
   }
 
-  const handleToggleRevista = (alunoId: string) => {
-    setAlunos(
-      alunos.map((aluno) =>
-        aluno.aluno_id === alunoId ? { ...aluno, trouxe_revista: !aluno.trouxe_revista } : aluno
-      )
-    )
-  }
+  const handleToggleVisitanteBiblia = (visitanteId: string) =>
+    setVisitantes(visitantes.map(v => v.id === visitanteId ? { ...v, trouxe_biblia: !v.trouxe_biblia } : v))
 
-  const handleJustificativaChange = (alunoId: string, justificativa: string) => {
-    setAlunos(
-      alunos.map((aluno) =>
-        aluno.aluno_id === alunoId ? { ...aluno, justificativa } : aluno
-      )
-    )
+  const handleToggleVisitanteRevista = (visitanteId: string) =>
+    setVisitantes(visitantes.map(v => v.id === visitanteId ? { ...v, trouxe_revista: !v.trouxe_revista } : v))
+
+  const handleRemoverVisitante = (visitanteId: string) => {
+    setVisitantes(visitantes.filter(v => v.id !== visitanteId))
   }
 
   const handleAdicionarVisitante = () => {
-    if (!novoVisitante.nome) {
+    if (!novoVisitante.nome.trim()) {
       alert('Por favor, preencha o nome do visitante.')
       return
     }
-
     const visitante: Visitante = {
-      id: `v${Date.now()}`,
-      nome: novoVisitante.nome,
+      id: `new_${Date.now()}`,
+      isNovo: true,
+      nome: novoVisitante.nome.trim(),
       telefone: novoVisitante.telefone,
       observacao: novoVisitante.observacao,
-      historico: [{ data: dataSelecionada, presente: true }],
-      presencas_seguidas: 1,
+      presenteHoje: 'presente', // novo visitante já é presente por padrão
       trouxe_biblia: false,
       trouxe_revista: false,
+      historico: [],
+      totalVisitas: 0,
     }
-
     setVisitantes([...visitantes, visitante])
     setNovoVisitante({ nome: '', telefone: '', observacao: '' })
     setDialogVisitanteOpen(false)
   }
 
-  const handleRemoverVisitante = (visitanteId: string) => {
-    setVisitantes(visitantes.filter((v) => v.id !== visitanteId))
-  }
-
-  const handleToggleVisitanteBiblia = (visitanteId: string) => {
-    setVisitantes(
-      visitantes.map((v) =>
-        v.id === visitanteId ? { ...v, trouxe_biblia: !v.trouxe_biblia } : v
-      )
-    )
-  }
-
-  const handleToggleVisitanteRevista = (visitanteId: string) => {
-    setVisitantes(
-      visitantes.map((v) =>
-        v.id === visitanteId ? { ...v, trouxe_revista: !v.trouxe_revista } : v
-      )
-    )
-  }
-
-  const handleConverterEmAluno = (visitanteId: string) => {
-    const visitante = visitantes.find((v) => v.id === visitanteId)
+  const handleConverterEmAluno = async (visitanteId: string) => {
+    const visitante = visitantes.find(v => v.id === visitanteId)
     if (!visitante) return
+    if (!confirm(`Converter ${visitante.nome} em aluno da turma "${turma.nome}"?\n\nUm registro de aluno será criado automaticamente.`)) return
 
-    if (
-      confirm(
-        `Converter ${visitante.nome} em aluno da turma?\n\nIsso criará uma matrícula e removerá da lista de visitantes.`
-      )
-    ) {
-      // Aqui você faria a conversão no banco de dados
-      alert(`${visitante.nome} foi convertido em aluno com sucesso!`)
-      handleRemoverVisitante(visitanteId)
+    const db = supabase as any
+    const { data: novoAluno, error } = await db
+      .from('alunos')
+      .insert({ nome: visitante.nome, telefone: visitante.telefone || null, turma_id: turmaId, ativo: true })
+      .select('id')
+      .single()
+    if (error || !novoAluno) { alert('Erro ao converter visitante em aluno.'); return }
+
+    // Marcar visitante como convertido
+    if (!visitante.isNovo) {
+      await db.from('visitantes').update({ convertido_em_aluno: true, aluno_id: novoAluno.id }).eq('id', visitanteId)
     }
+
+    alert(`${visitante.nome} foi convertido em aluno com sucesso! Ele agora aparecerá na lista de chamada.`)
+    // Remover da lista de visitantes (vai aparecer como aluno)
+    setVisitantes(visitantes.filter(v => v.id !== visitanteId))
+    // Adicionar na lista de alunos imediatamente
+    setAlunos([...alunos, {
+      aluno_id: novoAluno.id,
+      nome: visitante.nome,
+      presente: 'presente',
+      trouxe_biblia: visitante.trouxe_biblia,
+      trouxe_revista: visitante.trouxe_revista,
+      justificativa: '',
+    }])
   }
+
+  // ── Salvar Chamada ───────────────────────────────────────────────────────────
 
   const handleSalvarChamada = async () => {
     setSalvando(true)
     try {
       const db = supabase as any
 
-      // Upsert da chamada (cria ou atualiza)
+      // 1. Upsert da chamada
       const { data: chamada, error: errChamada } = await db
         .from('chamadas')
-        .upsert({ turma_id: turmaId, data: dataSelecionada, oferta: parseFloat(oferta) || 0, anotacoes }, { onConflict: 'turma_id,data' })
+        .upsert(
+          { turma_id: turmaId, data: dataSelecionada, oferta: parseFloat(oferta) || 0, anotacoes },
+          { onConflict: 'turma_id,data' }
+        )
         .select('id')
         .single()
 
       if (errChamada || !chamada) {
-        alert('Erro ao salvar chamada.')
+        alert('Erro ao salvar chamada: ' + (errChamada?.message ?? 'desconhecido'))
         setSalvando(false)
         return
       }
 
-      // Upsert de presenças
+      // 2. Upsert de presenças dos alunos
       const presencasPayload = alunos
         .filter(a => a.presente !== 'pendente')
         .map(a => ({
@@ -301,82 +366,118 @@ export default function ChamadaTurmaPage() {
         await db.from('presencas').upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
       }
 
-      // Salvar visitantes novos
+      // 3. Salvar visitantes (presença marcada ou não)
       for (const v of visitantes) {
-        const { data: visitante } = await db
-          .from('visitantes')
-          .upsert({ ...(v.id.startsWith('v') ? {} : { id: v.id }), nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
-          .select('id')
-          .single()
-        if (visitante) {
-          await db.from('historico_visitantes').upsert({
-            visitante_id: visitante.id,
-            turma_id: turmaId,
-            chamada_id: chamada.id,
-            data: dataSelecionada,
-            presente: true,
-            trouxe_biblia: v.trouxe_biblia,
-            trouxe_revista: v.trouxe_revista,
-          }, { onConflict: 'visitante_id,data,turma_id' })
+        if (v.presenteHoje === 'pendente') continue // ignorar não marcados
+
+        let visitanteId = v.isNovo ? null : v.id
+
+        if (v.isNovo) {
+          // Criar visitante novo no banco
+          const { data: visitanteSalvo, error: errV } = await db
+            .from('visitantes')
+            .insert({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
+            .select('id')
+            .single()
+          if (errV || !visitanteSalvo) continue
+          visitanteId = visitanteSalvo.id
+        } else {
+          // Atualizar dados do visitante existente
+          await db.from('visitantes').update({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null }).eq('id', v.id)
         }
+
+        if (!visitanteId) continue
+
+        // Upsert no histórico de visitantes
+        await db.from('historico_visitantes').upsert({
+          visitante_id: visitanteId,
+          turma_id: turmaId,
+          chamada_id: chamada.id,
+          data: dataSelecionada,
+          presente: v.presenteHoje === 'presente',
+          trouxe_biblia: v.trouxe_biblia,
+          trouxe_revista: v.trouxe_revista,
+        }, { onConflict: 'visitante_id,data,turma_id' })
       }
 
       alert('Chamada salva com sucesso!')
       router.push('/chamada')
-    } catch {
-      alert('Erro inesperado ao salvar chamada.')
+    } catch (e: any) {
+      alert('Erro inesperado ao salvar chamada: ' + (e?.message ?? ''))
     } finally {
       setSalvando(false)
     }
   }
 
-  // Calcular resumo
+  // ── Resumo ───────────────────────────────────────────────────────────────────
+
+  const visitantesPresentes = visitantes.filter(v => v.presenteHoje === 'presente')
+
   const resumo = {
     matriculados: alunos.length,
-    presentes: alunos.filter((a) => a.presente === 'presente').length,
-    faltas: alunos.filter((a) => a.presente === 'ausente').length,
-    visitantes: visitantes.length,
-    biblias: alunos.filter((a) => a.trouxe_biblia).length + visitantes.filter((v) => v.trouxe_biblia).length,
-    revistas: alunos.filter((a) => a.trouxe_revista).length + visitantes.filter((v) => v.trouxe_revista).length,
-    percentual_presenca:
-      alunos.length > 0 ? Math.round((alunos.filter((a) => a.presente === 'presente').length / alunos.length) * 100) : 0,
+    presentes: alunos.filter(a => a.presente === 'presente').length,
+    faltas: alunos.filter(a => a.presente === 'ausente').length,
+    visitantes: visitantesPresentes.length,
+    biblias: alunos.filter(a => a.trouxe_biblia).length + visitantesPresentes.filter(v => v.trouxe_biblia).length,
+    revistas: alunos.filter(a => a.trouxe_revista).length + visitantesPresentes.filter(v => v.trouxe_revista).length,
+    percentual_presenca: alunos.length > 0
+      ? Math.round((alunos.filter(a => a.presente === 'presente').length / alunos.length) * 100)
+      : 0,
   }
+
+  // ── Renderizar indicador de histórico de presença ────────────────────────────
 
   const renderIndicadorPresencas = (visitante: Visitante) => {
-    const ultimosDomingos = getUltimosDomingos(3)
-    const icones = ultimosDomingos.map((domingo, index) => {
-      const dataISO = converterParaISO(domingo)
-      const registro = visitante.historico.find((h) => h.data === dataISO)
+    // Pega os 3 últimos domingos ANTES da data atual
+    const domingosPrev = getUltimosDomingosAntesde(dataSelecionada, 3).reverse()
 
-      if (registro?.presente === true) {
-        return (
-          <div key={index} className="flex flex-col items-center">
-            <div className="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center font-bold text-sm">
-              {index + 1}
+    return (
+      <div className="flex gap-2 items-center">
+        {domingosPrev.map((data, index) => {
+          const reg = visitante.historico.find(h => h.data === data)
+          if (!reg) {
+            // Sem registro nesse domingo
+            return (
+              <div key={index} className="flex flex-col items-center gap-1">
+                <div className="w-8 h-8 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center">
+                  <div className="w-3 h-3 rounded-full bg-muted-foreground/30" />
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                </span>
+              </div>
+            )
+          }
+          return (
+            <div key={index} className="flex flex-col items-center gap-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${reg.presente ? 'bg-green-500' : 'bg-red-500'}`}>
+                {reg.presente
+                  ? <CheckCircle2 className="h-4 w-4 text-white" />
+                  : <XCircle className="h-4 w-4 text-white" />
+                }
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+              </span>
             </div>
+          )
+        })}
+        {/* Hoje */}
+        <div className="flex flex-col items-center gap-1">
+          <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm
+            ${visitante.presenteHoje === 'presente' ? 'bg-green-500 border-green-500 text-white' :
+              visitante.presenteHoje === 'ausente' ? 'bg-red-500 border-red-500 text-white' :
+              'border-yellow-400 text-yellow-400'}`}>
+            {visitante.presenteHoje === 'presente' ? <CheckCircle2 className="h-4 w-4" /> :
+             visitante.presenteHoje === 'ausente' ? <XCircle className="h-4 w-4" /> : '?'}
           </div>
-        )
-      } else if (registro?.presente === false) {
-        return (
-          <div key={index} className="flex flex-col items-center">
-            <div className="w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center">
-              <XCircle className="h-5 w-5" />
-            </div>
-          </div>
-        )
-      } else {
-        return (
-          <div key={index} className="flex flex-col items-center">
-            <div className="w-8 h-8 rounded-full border-2 border-gray-300 flex items-center justify-center">
-              <div className="w-4 h-4 rounded-full bg-gray-300" />
-            </div>
-          </div>
-        )
-      }
-    })
-
-    return <div className="flex gap-2">{icones}</div>
+          <span className="text-[10px] text-yellow-400 font-medium">Hoje</span>
+        </div>
+      </div>
+    )
   }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -389,7 +490,9 @@ export default function ChamadaTurmaPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">{turma.nome || 'Turma'}</h1>
             <p className="text-muted-foreground mt-1">
-              {formatarDomingo(dataSelecionada)}{turma.professor ? ` • Professor: ${turma.professor}` : ''}{turma.sala ? ` • ${turma.sala}` : ''}
+              {formatarDomingo(dataSelecionada)}
+              {turma.professor ? ` • Professor: ${turma.professor}` : ''}
+              {turma.sala ? ` • ${turma.sala}` : ''}
             </p>
           </div>
         </div>
@@ -398,6 +501,7 @@ export default function ChamadaTurmaPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Coluna Principal */}
         <div className="lg:col-span-2 space-y-6">
+
           {/* Lista de Alunos */}
           <Card>
             <CardHeader>
@@ -406,9 +510,7 @@ export default function ChamadaTurmaPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {alunos.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
-                  Nenhum aluno cadastrado nesta turma
-                </p>
+                <p className="text-center text-muted-foreground py-8">Nenhum aluno cadastrado nesta turma</p>
               ) : (
                 alunos.map((aluno, index) => (
                   <div key={aluno.aluno_id} className="p-4 border rounded-lg space-y-3">
@@ -424,9 +526,7 @@ export default function ChamadaTurmaPage() {
                           variant={aluno.presente === 'presente' ? 'default' : 'outline'}
                           size="sm"
                           onClick={() => handleMarcarPresenca(aluno.aluno_id, 'presente')}
-                          className={
-                            aluno.presente === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''
-                          }
+                          className={aluno.presente === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}
                         >
                           Presente
                         </Button>
@@ -434,55 +534,33 @@ export default function ChamadaTurmaPage() {
                           variant={aluno.presente === 'ausente' ? 'default' : 'outline'}
                           size="sm"
                           onClick={() => handleMarcarPresenca(aluno.aluno_id, 'ausente')}
-                          className={
-                            aluno.presente === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''
-                          }
+                          className={aluno.presente === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}
                         >
                           Ausente
                         </Button>
                         {aluno.presente === 'pendente' && (
-                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                             Pendente
                           </Badge>
                         )}
                       </div>
                     </div>
-
-                    {/* Checkboxes Bíblia/Revista se Presente */}
                     {aluno.presente === 'presente' && (
                       <div className="flex gap-6 ml-11">
                         <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`biblia-${aluno.aluno_id}`}
-                            checked={aluno.trouxe_biblia}
-                            onCheckedChange={() => handleToggleBiblia(aluno.aluno_id)}
-                          />
-                          <label
-                            htmlFor={`biblia-${aluno.aluno_id}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-2 cursor-pointer"
-                          >
-                            <Book className="h-4 w-4" />
-                            Trouxe Bíblia
+                          <Checkbox id={`biblia-${aluno.aluno_id}`} checked={aluno.trouxe_biblia} onCheckedChange={() => handleToggleBiblia(aluno.aluno_id)} />
+                          <label htmlFor={`biblia-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <Book className="h-4 w-4" /> Trouxe Bíblia
                           </label>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`revista-${aluno.aluno_id}`}
-                            checked={aluno.trouxe_revista}
-                            onCheckedChange={() => handleToggleRevista(aluno.aluno_id)}
-                          />
-                          <label
-                            htmlFor={`revista-${aluno.aluno_id}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex items-center gap-2 cursor-pointer"
-                          >
-                            <BookOpen className="h-4 w-4" />
-                            Trouxe Revista
+                          <Checkbox id={`revista-${aluno.aluno_id}`} checked={aluno.trouxe_revista} onCheckedChange={() => handleToggleRevista(aluno.aluno_id)} />
+                          <label htmlFor={`revista-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <BookOpen className="h-4 w-4" /> Trouxe Revista
                           </label>
                         </div>
                       </div>
                     )}
-
-                    {/* Justificativa se Ausente */}
                     {aluno.presente === 'ausente' && (
                       <div className="ml-11 space-y-2">
                         <Label htmlFor={`justificativa-${aluno.aluno_id}`} className="text-xs text-muted-foreground">
@@ -509,102 +587,134 @@ export default function ChamadaTurmaPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Visitantes</CardTitle>
-                  <CardDescription>Registre os visitantes da turma</CardDescription>
+                  <CardDescription>
+                    Visitantes anteriores aparecem automaticamente — marque presença ou ausência
+                  </CardDescription>
                 </div>
                 <Button onClick={() => setDialogVisitanteOpen(true)}>
                   <UserPlus className="h-4 w-4 mr-2" />
-                  Adicionar Visitante
+                  Novo Visitante
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {visitantes.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">
-                  Nenhum visitante registrado para este dia
+                  Nenhum visitante registrado para esta turma
                 </p>
               ) : (
-                visitantes.map((visitante) => (
-                  <div key={visitante.id} className="p-4 border rounded-lg space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium">{visitante.nome}</h4>
-                          {visitante.presencas_seguidas >= 3 && (
-                            <Badge className="bg-green-500">
-                              <PartyPopper className="h-3 w-3 mr-1" />
-                              Novo Membro!
-                            </Badge>
+                visitantes.map((visitante) => {
+                  const totalComHoje = visitante.totalVisitas + (visitante.presenteHoje === 'presente' ? (visitante.isNovo ? 1 : 0) : 0)
+                  // Contagem real: histórico com presente=true + hoje se presente
+                  const visitasConfirmadas = visitante.historico.filter(h => h.presente).length +
+                    (visitante.presenteHoje === 'presente' ? 1 : 0)
+                  const podeConverter = visitasConfirmadas >= 3
+
+                  return (
+                    <div key={visitante.id} className={`p-4 border rounded-lg space-y-3 ${podeConverter ? 'border-green-500/50 bg-green-500/5' : ''}`}>
+                      {/* Cabeçalho */}
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-medium">{visitante.nome}</h4>
+                            {visitante.isNovo && (
+                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">Novo</Badge>
+                            )}
+                            {podeConverter && (
+                              <Badge className="bg-green-500 text-xs">
+                                <PartyPopper className="h-3 w-3 mr-1" />
+                                {visitasConfirmadas} visitas — Pronto para ser aluno!
+                              </Badge>
+                            )}
+                          </div>
+                          {visitante.telefone && (
+                            <p className="text-sm text-muted-foreground">{visitante.telefone}</p>
+                          )}
+                          {visitante.observacao && (
+                            <p className="text-xs text-muted-foreground mt-1">{visitante.observacao}</p>
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground">{visitante.telefone}</p>
-                        {visitante.observacao && (
-                          <p className="text-xs text-muted-foreground mt-1">{visitante.observacao}</p>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRemoverVisitante(visitante.id)}
+                          title="Remover da lista hoje"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+
+                      {/* Histórico + presença hoje */}
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Histórico de Presenças</Label>
+                        {renderIndicadorPresencas(visitante)}
+                        <Progress value={(Math.min(visitasConfirmadas, 3) / 3) * 100} className="h-2" />
+                        <p className="text-xs text-muted-foreground">
+                          {visitasConfirmadas}/3 visitas confirmadas
+                        </p>
+                      </div>
+
+                      {/* Botões Presente / Ausente */}
+                      <div className="flex gap-2">
+                        <Button
+                          variant={visitante.presenteHoje === 'presente' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => handleMarcarPresencaVisitante(visitante.id, 'presente')}
+                          className={visitante.presenteHoje === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}
+                        >
+                          Presente
+                        </Button>
+                        <Button
+                          variant={visitante.presenteHoje === 'ausente' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => handleMarcarPresencaVisitante(visitante.id, 'ausente')}
+                          className={visitante.presenteHoje === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}
+                        >
+                          Ausente
+                        </Button>
+                        {visitante.presenteHoje === 'pendente' && (
+                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                            Pendente
+                          </Badge>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemoverVisitante(visitante.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
 
-                    {/* Indicador de presenças */}
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Histórico de Presenças</Label>
-                      {renderIndicadorPresencas(visitante)}
-                      <Progress value={(visitante.presencas_seguidas / 3) * 100} className="h-2" />
-                      <p className="text-xs text-muted-foreground">
-                        {visitante.presencas_seguidas}/3 presenças consecutivas
-                      </p>
-                    </div>
+                      {/* Bíblia / Revista (só se presente) */}
+                      {visitante.presenteHoje === 'presente' && (
+                        <div className="flex gap-6">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id={`vbiblia-${visitante.id}`}
+                              checked={visitante.trouxe_biblia}
+                              onCheckedChange={() => handleToggleVisitanteBiblia(visitante.id)}
+                            />
+                            <label htmlFor={`vbiblia-${visitante.id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                              <Book className="h-4 w-4" /> Trouxe Bíblia
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id={`vrevista-${visitante.id}`}
+                              checked={visitante.trouxe_revista}
+                              onCheckedChange={() => handleToggleVisitanteRevista(visitante.id)}
+                            />
+                            <label htmlFor={`vrevista-${visitante.id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                              <BookOpen className="h-4 w-4" /> Trouxe Revista
+                            </label>
+                          </div>
+                        </div>
+                      )}
 
-                    {/* Checkboxes */}
-                    <div className="flex gap-6">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`visitante-biblia-${visitante.id}`}
-                          checked={visitante.trouxe_biblia}
-                          onCheckedChange={() => handleToggleVisitanteBiblia(visitante.id)}
-                        />
-                        <label
-                          htmlFor={`visitante-biblia-${visitante.id}`}
-                          className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
-                        >
-                          <Book className="h-4 w-4" />
-                          Trouxe Bíblia
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`visitante-revista-${visitante.id}`}
-                          checked={visitante.trouxe_revista}
-                          onCheckedChange={() => handleToggleVisitanteRevista(visitante.id)}
-                        />
-                        <label
-                          htmlFor={`visitante-revista-${visitante.id}`}
-                          className="text-sm font-medium leading-none cursor-pointer flex items-center gap-2"
-                        >
-                          <BookOpen className="h-4 w-4" />
-                          Trouxe Revista
-                        </label>
-                      </div>
+                      {/* Botão converter */}
+                      {podeConverter && (
+                        <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleConverterEmAluno(visitante.id)}>
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Converter em Aluno
+                        </Button>
+                      )}
                     </div>
-
-                    {/* Botão Converter */}
-                    {visitante.presencas_seguidas >= 3 && (
-                      <Button
-                        className="w-full"
-                        variant="default"
-                        onClick={() => handleConverterEmAluno(visitante.id)}
-                      >
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Converter em Aluno
-                      </Button>
-                    )}
-                  </div>
-                ))
+                  )
+                })
               )}
             </CardContent>
           </Card>
@@ -612,7 +722,6 @@ export default function ChamadaTurmaPage() {
 
         {/* Coluna Lateral - Resumo */}
         <div className="space-y-6">
-          {/* Resumo da Sala */}
           <Card>
             <CardHeader>
               <CardTitle>Resumo da Sala</CardTitle>
@@ -625,9 +734,7 @@ export default function ChamadaTurmaPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Presentes:</span>
-                  <span className="font-semibold text-green-600">
-                    {resumo.presentes} ({resumo.percentual_presenca}%)
-                  </span>
+                  <span className="font-semibold text-green-600">{resumo.presentes} ({resumo.percentual_presenca}%)</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Faltas:</span>
@@ -671,11 +778,7 @@ export default function ChamadaTurmaPage() {
                 />
               </div>
 
-              <Button
-                className="w-full"
-                onClick={handleSalvarChamada}
-                disabled={salvando}
-              >
+              <Button className="w-full" onClick={handleSalvarChamada} disabled={salvando}>
                 <Save className="h-4 w-4 mr-2" />
                 {salvando ? 'Salvando...' : 'Salvar Chamada'}
               </Button>
@@ -688,7 +791,7 @@ export default function ChamadaTurmaPage() {
       <Dialog open={dialogVisitanteOpen} onOpenChange={setDialogVisitanteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adicionar Visitante</DialogTitle>
+            <DialogTitle>Novo Visitante</DialogTitle>
             <DialogDescription>Preencha os dados do visitante</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -722,9 +825,7 @@ export default function ChamadaTurmaPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogVisitanteOpen(false)}>
-              Cancelar
-            </Button>
+            <Button variant="outline" onClick={() => setDialogVisitanteOpen(false)}>Cancelar</Button>
             <Button onClick={handleAdicionarVisitante}>Adicionar</Button>
           </DialogFooter>
         </DialogContent>
