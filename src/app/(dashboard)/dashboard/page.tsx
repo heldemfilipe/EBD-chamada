@@ -323,8 +323,9 @@ export default function DashboardPage() {
         if (p.presente === true) presencaPorAluno[p.aluno_id].presentes++
       }
 
-      // Montar lista de alunos com dados
-      const listaAlunos = alunos.map((a: any) => ({
+      // Montar lista de alunos com dados (tipagem explícita para evitar 'any' implícito)
+      type AlunoItem = { id: string; nome: string; sala: string; presenca: number; total: number; pct: number }
+      const listaAlunos: AlunoItem[] = alunos.map((a: any): AlunoItem => ({
         id: a.id,
         nome: a.nome,
         sala: a.turmas?.nome ?? 'Sem turma',
@@ -333,16 +334,16 @@ export default function DashboardPage() {
         pct: presencaPorAluno[a.id]?.total > 0
           ? Math.round((presencaPorAluno[a.id].presentes / presencaPorAluno[a.id].total) * 100)
           : 0,
-      })).filter((a: any) => a.total > 0)
+      })).filter((a: AlunoItem) => a.total > 0)
 
       // Top 10 geral
       const top10 = [...listaAlunos]
-        .sort((a, b) => b.pct - a.pct || b.presenca - a.presenca)
+        .sort((a: AlunoItem, b: AlunoItem) => b.pct - a.pct || b.presenca - a.presenca)
         .slice(0, 10)
       setTop10Geral(top10)
 
       // Top 3 por sala
-      const porSala: Record<string, typeof listaAlunos> = {}
+      const porSala: Record<string, AlunoItem[]> = {}
       for (const a of listaAlunos) {
         if (!porSala[a.sala]) porSala[a.sala] = []
         porSala[a.sala].push(a)
@@ -350,9 +351,9 @@ export default function DashboardPage() {
       const topPorSala: Record<string, { nome: string; presenca: number; total: number }[]> = {}
       for (const sala in porSala) {
         topPorSala[sala] = porSala[sala]
-          .sort((a, b) => b.pct - a.pct || b.presenca - a.presenca)
+          .sort((a: AlunoItem, b: AlunoItem) => b.pct - a.pct || b.presenca - a.presenca)
           .slice(0, 3)
-          .map(a => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
+          .map((a: AlunoItem) => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
       }
       setTopAlunosPorSala(topPorSala)
 
