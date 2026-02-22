@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { Plus, Users, GraduationCap, Edit, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { StatCard } from '@/components/ui/stat-card'
 
 interface Turma {
   id: string
@@ -248,45 +249,10 @@ export default function TurmasPage() {
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Turmas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{turmasData.length}</div>
-            <p className="text-xs text-muted-foreground">Em funcionamento</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Alunos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalAlunos}</div>
-            <p className="text-xs text-muted-foreground">Em todas as turmas</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Média por Turma</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{mediaAlunos}</div>
-            <p className="text-xs text-muted-foreground">Alunos/turma</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Faixas Etárias</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{new Set(turmasData.map(t => t.faixaEtaria)).size}</div>
-            <p className="text-xs text-muted-foreground">Diferentes grupos</p>
-          </CardContent>
-        </Card>
+        <StatCard title="Total de Turmas" value={turmasData.length} icon={GraduationCap} description="Em funcionamento" />
+        <StatCard title="Total de Alunos" value={totalAlunos} icon={Users} description="Em todas as turmas" />
+        <StatCard title="Média por Turma" value={mediaAlunos} description="Alunos/turma" />
+        <StatCard title="Faixas Etárias" value={new Set(turmasData.map(t => t.faixaEtaria)).size} description="Diferentes grupos" />
       </div>
 
       {/* Turmas Grid */}

@@ -186,13 +186,21 @@ src/
 │   ├── login/page.tsx              # Tela de login
 │   └── layout.tsx
 ├── components/
-│   ├── ui/                         # shadcn/ui components
+│   ├── ui/
+│   │   ├── stat-card.tsx           # Card de KPI reutilizável (título, valor, ícone)
+│   │   ├── presence-bar.tsx        # Barra de presença com cor dinâmica
+│   │   ├── empty-state.tsx         # Estado vazio padronizado
+│   │   ├── period-selector.tsx     # Seletor de período (mensal/trimestral/anual)
+│   │   ├── chart-tooltip.tsx       # Tooltip reutilizável para gráficos Recharts
+│   │   └── ...                     # shadcn/ui components
 │   ├── layout/
 │   │   └── Sidebar.tsx             # Menu filtrado por permissões + logout
 │   └── Providers.tsx               # Wrapper AuthProvider
 ├── contexts/
 │   └── AuthContext.tsx             # Sessão, perfil, permissões
 ├── lib/
+│   ├── constants.ts                # Constantes globais (anos, meses, trimestres, cores)
+│   ├── presence.ts                 # Utilitários de presença (calcularPct, corPresenca, etc.)
 │   ├── supabase.ts                 # Cliente Supabase (cookie-based)
 │   ├── logger.ts                   # Logger dual-mode (terminal colorido / JSON Vercel)
 │   └── chamada-utils.ts            # Utilitários de data para chamada

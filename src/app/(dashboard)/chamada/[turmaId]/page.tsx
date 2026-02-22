@@ -31,6 +31,7 @@ import {
 import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
+import { calcularPct } from '@/lib/presence'
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
