@@ -1,11 +1,10 @@
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database.types'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-// Cliente para uso no browser (client components)
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+// Cliente para uso no browser — usa COOKIES em vez de localStorage
+// Isso garante que o middleware (createMiddlewareClient) consegue ler a sessão
+export const supabase = createClientComponentClient<Database>()
 
 // Helper: retorna cliente com service role (apenas server-side)
 export function createServiceClient() {

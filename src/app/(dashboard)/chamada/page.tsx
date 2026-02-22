@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { getDomingoAtual, getProximoDomingo, getUltimosDomingos, formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 import { format, addDays, subDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -72,6 +73,7 @@ function getOffsetInicial(): number {
 
 export default function ChamadaPage() {
   const router = useRouter()
+  const { isAdmin, turmasPermitidas } = useAuth()
   const [turmasData, setTurmasData] = useState<Turma[]>([])
   const [dataSelecionada, setDataSelecionada] = useState<Date>(getDataInicial)
   const [semanaOffset, setSemanaOffset] = useState<number>(getOffsetInicial)
@@ -120,11 +122,16 @@ export default function ChamadaPage() {
             }
           })
         )
-        setTurmasData(turmasComContagem)
+        // Filtra por turmas permitidas (não-admin só vê suas turmas)
+        const turmasFiltradas = isAdmin || turmasPermitidas.includes('*')
+          ? turmasComContagem
+          : turmasComContagem.filter(t => turmasPermitidas.includes(t.id))
+        setTurmasData(turmasFiltradas)
       }
     }
     fetchTurmas()
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, turmasPermitidas])
 
   useEffect(() => {
     async function fetchResumoDia() {
