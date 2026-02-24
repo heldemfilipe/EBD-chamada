@@ -273,7 +273,7 @@ export default function EscalaPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Tipo de Filtro */}
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Button
               variant={filtroTipo === 'ano' ? 'default' : 'outline'}
               onClick={() => setFiltroTipo('ano')}
@@ -309,7 +309,7 @@ export default function EscalaPage() {
           </div>
 
           {/* Opções de Filtro */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {filtroTipo === 'ano' && (
               <div className="space-y-2">
                 <Label>Ano</Label>
@@ -393,7 +393,7 @@ export default function EscalaPage() {
       </Card>
 
       {/* Estatísticas */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Escalas</CardTitle>
@@ -460,7 +460,7 @@ export default function EscalaPage() {
                     </Badge>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {escalasAgrupadas[data].map(escala => (
                       <div
                         key={escala.id}

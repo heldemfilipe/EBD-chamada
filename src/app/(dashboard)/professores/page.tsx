@@ -132,7 +132,7 @@ export default function ProfessoresPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total de Professores" value={professores.length} icon={Users} description="Ativos no sistema" />
         <StatCard title="Atribuições" value={professores.reduce((a, p) => a + p.turmas.length, 0)} icon={GraduationCap} description="Turmas lecionadas" />
         <StatCard title="Também Alunos" value={professores.filter(p => p.turmaAluno !== null).length} icon={BookOpen} description="Matriculados em turma" />

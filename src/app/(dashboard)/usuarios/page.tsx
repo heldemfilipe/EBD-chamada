@@ -249,7 +249,7 @@ export default function UsuariosPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Users className="h-4 w-4 text-muted-foreground" />Total Ativos</CardTitle></CardHeader>
           <CardContent><div className="text-2xl font-bold">{totalAtivos}</div><p className="text-xs text-muted-foreground">Usuários com acesso</p></CardContent>
