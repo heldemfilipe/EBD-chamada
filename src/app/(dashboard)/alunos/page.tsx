@@ -146,7 +146,7 @@ export default function AlunosPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Alunos</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Alunos</h1>
           <p className="text-muted-foreground mt-2">Gerencie os alunos da Escola Bíblica Dominical</p>
         </div>
         <Button onClick={() => openDialog()}>
@@ -155,7 +155,7 @@ export default function AlunosPage() {
       </div>
 
       {/* Stats por faixa etária */}
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard title="Total" value={alunos.length} icon={Users} description="Ativos no sistema" />
         {FAIXAS.map((f) => (
           <StatCard
@@ -191,15 +191,15 @@ export default function AlunosPage() {
             </Select>
           </div>
 
-          <div className="rounded-md border">
-            <Table>
+          <div className="rounded-md border overflow-x-auto">
+            <Table className="min-w-[600px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
-                  <TableHead>Idade</TableHead>
+                  <TableHead className="hidden sm:table-cell">Idade</TableHead>
                   <TableHead>Turma</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Presença</TableHead>
+                  <TableHead className="hidden md:table-cell">Contato</TableHead>
+                  <TableHead className="hidden md:table-cell">Presença</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -213,17 +213,17 @@ export default function AlunosPage() {
                           {aluno.isProfessor && <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">Professor</Badge>}
                         </div>
                       </TableCell>
-                      <TableCell>{aluno.idade > 0 ? `${aluno.idade} anos` : '—'}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{aluno.idade > 0 ? `${aluno.idade} anos` : '—'}</TableCell>
                       <TableCell>
                         <Badge variant="secondary">{turmas.find(t => t.id === aluno.turmaId)?.nome ?? '—'}</Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2 text-sm"><Phone className="h-3 w-3 text-muted-foreground" /><span className="text-muted-foreground">{aluno.telefone || '—'}</span></div>
                           <div className="flex items-center gap-2 text-sm"><Mail className="h-3 w-3 text-muted-foreground" /><span className="text-muted-foreground">{aluno.email || '—'}</span></div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         <div className="flex items-center gap-2">
                           <PresenceBar pct={aluno.presenca} className="max-w-[100px]" />
                           <span className="text-sm font-medium">{aluno.presenca}%</span>

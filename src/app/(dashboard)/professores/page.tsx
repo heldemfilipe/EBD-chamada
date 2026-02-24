@@ -125,7 +125,7 @@ export default function ProfessoresPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Professores</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Professores</h1>
           <p className="text-muted-foreground mt-2">Gerencie os professores da Escola Bíblica Dominical</p>
         </div>
         <Button onClick={() => openDialog()}><Plus className="h-4 w-4 mr-2" />Novo Professor</Button>
@@ -153,8 +153,8 @@ export default function ProfessoresPage() {
             </div>
           </div>
 
-          <div className="rounded-md border">
-            <Table>
+          <div className="rounded-md border overflow-x-auto">
+            <Table className="min-w-[700px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>

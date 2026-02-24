@@ -249,7 +249,7 @@ export default function EscalaPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Escala de Professores</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Escala de Professores</h1>
           <p className="text-muted-foreground mt-2">
             Gerencie a escala de professores por turma
           </p>
@@ -445,7 +445,7 @@ export default function EscalaPage() {
             <div className="space-y-6">
               {Object.keys(escalasAgrupadas).map(data => (
                 <div key={data} className="space-y-3">
-                  <div className="flex items-center gap-3 pb-2 border-b">
+                  <div className="flex flex-wrap items-center gap-2 pb-2 border-b">
                     <Calendar className="h-5 w-5 text-primary" />
                     <h3 className="text-lg font-semibold">
                       {new Date(data + 'T00:00:00').toLocaleDateString('pt-BR', {

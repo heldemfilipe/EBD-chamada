@@ -235,12 +235,12 @@ export default function DashboardPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground mt-2">Bem-vindo ao sistema de gestão EBD</p>
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total de Alunos"  value={stats.totalAlunos}      icon={Users}         description="Ativos no sistema" />
         <StatCard title="Professores"       value={stats.totalProfessores}  icon={GraduationCap} description="Cadastrados" />
         <StatCard title="Turmas Ativas"     value={stats.totalTurmas}       icon={BookOpen}      description="Todas as faixas etárias" />
@@ -411,8 +411,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Turmas + Chamadas Recentes */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="col-span-4">
+      <div className="grid gap-4 lg:grid-cols-7">
+        <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle>Turmas Ativas</CardTitle>
             <CardDescription>Turmas cadastradas e seus professores</CardDescription>
@@ -439,7 +439,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-3">
+        <Card className="lg:col-span-3">
           <CardHeader>
             <CardTitle>Chamadas Recentes</CardTitle>
             <CardDescription>Últimas chamadas registradas no sistema</CardDescription>
@@ -473,7 +473,7 @@ export default function DashboardPage() {
           <CardDescription>Acesso rápido às funcionalidades mais usadas</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <QuickAction title="Fazer Chamada"      description="Registrar presença dos alunos" href="/chamada"   icon={<CheckCircle2 className="h-5 w-5" />} />
             <QuickAction title="Cadastrar Aluno"    description="Adicionar novo aluno"          href="/alunos"    icon={<Users className="h-5 w-5" />} />
             <QuickAction title="Ver Escalas"        description="Gerenciar escalas"             href="/escala"    icon={<Calendar className="h-5 w-5" />} />
@@ -488,7 +488,7 @@ export default function DashboardPage() {
 // ─── Subcomponentes ───────────────────────────────────────────────────────────
 function QuickAction({ title, description, href, icon }: { title: string; description: string; href: string; icon: React.ReactNode }) {
   return (
-    <a href={href} className="flex items-start gap-4 p-4 rounded-lg border hover:bg-accent hover:border-primary/50 transition-all cursor-pointer group">
+    <a href={href} className="flex items-start gap-3 p-3 sm:p-4 rounded-lg border hover:bg-accent hover:border-primary/50 transition-all cursor-pointer group">
       <div className="p-2 rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
         {icon}
       </div>

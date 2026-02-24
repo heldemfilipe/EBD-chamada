@@ -139,7 +139,7 @@ export default function ChamadaPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Chamada - Sistema EBD</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Chamada</h1>
         <p className="text-muted-foreground mt-2">Selecione a data e visualize os resumos das turmas</p>
       </div>
 
@@ -206,7 +206,7 @@ export default function ChamadaPage() {
       {/* Resumo Geral do Dia */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Resumo Geral do Dia</h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users} description="Todas as turmas" />
           <StatCard title="Total Presentes" value={resumoDia.total_presentes} icon={CheckCircle2} description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
           <StatCard title="Total Faltas"    value={resumoDia.total_faltas}    icon={XCircle}     description="Ausências"        valueClassName="text-red-600" />
@@ -220,7 +220,7 @@ export default function ChamadaPage() {
       {/* Resumo Por Sala */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Resumo por Sala</h2>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {turmasData.map((turma) => {
             const resumo = resumosPorTurma[turma.id] ?? { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 }
             const pct = calcularPct(resumo.presentes, turma.totalAlunos)

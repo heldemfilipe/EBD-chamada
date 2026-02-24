@@ -34,6 +34,7 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 - [Scripts](#scripts)
 - [Logging](#logging)
 - [Segurança (RLS)](#segurança-rls)
+- [Responsividade Mobile](#responsividade-mobile)
 - [Licença](#licença)
 
 ---
@@ -337,6 +338,40 @@ As permissões granulares por módulo e turma são verificadas:
 - No **cliente** via `AuthContext` (renderização condicional de menus e conteúdo)
 - No **edge** via `middleware.ts` (proteção de rota antes de qualquer renderização)
 - Na **API** via verificação de `role` antes de qualquer mutação
+
+---
+
+## Responsividade Mobile
+
+Todas as telas foram auditadas e ajustadas para funcionar corretamente em celulares de qualquer tamanho (a partir de 320px de largura). Os breakpoints do Tailwind CSS utilizados são: `sm` (≥640px), `md` (≥768px) e `lg` (≥1024px).
+
+### Correções aplicadas
+
+| Área | Problema | Solução |
+|---|---|---|
+| **Layout geral** | Botão hambúrguer sobrepunha o conteúdo no mobile | Adicionado `pt-16` no `<main>` para mobile (`DashboardLayout.tsx`) |
+| **Tabelas** | `overflow-hidden` causava corte de colunas em telas pequenas | Substituído por `overflow-x-auto` + `min-w-[Xpx]` em todas as tabelas |
+| **Grids de KPIs** | `md:grid-cols-2 lg:grid-cols-4` sem classe padrão causava overflow | Adicionado `sm:grid-cols-2` como passo intermediário |
+| **Dashboard** | `col-span-4` / `col-span-3` dentro de `md:grid-cols-2 lg:grid-cols-7` transbordava no breakpoint `md` | Removido `md:grid-cols-2`, col-spans limitados a `lg:col-span-N` |
+| **Chamada** | Botões "Presente / Ausente" saíam da tela em celulares estreitos | Adicionado `flex-wrap` no container dos botões |
+| **Chamada** | Margem `ml-11` fixa em checkboxes de bíblia/revista causava overflow | Substituído por `ml-8 sm:ml-11` |
+| **Chamada** | Cabeçalho com título + botão "Salvar" não cabia em uma linha | Adicionado `flex-wrap items-start sm:items-center` |
+| **Títulos** | `text-3xl` em todas as páginas era grande demais no mobile | Padronizado para `text-2xl sm:text-3xl` em todas as páginas |
+| **Stat-card** | Valor `text-2xl font-bold` comprimia em cards pequenos | Ajustado para `text-xl sm:text-2xl font-bold` |
+| **Escala** | Cabeçalho de data com professor transbordava em mobile | Adicionado `flex-wrap gap-2` no grupo de data |
+| **Relatórios** | Botões de exportar lado a lado saíam da tela | Adicionado `flex-wrap` no container dos botões |
+| **Alunos** | Colunas Idade, Contato e Presença desnecessárias no mobile | Ocultadas com `hidden sm:table-cell` / `hidden md:table-cell` |
+
+### Breakpoints de exibição de colunas (tabela Alunos)
+
+| Coluna | Mobile (< 640px) | Tablet (≥ 640px) | Desktop (≥ 768px) |
+|---|---|---|---|
+| Nome | ✔ | ✔ | ✔ |
+| Turma | ✔ | ✔ | ✔ |
+| Idade | ✘ | ✔ | ✔ |
+| Contato | ✘ | ✘ | ✔ |
+| Presença | ✘ | ✘ | ✔ |
+| Ações | ✔ | ✔ | ✔ |
 
 ---
 

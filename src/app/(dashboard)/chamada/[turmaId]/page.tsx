@@ -507,13 +507,13 @@ export default function ChamadaTurmaPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.push('/chamada')}>
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" className="flex-shrink-0" onClick={() => router.push('/chamada')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">{turma.nome || 'Turma'}</h1>
+            <h1 className="text-xl sm:text-3xl font-bold tracking-tight">{turma.nome || 'Turma'}</h1>
             <p className="text-muted-foreground mt-1">
               {formatarDomingo(dataSelecionada)}
               {turma.professor ? ` • Professor: ${turma.professor}` : ''}
@@ -546,7 +546,7 @@ export default function ChamadaTurmaPage() {
                         </div>
                         <span className="font-medium">{aluno.nome}</span>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           variant={aluno.presente === 'presente' ? 'default' : 'outline'}
                           size="sm"
@@ -571,7 +571,7 @@ export default function ChamadaTurmaPage() {
                       </div>
                     </div>
                     {aluno.presente === 'presente' && (
-                      <div className="flex gap-6 ml-11">
+                      <div className="flex flex-wrap gap-4 sm:gap-6 ml-8 sm:ml-11">
                         <div className="flex items-center space-x-2">
                           <Checkbox id={`biblia-${aluno.aluno_id}`} checked={aluno.trouxe_biblia} onCheckedChange={() => handleToggleBiblia(aluno.aluno_id)} />
                           <label htmlFor={`biblia-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
@@ -587,7 +587,7 @@ export default function ChamadaTurmaPage() {
                       </div>
                     )}
                     {aluno.presente === 'ausente' && (
-                      <div className="ml-11 space-y-2">
+                      <div className="ml-8 sm:ml-11 space-y-2">
                         <Label htmlFor={`justificativa-${aluno.aluno_id}`} className="text-xs text-muted-foreground">
                           Justificativa (opcional)
                         </Label>
@@ -609,7 +609,7 @@ export default function ChamadaTurmaPage() {
           {/* Visitantes */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
                 <div>
                   <CardTitle>Visitantes</CardTitle>
                   <CardDescription>
@@ -706,7 +706,7 @@ export default function ChamadaTurmaPage() {
 
                       {/* Bíblia / Revista (só se presente) */}
                       {visitante.presenteHoje === 'presente' && (
-                        <div className="flex gap-6">
+                        <div className="flex flex-wrap gap-4 sm:gap-6">
                           <div className="flex items-center space-x-2">
                             <Checkbox
                               id={`vbiblia-${visitante.id}`}

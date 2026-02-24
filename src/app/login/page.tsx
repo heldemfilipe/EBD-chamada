@@ -46,7 +46,7 @@ function LoginForm() {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-5 sm:p-8 space-y-6">
       <div className="space-y-1">
         <h2 className="text-xl font-semibold">Bem-vindo</h2>
         <p className="text-sm text-muted-foreground">Faça login para acessar o sistema</p>

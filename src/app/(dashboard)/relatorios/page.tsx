@@ -287,10 +287,10 @@ export default function RelatoriosPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Relatórios</h1>
           <p className="text-muted-foreground mt-1">Visualize estatísticas detalhadas por período</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm"><FileText className="h-4 w-4 mr-2" />PDF</Button>
           <Button variant="outline" size="sm"><BarChart3 className="h-4 w-4 mr-2" />Excel</Button>
           <Button variant="outline" size="sm"><Download className="h-4 w-4 mr-2" />CSV</Button>
@@ -448,8 +448,8 @@ export default function RelatoriosPage() {
                 </BarChart>
               </ResponsiveContainer>
 
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
+              <div className="rounded-lg border overflow-x-auto">
+                <Table className="min-w-[700px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
                       <TableHead>Sala</TableHead>
@@ -514,8 +514,8 @@ export default function RelatoriosPage() {
             {topAlunos.length === 0 ? (
               <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
             ) : (
-              <div className="rounded-lg border overflow-hidden">
-                <Table>
+              <div className="rounded-lg border overflow-x-auto">
+                <Table className="min-w-[500px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
                       <TableHead className="w-8">#</TableHead>
@@ -600,8 +600,8 @@ export default function RelatoriosPage() {
           {professores.length === 0 ? (
             <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
           ) : (
-            <div className="rounded-lg border overflow-hidden">
-              <Table>
+            <div className="rounded-lg border overflow-x-auto">
+              <Table className="min-w-[600px]">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Professor</TableHead>

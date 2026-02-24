@@ -239,7 +239,7 @@ export default function UsuariosPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Usuários</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Usuários</h1>
           <p className="text-muted-foreground mt-1">Gerencie acessos e permissões do sistema</p>
         </div>
         <Button onClick={abrirCriar}>
@@ -273,8 +273,8 @@ export default function UsuariosPage() {
           {loadingData ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : (
-            <div className="rounded-lg border overflow-hidden">
-              <Table>
+            <div className="rounded-lg border overflow-x-auto">
+              <Table className="min-w-[500px]">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Usuário</TableHead>
