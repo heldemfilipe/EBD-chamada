@@ -193,7 +193,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       module: 'auth',
       userId: user?.id,
     })
-    await supabase.auth.signOut()
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      logger.warn('Erro ao chamar supabase.auth.signOut — limpando estado local mesmo assim', {
+        module: 'auth',
+        error: err instanceof Error ? err : undefined,
+      })
+    }
     resetState()
   }
 

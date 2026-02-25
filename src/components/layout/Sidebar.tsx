@@ -46,8 +46,11 @@ export function Sidebar() {
 
   const handleSignOut = async () => {
     setSigningOut(true)
-    await signOut()
-    router.replace('/login')
+    try {
+      await signOut()
+    } finally {
+      router.replace('/login')
+    }
   }
 
   // Iniciais do nome para o avatar
