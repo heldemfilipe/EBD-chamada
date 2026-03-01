@@ -1,6 +1,11 @@
 // ─── Constantes globais do sistema EBD ────────────────────────────────────────
 
-export const ANOS_DISPONIVEIS = [2024, 2025, 2026]
+export const ANOS_DISPONIVEIS = (() => {
+  const anoAtual = new Date().getFullYear()
+  const anos: number[] = []
+  for (let a = 2026; a <= Math.max(anoAtual + 1, 2027); a++) anos.push(a)
+  return anos
+})()
 
 export const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',

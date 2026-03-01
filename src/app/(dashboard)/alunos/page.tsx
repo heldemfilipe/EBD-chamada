@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Aluno {
@@ -132,21 +133,21 @@ export default function AlunosPage() {
   }
 
   async function handleSave() {
-    if (!form.nome) { alert('Por favor, preencha o nome do aluno.'); return }
+    if (!form.nome) { toast('Por favor, preencha o nome do aluno.', 'error'); return }
     const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
     const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
     const payload   = { nome: form.nome, data_nascimento: form.dataNascimento || null, telefone: form.telefone, email: form.email, responsavel: form.responsavel, turma_id: form.turmaId || null }
 
     if (editMode && selected) {
       const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
-      if (error) { alert('Erro ao atualizar aluno.'); return }
+      if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
       setAlunos(alunos.map(a => a.id === selected.id ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, idade, isProfessor: false } : a))
-      alert('Aluno atualizado com sucesso!')
+      toast('Aluno atualizado com sucesso!')
     } else {
       const { data, error } = await db.from('alunos').insert(payload).select('id').single()
-      if (error || !data) { alert('Erro ao cadastrar aluno.'); return }
+      if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
       setAlunos([...alunos, { id: data.id, nome: form.nome, idade, turma: turmaNome, turmaId: form.turmaId || null, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, responsavel: form.responsavel, presenca: 0, status: 'ativo', isProfessor: false }])
-      alert('Aluno cadastrado com sucesso!')
+      toast('Aluno cadastrado com sucesso!')
     }
     closeDialog()
   }
@@ -154,9 +155,9 @@ export default function AlunosPage() {
   async function handleDelete() {
     if (!selected) return
     const { error } = await db.from('alunos').delete().eq('id', selected.id)
-    if (error) { alert('Erro ao excluir aluno.'); return }
+    if (error) { toast('Erro ao excluir aluno.', 'error'); return }
     setAlunos(alunos.filter(a => a.id !== selected.id))
-    alert('Aluno excluído com sucesso!')
+    toast('Aluno excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)
   }
 

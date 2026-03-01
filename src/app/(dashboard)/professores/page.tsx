@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Professor {
@@ -88,23 +89,23 @@ export default function ProfessoresPage() {
   }
 
   async function handleSave() {
-    if (!form.nome) { alert('Por favor, preencha o nome do professor.'); return }
+    if (!form.nome) { toast('Por favor, preencha o nome do professor.', 'error'); return }
 
     if (editMode && selected) {
       const { error } = await db.from('professores').update({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno }).eq('id', selected.id)
-      if (error) { alert('Erro ao atualizar professor.'); return }
+      if (error) { toast('Erro ao atualizar professor.', 'error'); return }
       await db.from('professor_turmas').delete().eq('professor_id', selected.id)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
       await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
       setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno } : p))
-      alert('Professor atualizado com sucesso!')
+      toast('Professor atualizado com sucesso!')
     } else {
       const { data, error } = await db.from('professores').insert({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
-      if (error || !data) { alert('Erro ao cadastrar professor.'); return }
+      if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       await sincronizarAluno(data.id, form.nome, form.turmaAluno)
       setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, dataIngresso: new Date().toISOString().split('T')[0] }])
-      alert('Professor cadastrado com sucesso!')
+      toast('Professor cadastrado com sucesso!')
     }
     closeDialog()
   }
@@ -113,9 +114,9 @@ export default function ProfessoresPage() {
     if (!selected) return
     await db.from('alunos').delete().eq('responsavel', `professor:${selected.id}`)
     const { error } = await db.from('professores').delete().eq('id', selected.id)
-    if (error) { alert('Erro ao excluir professor.'); return }
+    if (error) { toast('Erro ao excluir professor.', 'error'); return }
     setProfessores(professores.filter(p => p.id !== selected.id))
-    alert('Professor excluído com sucesso!')
+    toast('Professor excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)
   }
 

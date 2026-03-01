@@ -1,6 +1,7 @@
 "use client"
 
 import { Sidebar } from './Sidebar'
+import { Toaster } from '@/components/ui/toaster'
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <Toaster />
     </div>
   )
 }

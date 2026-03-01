@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { Calendar, Filter, Plus, Edit, Trash2, GraduationCap, BookOpen } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast';
 
 interface Escala {
   id: string
@@ -193,7 +194,7 @@ export default function EscalaPage() {
 
   const handleSaveEscala = async () => {
     if (!formData.data || !formData.turmaId || !formData.professorId) {
-      alert('Por favor, preencha todos os campos obrigatórios (Data, Turma e Professor).')
+      toast('Preencha todos os campos obrigatórios (Data, Turma e Professor).', 'error')
       return
     }
     const trimestre = calcularTrimestre(formData.data)
@@ -206,13 +207,13 @@ export default function EscalaPage() {
         professor_id: formData.professorId,
         observacoes: formData.observacao,
       }).eq('id', selectedEscala.id)
-      if (error) { alert('Erro ao atualizar escala.'); return }
+      if (error) { toast('Erro ao atualizar escala.', 'error'); return }
       setEscalasData(escalasData.map(e =>
         e.id === selectedEscala.id
           ? { ...e, data: formData.data, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }
           : e
       ))
-      alert('Escala atualizada com sucesso!')
+      toast('Escala atualizada com sucesso!')
     } else {
       const { data, error } = await db.from('escalas').insert({
         data: formData.data,
@@ -220,9 +221,9 @@ export default function EscalaPage() {
         professor_id: formData.professorId,
         observacoes: formData.observacao,
       }).select('id').single()
-      if (error || !data) { alert('Erro ao cadastrar escala.'); return }
+      if (error || !data) { toast('Erro ao cadastrar escala.', 'error'); return }
       setEscalasData([...escalasData, { id: data.id, data: formData.data, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }])
-      alert('Escala cadastrada com sucesso!')
+      toast('Escala cadastrada com sucesso!')
     }
     handleCloseDialog()
   }
@@ -236,9 +237,9 @@ export default function EscalaPage() {
     if (selectedEscala) {
       const db = supabase as any
       const { error } = await db.from('escalas').delete().eq('id', selectedEscala.id)
-      if (error) { alert('Erro ao excluir escala.'); return }
+      if (error) { toast('Erro ao excluir escala.', 'error'); return }
       setEscalasData(escalasData.filter(e => e.id !== selectedEscala.id))
-      alert('Escala excluída com sucesso!')
+      toast('Escala excluída com sucesso!')
       setDeleteDialogOpen(false)
       setSelectedEscala(null)
     }

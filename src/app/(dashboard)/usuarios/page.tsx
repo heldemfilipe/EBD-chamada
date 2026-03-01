@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface UsuarioDB {
@@ -167,8 +168,8 @@ export default function UsuariosPage() {
   }
 
   async function handleSalvar() {
-    if (!form.nome || !form.email) { alert('Nome e e-mail são obrigatórios.'); return }
-    if (!editMode && !form.senha) { alert('Senha é obrigatória para novos usuários.'); return }
+    if (!form.nome || !form.email) { toast('Nome e e-mail são obrigatórios.', 'error'); return }
+    if (!editMode && !form.senha) { toast('Senha é obrigatória para novos usuários.', 'error'); return }
 
     setSaving(true)
 
@@ -192,7 +193,7 @@ export default function UsuariosPage() {
 
     if (!res.ok) {
       const err = await res.json()
-      alert(err.error || 'Erro ao salvar usuário.')
+      toast(err.error || 'Erro ao salvar usuário.', 'error')
       setSaving(false)
       return
     }

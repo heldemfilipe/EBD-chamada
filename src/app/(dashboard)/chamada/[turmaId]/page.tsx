@@ -32,6 +32,7 @@ import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 import { calcularPct } from '@/lib/presence'
+import { toast } from '@/lib/toast';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -278,7 +279,7 @@ export default function ChamadaTurmaPage() {
 
   const handleAdicionarVisitante = () => {
     if (!novoVisitante.nome.trim()) {
-      alert('Por favor, preencha o nome do visitante.')
+      toast('Por favor, preencha o nome do visitante.', 'error')
       return
     }
     const visitante: Visitante = {
@@ -309,14 +310,14 @@ export default function ChamadaTurmaPage() {
       .insert({ nome: visitante.nome, telefone: visitante.telefone || null, turma_id: turmaId, ativo: true })
       .select('id')
       .single()
-    if (error || !novoAluno) { alert('Erro ao converter visitante em aluno.'); return }
+    if (error || !novoAluno) { toast('Erro ao converter visitante em aluno.', 'error'); return }
 
     // Marcar visitante como convertido
     if (!visitante.isNovo) {
       await db.from('visitantes').update({ convertido_em_aluno: true, aluno_id: novoAluno.id }).eq('id', visitanteId)
     }
 
-    alert(`${visitante.nome} foi convertido em aluno com sucesso! Ele agora aparecerá na lista de chamada.`)
+    toast(`${visitante.nome} convertido em aluno com sucesso!`)
     // Remover da lista de visitantes (vai aparecer como aluno)
     setVisitantes(visitantes.filter(v => v.id !== visitanteId))
     // Adicionar na lista de alunos imediatamente
@@ -341,29 +342,27 @@ export default function ChamadaTurmaPage() {
       const { data: chamada, error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
         .select('id')
         .single()
 
       if (errChamada || !chamada) {
-        alert('Erro ao salvar chamada: ' + (errChamada?.message ?? 'desconhecido'))
+        toast('Erro ao salvar chamada: ' + (errChamada?.message ?? 'desconhecido'), 'error')
         setSalvando(false)
         return
       }
 
-      // 2. Upsert de presenças dos alunos
-      const presencasPayload = alunos
-        .filter(a => a.presente !== 'pendente')
-        .map(a => ({
-          chamada_id: chamada.id,
-          aluno_id: a.aluno_id,
-          presente: a.presente === 'presente',
-          trouxe_biblia: a.trouxe_biblia,
-          trouxe_revista: a.trouxe_revista,
-          justificativa: a.justificativa || null,
-        }))
+      // 2. Upsert de presenças dos alunos (pendente → ausente)
+      const presencasPayload = alunos.map(a => ({
+        chamada_id: chamada.id,
+        aluno_id: a.aluno_id,
+        presente: a.presente === 'presente',
+        trouxe_biblia: a.presente === 'presente' ? a.trouxe_biblia : false,
+        trouxe_revista: a.presente === 'presente' ? a.trouxe_revista : false,
+        justificativa: a.justificativa || null,
+      }))
 
       if (presencasPayload.length > 0) {
         await db.from('presencas').upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
@@ -427,10 +426,10 @@ export default function ChamadaTurmaPage() {
         }
       }
 
-      alert('Chamada salva com sucesso!')
+      toast('Chamada salva com sucesso!')
       router.push('/chamada')
     } catch (e: any) {
-      alert('Erro inesperado ao salvar chamada: ' + (e?.message ?? ''))
+      toast('Erro ao salvar chamada: ' + (e?.message ?? 'erro inesperado'), 'error')
     } finally {
       setSalvando(false)
     }
