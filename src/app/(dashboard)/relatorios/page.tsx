@@ -98,7 +98,7 @@ export default function RelatoriosPage() {
         })
 
         mensal[m].domingos++
-        mensal[m].total = ps.length
+        mensal[m].total    += ps.length
         mensal[m].presentes += presentes
         mensal[m].faltas    += faltas
         mensal[m].biblias   += biblias
@@ -256,7 +256,7 @@ export default function RelatoriosPage() {
         ...acc, presentes: acc.presentes + m.presentes, faltas: acc.faltas + m.faltas,
         visitantes: acc.visitantes + m.visitantes, biblias: acc.biblias + m.biblias,
         revistas: acc.revistas + m.revistas, oferta: acc.oferta + m.oferta,
-        domingos: acc.domingos + m.domingos, total: m.total,
+        domingos: acc.domingos + m.domingos, total: acc.total + m.total,
       }), dadosVazios())
       return {
         dados: { ...d, pct: calcularPct(d.presentes, d.total) },
@@ -269,7 +269,7 @@ export default function RelatoriosPage() {
     const d = resumoMensal.reduce((acc, m) => ({
       ...acc, presentes: acc.presentes + m.presentes, faltas: acc.faltas + m.faltas,
       visitantes: acc.visitantes + m.visitantes, biblias: acc.biblias + m.biblias,
-      revistas: acc.revistas + m.revistas, oferta: acc.oferta + m.oferta, domingos: acc.domingos + m.domingos, total: m.total,
+      revistas: acc.revistas + m.revistas, oferta: acc.oferta + m.oferta, domingos: acc.domingos + m.domingos, total: acc.total + m.total,
     }), dadosVazios())
     return {
       dados: { ...d, pct: calcularPct(d.presentes, d.total) },
