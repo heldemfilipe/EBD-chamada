@@ -96,7 +96,7 @@ export default function AlunosPage() {
       const anoAtual = new Date().getFullYear()
       const [{ data: turmasData }, { data: alunosData }, { data: chamadasData }] = await Promise.all([
         db.from('turmas').select('id, nome, faixa_etaria, cor').eq('ativa', true).order('nome'),
-        db.from('alunos').select('id, nome, data_nascimento, telefone, email, responsavel, turma_id, cargo').order('nome'),
+        db.from('alunos').select('*').order('nome'),
         db.from('chamadas').select('id, data').eq('ano', anoAtual),
       ])
 
