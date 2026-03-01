@@ -184,7 +184,7 @@ export default function DashboardPage() {
         porSala[a.sala].push(a)
       }
       const topS: Record<string, { nome: string; presenca: number; total: number }[]> = {}
-      for (const sala in porSala) topS[sala] = porSala[sala].slice(0, 3).map((a: any) => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
+      for (const sala in porSala) topS[sala] = porSala[sala].slice(0, 5).map((a: any) => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
       setTopPorSala(topS)
       if (!salaSelecionada && Object.keys(topS).length > 0) setSalaSelecionada(Object.keys(topS)[0])
     }
@@ -332,7 +332,7 @@ export default function DashboardPage() {
                 <Trophy className="h-4 w-4 text-yellow-500" />
                 Destaques por Sala
               </CardTitle>
-              <CardDescription>Top 3 alunos com maior presença no período</CardDescription>
+              <CardDescription>Top 5 alunos com maior presença no período</CardDescription>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {Object.keys(topPorSala).length > 0 ? Object.keys(topPorSala).map((sala) => (
                   <button
@@ -350,10 +350,10 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {topAlunos.map((aluno, idx) => {
                     const pct = calcularPct(aluno.presenca, aluno.total)
-                    const medalha = idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'
+                    const medalha = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}º`
                     return (
                       <div key={aluno.nome} className="flex items-center gap-3">
-                        <span className="text-xl w-7 text-center flex-shrink-0">{medalha}</span>
+                        <span className={`w-7 text-center flex-shrink-0 ${idx < 3 ? 'text-xl' : 'text-sm font-bold text-muted-foreground'}`}>{medalha}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-medium truncate">{aluno.nome}</span>
