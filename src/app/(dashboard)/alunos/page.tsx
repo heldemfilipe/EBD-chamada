@@ -13,9 +13,9 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Users } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { MESES, TRIMESTRES, BG_TO_HEX } from '@/lib/constants'
+import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -55,19 +55,6 @@ const FAIXAS = [
   { label: 'Adultos',      desc: 'A partir de 18 anos', faixa: 'A partir de 18 anos',   color: 'text-blue-500' },
 ]
 
-// Cargos eclesiásticos com cores distintas
-const CARGOS = [
-  { label: 'Pastor',      bg: '#7C3AED20', color: '#7C3AED', border: '#7C3AED50' },
-  { label: 'Evangelista', bg: '#2563EB20', color: '#2563EB', border: '#2563EB50' },
-  { label: 'Presbítero',  bg: '#4F46E520', color: '#4F46E5', border: '#4F46E550' },
-  { label: 'Diácono',     bg: '#16A34A20', color: '#16A34A', border: '#16A34A50' },
-  { label: 'Cooperador',  bg: '#0D948820', color: '#0D9488', border: '#0D948850' },
-  { label: 'Obreiro',     bg: '#EA580C20', color: '#EA580C', border: '#EA580C50' },
-]
-
-function getCargo(cargo: string) {
-  return CARGOS.find(c => c.label === cargo) ?? null
-}
 
 const FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', email: '', responsavel: '', turmaId: '', cargo: '' }
 
@@ -84,6 +71,22 @@ export default function AlunosPage() {
   const [editMode, setEditMode] = useState(false)
   const [selected, setSelected] = useState<Aluno | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
+
+  // Ordenação da tabela
+  const [sortKey, setSortKey] = useState<'nome' | 'idade' | 'presenca' | 'turma'>('nome')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  function handleSort(key: 'nome' | 'idade' | 'presenca' | 'turma') {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  function SortIcon({ col }: { col: 'nome' | 'idade' | 'presenca' | 'turma' }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />
+    return sortDir === 'asc'
+      ? <ArrowUp className="h-3 w-3 ml-1 text-primary" />
+      : <ArrowDown className="h-3 w-3 ml-1 text-primary" />
+  }
 
   // Filtro de período para presença
   const [periodoPresenca, setPeriodoPresenca] = useState<'ano' | 'mes' | 'trimestre'>('ano')
@@ -163,6 +166,18 @@ export default function AlunosPage() {
     .map(a => {
       const pm = presencaFiltrada[a.id]
       return { ...a, presenca: pm && pm.total > 0 ? Math.round((pm.presentes / pm.total) * 100) : 0 }
+    })
+    .sort((a, b) => {
+      let cmp = 0
+      if (sortKey === 'nome')     cmp = a.nome.localeCompare(b.nome, 'pt-BR')
+      if (sortKey === 'idade')    cmp = a.idade - b.idade
+      if (sortKey === 'presenca') cmp = a.presenca - b.presenca
+      if (sortKey === 'turma') {
+        const ta = turmaMap[a.turmaId ?? '']?.nome ?? ''
+        const tb = turmaMap[b.turmaId ?? '']?.nome ?? ''
+        cmp = ta.localeCompare(tb, 'pt-BR')
+      }
+      return sortDir === 'asc' ? cmp : -cmp
     })
 
   const faixaPorTurma: Record<string, string> = {}
@@ -317,11 +332,27 @@ export default function AlunosPage() {
             <Table className="min-w-[600px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead className="hidden sm:table-cell">Idade</TableHead>
-                  <TableHead>Turma</TableHead>
+                  <TableHead>
+                    <button onClick={() => handleSort('nome')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      Nome <SortIcon col="nome" />
+                    </button>
+                  </TableHead>
+                  <TableHead className="hidden sm:table-cell">
+                    <button onClick={() => handleSort('idade')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      Idade <SortIcon col="idade" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button onClick={() => handleSort('turma')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      Turma <SortIcon col="turma" />
+                    </button>
+                  </TableHead>
                   <TableHead className="hidden md:table-cell">Contato</TableHead>
-                  <TableHead className="hidden md:table-cell">Presença</TableHead>
+                  <TableHead className="hidden md:table-cell">
+                    <button onClick={() => handleSort('presenca')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      Presença <SortIcon col="presenca" />
+                    </button>
+                  </TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>

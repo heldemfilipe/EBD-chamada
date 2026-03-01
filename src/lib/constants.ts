@@ -44,6 +44,20 @@ export const BG_TO_HEX: Record<string, string> = {
   'bg-cyan-500':   '#06B6D4',
 }
 
+/** Cargos eclesiásticos com cores */
+export const CARGOS = [
+  { label: 'Pastor',      bg: '#7C3AED20', color: '#7C3AED', border: '#7C3AED50' },
+  { label: 'Evangelista', bg: '#2563EB20', color: '#2563EB', border: '#2563EB50' },
+  { label: 'Presbítero',  bg: '#4F46E520', color: '#4F46E5', border: '#4F46E550' },
+  { label: 'Diácono',     bg: '#16A34A20', color: '#16A34A', border: '#16A34A50' },
+  { label: 'Cooperador',  bg: '#0D948820', color: '#0D9488', border: '#0D948850' },
+  { label: 'Obreiro',     bg: '#EA580C20', color: '#EA580C', border: '#EA580C50' },
+]
+
+export function getCargo(cargo: string) {
+  return CARGOS.find(c => c.label === cargo) ?? null
+}
+
 /** Faixas etárias padrão da EBD */
 export const FAIXAS_ETARIAS = [
   { label: 'Crianças (0–7)',   min: 0,  max: 7  },

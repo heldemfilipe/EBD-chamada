@@ -28,7 +28,8 @@ import { Plus, Users, GraduationCap, Edit, Trash2, Eye, UserPlus, Loader2 } from
 import { supabase } from '@/lib/supabase'
 import { StatCard } from '@/components/ui/stat-card'
 import { PresenceBar } from '@/components/ui/presence-bar'
-import { toast } from '@/lib/toast';
+import { CARGOS, getCargo } from '@/lib/constants'
+import { toast } from '@/lib/toast'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 interface Turma {
@@ -84,7 +85,7 @@ const faixasEtarias = [
   { value: 'A partir de 18 anos',  label: 'Adultos — A partir de 18 anos' },
 ]
 
-const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '' }
+const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', cargo: '' }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function TurmasPage() {
@@ -270,6 +271,7 @@ export default function TurmasPage() {
       nome: enrollForm.nome,
       data_nascimento: enrollForm.dataNascimento || null,
       telefone: enrollForm.telefone || null,
+      cargo: enrollForm.cargo || null,
       turma_id: selectedTurma.id,
       ativo: true,
     }).select('id').single()
@@ -540,6 +542,25 @@ export default function TurmasPage() {
                   onChange={(e) => setEnrollForm({ ...enrollForm, telefone: e.target.value })}
                   placeholder="(00) 00000-0000"
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="enroll-cargo">Cargo Eclesiástico</Label>
+                <Select value={enrollForm.cargo || 'nenhum'} onValueChange={(v) => setEnrollForm({ ...enrollForm, cargo: v === 'nenhum' ? '' : v })}>
+                  <SelectTrigger id="enroll-cargo"><SelectValue placeholder="Selecione (opcional)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="nenhum">Nenhum</SelectItem>
+                    {CARGOS.map((c) => <SelectItem key={c.label} value={c.label}>{c.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {enrollForm.cargo && getCargo(enrollForm.cargo) && (() => {
+                  const c = getCargo(enrollForm.cargo)!
+                  return (
+                    <span className="self-start text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+                      style={{ backgroundColor: c.bg, color: c.color, borderColor: c.border }}>
+                      {c.label}
+                    </span>
+                  )
+                })()}
               </div>
             </div>
           ) : (

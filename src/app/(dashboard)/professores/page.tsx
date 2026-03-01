@@ -15,16 +15,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { toast } from '@/lib/toast';
+import { CARGOS, getCargo } from '@/lib/constants'
+import { toast } from '@/lib/toast'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Professor {
   id: string; nome: string; especialidade: string; turmas: string[]
-  turmaAluno: string | null; telefone: string; email: string; dataIngresso: string
+  turmaAluno: string | null; telefone: string; email: string; dataIngresso: string; cargo: string
 }
 interface Turma { id: string; nome: string }
 
-const FORM_VAZIO = { nome: '', telefone: '', email: '', especialidade: '', turmas: [] as string[], turmaAluno: null as string | null }
+const FORM_VAZIO = { nome: '', telefone: '', email: '', especialidade: '', turmas: [] as string[], turmaAluno: null as string | null, cargo: '' }
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function ProfessoresPage() {
@@ -49,6 +50,7 @@ export default function ProfessoresPage() {
         id: p.id, nome: p.nome, especialidade: p.especialidade ?? '', telefone: p.telefone ?? '',
         email: p.email ?? '', dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
         turmaAluno: p.turma_aluno_id ?? null, turmas: (p.professor_turmas ?? []).map((pt: any) => pt.turma_id),
+        cargo: p.cargo ?? '',
       })))
       setTurmas(turmasData ?? [])
     }
@@ -68,7 +70,7 @@ export default function ProfessoresPage() {
   function openDialog(professor?: Professor) {
     if (professor) {
       setEditMode(true); setSelected(professor)
-      setForm({ nome: professor.nome, telefone: professor.telefone, email: professor.email, especialidade: professor.especialidade, turmas: professor.turmas, turmaAluno: professor.turmaAluno })
+      setForm({ nome: professor.nome, telefone: professor.telefone, email: professor.email, especialidade: professor.especialidade, turmas: professor.turmas, turmaAluno: professor.turmaAluno, cargo: professor.cargo ?? '' })
     } else {
       setEditMode(false); setSelected(null); setForm(FORM_VAZIO)
     }
@@ -92,19 +94,19 @@ export default function ProfessoresPage() {
     if (!form.nome) { toast('Por favor, preencha o nome do professor.', 'error'); return }
 
     if (editMode && selected) {
-      const { error } = await db.from('professores').update({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno }).eq('id', selected.id)
+      const { error } = await db.from('professores').update({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, cargo: form.cargo || null }).eq('id', selected.id)
       if (error) { toast('Erro ao atualizar professor.', 'error'); return }
       await db.from('professor_turmas').delete().eq('professor_id', selected.id)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
       await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
-      setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno } : p))
+      setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo } : p))
       toast('Professor atualizado com sucesso!')
     } else {
-      const { data, error } = await db.from('professores').insert({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
+      const { data, error } = await db.from('professores').insert({ nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, cargo: form.cargo || null, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
       if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       await sincronizarAluno(data.id, form.nome, form.turmaAluno)
-      setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, dataIngresso: new Date().toISOString().split('T')[0] }])
+      setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
       toast('Professor cadastrado com sucesso!')
     }
     closeDialog()
@@ -170,7 +172,20 @@ export default function ProfessoresPage() {
                 {filtered.length > 0 ? filtered.map((prof) => (
                   <TableRow key={prof.id}>
                     <TableCell>
-                      <div className="font-medium">{prof.nome}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{prof.nome}</span>
+                        {(() => {
+                          const c = getCargo(prof.cargo)
+                          return c ? (
+                            <span
+                              className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+                              style={{ backgroundColor: c.bg, color: c.color, borderColor: c.border }}
+                            >
+                              {c.label}
+                            </span>
+                          ) : null
+                        })()}
+                      </div>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                         <Calendar className="h-3 w-3" />
                         Desde {new Date(prof.dataIngresso).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}
@@ -236,6 +251,25 @@ export default function ProfessoresPage() {
             <div className="grid gap-2">
               <Label htmlFor="especialidade">Especialidade</Label>
               <Input id="especialidade" value={form.especialidade} onChange={(e) => setForm({ ...form, especialidade: e.target.value })} placeholder="Ex: Estudos Bíblicos, Teologia, etc." />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cargo">Cargo Eclesiástico</Label>
+              <Select value={form.cargo || 'nenhum'} onValueChange={(v) => setForm({ ...form, cargo: v === 'nenhum' ? '' : v })}>
+                <SelectTrigger id="cargo"><SelectValue placeholder="Selecione (opcional)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nenhum">Nenhum</SelectItem>
+                  {CARGOS.map((c) => <SelectItem key={c.label} value={c.label}>{c.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {form.cargo && getCargo(form.cargo) && (() => {
+                const c = getCargo(form.cargo)!
+                return (
+                  <span className="self-start text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+                    style={{ backgroundColor: c.bg, color: c.color, borderColor: c.border }}>
+                    {c.label}
+                  </span>
+                )
+              })()}
             </div>
             <div className="grid gap-3">
               <Label className="flex items-center gap-2"><GraduationCap className="h-4 w-4" />Turmas que leciona</Label>
