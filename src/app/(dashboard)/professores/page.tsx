@@ -43,7 +43,7 @@ export default function ProfessoresPage() {
   useEffect(() => {
     async function load() {
       const [{ data: profsData }, { data: turmasData }] = await Promise.all([
-        db.from('professores').select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, professor_turmas(turma_id)').eq('ativo', true).order('nome'),
+        db.from('professores').select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, cargo, professor_turmas(turma_id)').eq('ativo', true).order('nome'),
         db.from('turmas').select('id, nome').eq('ativa', true).order('nome'),
       ])
       setProfessores((profsData ?? []).map((p: any) => ({
@@ -90,11 +90,15 @@ export default function ProfessoresPage() {
     }
   }
 
-  // Salva cargo separadamente — ignora silenciosamente se a coluna ainda não existir no banco
-  async function tentarSalvarCargo(tabela: string, id: string, cargo: string) {
+  // Salva cargo no professor e sincroniza com o aluno correspondente (se existir)
+  async function tentarSalvarCargo(profId: string, cargo: string) {
     try {
-      await db.from(tabela).update({ cargo: cargo || null }).eq('id', id)
+      await db.from('professores').update({ cargo: cargo || null }).eq('id', profId)
     } catch (_) { /* coluna ainda não criada */ }
+    try {
+      // Atualiza o cargo no registro de aluno vinculado ao professor
+      await db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`)
+    } catch (_) { /* sem aluno vinculado ou coluna não criada */ }
   }
 
   async function handleSave() {
@@ -106,7 +110,7 @@ export default function ProfessoresPage() {
     if (editMode && selected) {
       const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
       if (error) { toast('Erro ao atualizar professor.', 'error'); return }
-      await tentarSalvarCargo('professores', selected.id, form.cargo)
+      await tentarSalvarCargo(selected.id, form.cargo)
       await db.from('professor_turmas').delete().eq('professor_id', selected.id)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
       await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
@@ -115,7 +119,7 @@ export default function ProfessoresPage() {
     } else {
       const { data, error } = await db.from('professores').insert({ ...payloadBase, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
       if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
-      await tentarSalvarCargo('professores', data.id, form.cargo)
+      await tentarSalvarCargo(data.id, form.cargo)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       await sincronizarAluno(data.id, form.nome, form.turmaAluno)
       setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
