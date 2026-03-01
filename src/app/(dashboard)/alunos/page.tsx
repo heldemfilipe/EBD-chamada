@@ -70,20 +70,40 @@ export default function AlunosPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: turmasData }, { data: alunosData }] = await Promise.all([
+      const anoAtual = new Date().getFullYear()
+      const [{ data: turmasData }, { data: alunosData }, { data: chamadasData }] = await Promise.all([
         db.from('turmas').select('id, nome, faixa_etaria').eq('ativa', true).order('nome'),
         db.from('alunos').select('id, nome, data_nascimento, telefone, email, responsavel, turma_id').order('nome'),
+        db.from('chamadas').select('id').eq('ano', anoAtual),
       ])
 
       setTurmas((turmasData ?? []).map((t: any) => ({ id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '' })))
-      setAlunos((alunosData ?? []).map((a: any) => ({
-        id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
-        telefone: a.telefone ?? '', email: a.email ?? '',
-        dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
-        presenca: 0, status: 'ativo',
-        idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
-        isProfessor: (a.responsavel ?? '').startsWith('professor:'),
-      })))
+
+      // Calcular presença real de cada aluno no ano corrente
+      const presencaMap: Record<string, { presentes: number; total: number }> = {}
+      const chamadaIds = (chamadasData ?? []).map((c: any) => c.id)
+      if (chamadaIds.length > 0) {
+        const { data: presencas } = await db
+          .from('presencas').select('aluno_id, presente').in('chamada_id', chamadaIds)
+        for (const p of presencas ?? []) {
+          if (!presencaMap[p.aluno_id]) presencaMap[p.aluno_id] = { presentes: 0, total: 0 }
+          presencaMap[p.aluno_id].total++
+          if (p.presente) presencaMap[p.aluno_id].presentes++
+        }
+      }
+
+      setAlunos((alunosData ?? []).map((a: any) => {
+        const pm = presencaMap[a.id]
+        const presenca = pm ? Math.round((pm.presentes / pm.total) * 100) : 0
+        return {
+          id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
+          telefone: a.telefone ?? '', email: a.email ?? '',
+          dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
+          presenca, status: 'ativo',
+          idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+          isProfessor: (a.responsavel ?? '').startsWith('professor:'),
+        }
+      }))
     }
     load()
   }, [])

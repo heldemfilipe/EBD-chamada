@@ -292,7 +292,7 @@ export default function ChamadaPage() {
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1">
                     <DollarSign className="h-3.5 w-3.5 text-green-500 mb-0.5" />
-                    <span className="text-sm font-semibold text-green-600">{resumo.oferta.toFixed(0)}</span>
+                    <span className="text-sm font-semibold text-green-600">{resumo.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     <span className="text-[9px] text-muted-foreground">Oferta R$</span>
                   </div>
                 </div>

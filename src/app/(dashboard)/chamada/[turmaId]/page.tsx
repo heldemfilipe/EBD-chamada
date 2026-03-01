@@ -105,7 +105,7 @@ export default function ChamadaTurmaPage() {
   const [turma, setTurma] = useState<TurmaInfo>({ id: turmaId, nome: '', sala: '', professor: '' })
   const [alunos, setAlunos] = useState<AlunoPresenca[]>([])
   const [visitantes, setVisitantes] = useState<Visitante[]>([])
-  const [oferta, setOferta] = useState<string>('')
+  const [ofertaCents, setOfertaCents] = useState<number>(0)
   const [anotacoes, setAnotacoes] = useState<string>('')
   const [dialogVisitanteOpen, setDialogVisitanteOpen] = useState(false)
   const [novoVisitante, setNovoVisitante] = useState({ nome: '', telefone: '', observacao: '' })
@@ -141,7 +141,7 @@ export default function ChamadaTurmaPage() {
         .single() as { data: { id: string; oferta: number; anotacoes: string | null; presencas: any[] } | null }
 
       if (chamadaExistente) {
-        setOferta(String(chamadaExistente.oferta || ''))
+        setOfertaCents(Math.round((chamadaExistente.oferta || 0) * 100))
         setAnotacoes(chamadaExistente.anotacoes ?? '')
         const presencasMap = new Map((chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p]))
         setAlunos(
@@ -158,6 +158,8 @@ export default function ChamadaTurmaPage() {
           })
         )
       } else {
+        setOfertaCents(0)
+        setAnotacoes('')
         setAlunos(
           (alunosData ?? []).map(a => ({
             aluno_id: a.id,
@@ -339,7 +341,7 @@ export default function ChamadaTurmaPage() {
       const { data: chamada, error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, oferta: parseFloat(oferta) || 0, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
         .select('id')
@@ -783,12 +785,25 @@ export default function ChamadaTurmaPage() {
                 <Label htmlFor="oferta">Oferta (R$)</Label>
                 <Input
                   id="oferta"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="0,00"
-                  value={oferta}
-                  onChange={(e) => setOferta(e.target.value)}
+                  type="text"
+                  inputMode="numeric"
+                  value={(ofertaCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  onChange={() => {}}
+                  onKeyDown={(e) => {
+                    if (e.key >= '0' && e.key <= '9') {
+                      e.preventDefault()
+                      setOfertaCents(prev => Math.min(prev * 10 + parseInt(e.key), 9999999))
+                    } else if (e.key === 'Backspace') {
+                      e.preventDefault()
+                      setOfertaCents(prev => Math.floor(prev / 10))
+                    } else if (e.key === 'Delete') {
+                      e.preventDefault()
+                      setOfertaCents(0)
+                    } else if (!['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                      e.preventDefault()
+                    }
+                  }}
+                  className="text-right font-mono tabular-nums"
                 />
               </div>
 

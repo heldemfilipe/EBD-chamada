@@ -47,6 +47,20 @@ function dadosVazios() {
   return { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0, total: 0, domingos: 0, pct: 0 }
 }
 
+/** Filtra chamadas pelo período selecionado usando o campo `data` */
+function filtrarPorPeriodo(
+  chamadas: any[],
+  opts: { granularidade: Granularidade; mes: number; trim: number }
+): any[] {
+  return chamadas.filter((c: any) => {
+    if (!c.data) return opts.granularidade === 'ano'
+    const m = parseISO(c.data).getMonth()
+    if (opts.granularidade === 'mes' || opts.granularidade === 'dia') return m === opts.mes
+    if (opts.granularidade === 'trimestre') return TRIMESTRES[opts.trim].meses.includes(m)
+    return true
+  })
+}
+
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function RelatoriosPage() {
   const db = supabase as any
@@ -121,15 +135,17 @@ export default function RelatoriosPage() {
       if (!turmas?.length) { setDadosSala([]); return }
 
       const resultado: DadosSala[] = await Promise.all(turmas.map(async (turma: any, idx: number) => {
-        const [{ count: matriculados }, { data: chamadas }] = await Promise.all([
+        const [{ count: matriculados }, { data: chamadasRaw }] = await Promise.all([
           db.from('alunos').select('id', { count: 'exact', head: true }).eq('turma_id', turma.id).eq('ativo', true),
           db.from('chamadas')
-            .select('id, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
-            .eq('turma_id', turma.id).gte('data', dataInicio).lte('data', dataFim),
+            .select('id, data, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
+            .eq('turma_id', turma.id).eq('ano', ano),
         ])
 
+        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
+
         let presentes = 0, faltas = 0, biblias = 0, revistas = 0, visitantes = 0, oferta = 0, total = 0
-        for (const c of chamadas ?? []) {
+        for (const c of chamadas) {
           const ps = c.presencas ?? []
           total += ps.length
           presentes += ps.filter((p: any) => p.presente).length
@@ -155,9 +171,9 @@ export default function RelatoriosPage() {
   // ── Top alunos + atenção ──
   useEffect(() => {
     async function load() {
-      const { dataInicio, dataFim } = rangeDoPeriodo({ granularidade, ano, mes, trimestre: trim })
-      const { data: chamadas } = await db.from('chamadas').select('id').gte('data', dataInicio).lte('data', dataFim)
-      if (!chamadas?.length) { setTopAlunos([]); setAlunosAtencao([]); return }
+      const { data: chamadasRaw } = await db.from('chamadas').select('id, data').eq('ano', ano)
+      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
+      if (!chamadas.length) { setTopAlunos([]); setAlunosAtencao([]); return }
 
       const { data: presencas } = await db.from('presencas').select('aluno_id, presente').in('chamada_id', chamadas.map((c: any) => c.id))
       if (!presencas?.length) { setTopAlunos([]); setAlunosAtencao([]); return }
@@ -189,7 +205,6 @@ export default function RelatoriosPage() {
   // ── Professores ──
   useEffect(() => {
     async function load() {
-      const { dataInicio, dataFim } = rangeDoPeriodo({ granularidade, ano, mes, trimestre: trim })
       const { data: profsList } = await db
         .from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
       if (!profsList?.length) { setProfessores([]); return }
@@ -200,12 +215,14 @@ export default function RelatoriosPage() {
 
         if (!turmaIds.length) return { nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 }
 
-        const { data: chamadas } = await db
-          .from('chamadas').select('id, presencas(presente, trouxe_biblia)')
-          .in('turma_id', turmaIds).gte('data', dataInicio).lte('data', dataFim)
+        const { data: chamadasRaw } = await db
+          .from('chamadas').select('id, data, presencas(presente, trouxe_biblia)')
+          .in('turma_id', turmaIds).eq('ano', ano)
+
+        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
 
         let totalPresentes = 0, totalAlunos = 0, totalBiblias = 0, aulas = 0
-        for (const c of chamadas ?? []) {
+        for (const c of chamadas) {
           aulas++
           const ps = c.presencas ?? []
           totalAlunos   += ps.length
