@@ -49,7 +49,9 @@ interface AlunoPresenca {
   isProfessor: boolean
   professorId: string | null   // ID do professor (extraído de responsavel)
   cargo: string                // Cargo eclesiástico
-  dadoAula: boolean            // Está na escala como professor desta turma hoje
+  dadoAula: boolean            // Está na escala hoje (qualquer turma)
+  turmaDaAulaId: string | null    // ID da turma onde está lecionando hoje
+  turmaDaAulaNome: string | null  // Nome da turma onde está lecionando hoje
 }
 
 interface HistoricoItem {
@@ -140,13 +142,24 @@ export default function ChamadaTurmaPage() {
         .eq('ativo', true)
         .order('nome') as { data: { id: string; nome: string; responsavel: string | null; cargo: string | null }[] | null }
 
-      // 2b. Escala do dia: quem está lecionando nesta turma hoje
+      // 2b. Escala do dia: todos os professores escalados hoje (qualquer turma)
       const { data: escalaDia } = await db
         .from('escalas')
-        .select('professor_id')
-        .eq('turma_id', turmaId)
-        .eq('data', dataSelecionada) as { data: { professor_id: string }[] | null }
-      const professorIdsDaEscala = new Set((escalaDia ?? []).map(e => e.professor_id))
+        .select('professor_id, turma_id')
+        .eq('data', dataSelecionada) as { data: { professor_id: string; turma_id: string }[] | null }
+
+      // Buscar nomes das turmas da escala
+      const turmaIdsEscala = [...new Set((escalaDia ?? []).map(e => e.turma_id))]
+      const turmaNomesEscala: Record<string, string> = {}
+      if (turmaIdsEscala.length > 0) {
+        const { data: turmasEscala } = await db.from('turmas').select('id, nome').in('id', turmaIdsEscala)
+        for (const t of turmasEscala ?? []) turmaNomesEscala[t.id] = t.nome
+      }
+      // Map: professorId → { turmaId, turmaNome }
+      const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
+      for (const e of escalaDia ?? []) {
+        professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: turmaNomesEscala[e.turma_id] ?? '' })
+      }
 
       // 3. Chamada existente para o dia
       const { data: chamadaExistente } = await db
@@ -176,7 +189,9 @@ export default function ChamadaTurmaPage() {
               isProfessor: profId !== null,
               professorId: profId,
               cargo: a.cargo ?? '',
-              dadoAula: profId !== null && professorIdsDaEscala.has(profId),
+              dadoAula: profId !== null && professorEscalaMap.has(profId),
+              turmaDaAulaId: profId ? (professorEscalaMap.get(profId)?.turmaId ?? null) : null,
+              turmaDaAulaNome: profId ? (professorEscalaMap.get(profId)?.turmaNome ?? null) : null,
             }
           })
         )
@@ -198,7 +213,9 @@ export default function ChamadaTurmaPage() {
               isProfessor: profId !== null,
               professorId: profId,
               cargo: a.cargo ?? '',
-              dadoAula: profId !== null && professorIdsDaEscala.has(profId),
+              dadoAula: profId !== null && professorEscalaMap.has(profId),
+              turmaDaAulaId: profId ? (professorEscalaMap.get(profId)?.turmaId ?? null) : null,
+              turmaDaAulaNome: profId ? (professorEscalaMap.get(profId)?.turmaNome ?? null) : null,
             }
           })
         )
@@ -363,6 +380,8 @@ export default function ChamadaTurmaPage() {
       professorId: null,
       cargo: '',
       dadoAula: false,
+      turmaDaAulaId: null,
+      turmaDaAulaNome: null,
     }])
   }
 
@@ -605,7 +624,11 @@ export default function ChamadaTurmaPage() {
                           {aluno.dadoAula && (
                             <div className="flex items-center gap-1 mt-0.5">
                               <GraduationCap className="h-3 w-3 text-red-400" />
-                              <span className="text-[11px] font-semibold text-red-400">Lecionando hoje nesta turma</span>
+                              <span className="text-[11px] font-semibold text-red-400">
+                                {aluno.turmaDaAulaId === turmaId
+                                  ? 'Lecionando hoje nesta turma'
+                                  : `Lecionando hoje em: ${aluno.turmaDaAulaNome}`}
+                              </span>
                             </div>
                           )}
                         </div>
