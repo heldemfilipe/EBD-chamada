@@ -202,19 +202,28 @@ export default function AlunosPage() {
     setDialogOpen(false); setEditMode(false); setSelected(null); setForm(FORM_VAZIO)
   }
 
+  // Salva cargo separadamente — ignora silenciosamente se a coluna ainda não existir no banco
+  async function tentarSalvarCargo(tabela: string, id: string, cargo: string) {
+    try {
+      await db.from(tabela).update({ cargo: cargo || null }).eq('id', id)
+    } catch (_) { /* coluna ainda não criada */ }
+  }
+
   async function handleSave() {
     if (!form.nome) { toast('Por favor, preencha o nome do aluno.', 'error'); return }
     const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
     const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
+    // Payload sem cargo para não quebrar se a coluna não existir
     const payload   = {
       nome: form.nome, data_nascimento: form.dataNascimento || null,
       telefone: form.telefone, email: form.email, responsavel: form.responsavel,
-      turma_id: form.turmaId || null, cargo: form.cargo || null,
+      turma_id: form.turmaId || null,
     }
 
     if (editMode && selected) {
       const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
       if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
+      await tentarSalvarCargo('alunos', selected.id, form.cargo)
       setAlunos(alunos.map(a => a.id === selected.id
         ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, isProfessor: false }
         : a))
@@ -222,6 +231,7 @@ export default function AlunosPage() {
     } else {
       const { data, error } = await db.from('alunos').insert(payload).select('id').single()
       if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
+      await tentarSalvarCargo('alunos', data.id, form.cargo)
       setAlunos([...alunos, {
         id: data.id, nome: form.nome, idade, turma: turmaNome,
         turmaId: form.turmaId || null, telefone: form.telefone,

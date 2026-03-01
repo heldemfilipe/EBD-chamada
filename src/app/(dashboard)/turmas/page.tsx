@@ -264,19 +264,27 @@ export default function TurmasPage() {
     setEnrollOpen(true)
   }
 
+  // Salva cargo separadamente — ignora silenciosamente se a coluna ainda não existir no banco
+  async function tentarSalvarCargo(tabela: string, id: string, cargo: string) {
+    try {
+      await db.from(tabela).update({ cargo: cargo || null }).eq('id', id)
+    } catch (_) { /* coluna ainda não criada */ }
+  }
+
   async function handleEnrollNovo() {
     if (!enrollForm.nome || !selectedTurma) { toast('Preencha o nome do aluno.', 'error'); return }
     setEnrollLoading(true)
+    // Payload sem cargo para não quebrar se a coluna não existir
     const { data, error } = await db.from('alunos').insert({
       nome: enrollForm.nome,
       data_nascimento: enrollForm.dataNascimento || null,
       telefone: enrollForm.telefone || null,
-      cargo: enrollForm.cargo || null,
       turma_id: selectedTurma.id,
       ativo: true,
     }).select('id').single()
     setEnrollLoading(false)
     if (error || !data) { toast('Erro ao matricular aluno.', 'error'); return }
+    if (enrollForm.cargo) await tentarSalvarCargo('alunos', data.id, enrollForm.cargo)
 
     const novoAluno: AlunoDetalhe = {
       id: data.id, nome: enrollForm.nome,
