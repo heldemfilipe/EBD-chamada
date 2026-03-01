@@ -27,12 +27,14 @@ import {
   XCircle,
   PartyPopper,
   Trash2,
+  GraduationCap,
 } from 'lucide-react'
 import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 import { calcularPct } from '@/lib/presence'
-import { toast } from '@/lib/toast';
+import { toast } from '@/lib/toast'
+import { getCargo } from '@/lib/constants'
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -43,6 +45,11 @@ interface AlunoPresenca {
   trouxe_biblia: boolean
   trouxe_revista: boolean
   justificativa: string
+  // Informações extras para identificação na lista
+  isProfessor: boolean
+  professorId: string | null   // ID do professor (extraído de responsavel)
+  cargo: string                // Cargo eclesiástico
+  dadoAula: boolean            // Está na escala como professor desta turma hoje
 }
 
 interface HistoricoItem {
@@ -125,13 +132,21 @@ export default function ChamadaTurmaPage() {
         .single() as { data: { id: string; nome: string; sala: string | null } | null }
       if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-      // 2. Alunos da turma
+      // 2. Alunos da turma (com responsavel e cargo para identificar professores)
       const { data: alunosData } = await db
         .from('alunos')
-        .select('id, nome')
+        .select('id, nome, responsavel, cargo')
         .eq('turma_id', turmaId)
         .eq('ativo', true)
-        .order('nome') as { data: { id: string; nome: string }[] | null }
+        .order('nome') as { data: { id: string; nome: string; responsavel: string | null; cargo: string | null }[] | null }
+
+      // 2b. Escala do dia: quem está lecionando nesta turma hoje
+      const { data: escalaDia } = await db
+        .from('escalas')
+        .select('professor_id')
+        .eq('turma_id', turmaId)
+        .eq('data', dataSelecionada) as { data: { professor_id: string }[] | null }
+      const professorIdsDaEscala = new Set((escalaDia ?? []).map(e => e.professor_id))
 
       // 3. Chamada existente para o dia
       const { data: chamadaExistente } = await db
@@ -148,6 +163,9 @@ export default function ChamadaTurmaPage() {
         setAlunos(
           (alunosData ?? []).map(a => {
             const p = presencasMap.get(a.id)
+            const profId = (a.responsavel ?? '').startsWith('professor:')
+              ? (a.responsavel as string).replace('professor:', '')
+              : null
             return {
               aluno_id: a.id,
               nome: a.nome,
@@ -155,6 +173,10 @@ export default function ChamadaTurmaPage() {
               trouxe_biblia: p?.trouxe_biblia ?? false,
               trouxe_revista: p?.trouxe_revista ?? false,
               justificativa: p?.justificativa ?? '',
+              isProfessor: profId !== null,
+              professorId: profId,
+              cargo: a.cargo ?? '',
+              dadoAula: profId !== null && professorIdsDaEscala.has(profId),
             }
           })
         )
@@ -162,14 +184,23 @@ export default function ChamadaTurmaPage() {
         setOfertaCents(0)
         setAnotacoes('')
         setAlunos(
-          (alunosData ?? []).map(a => ({
-            aluno_id: a.id,
-            nome: a.nome,
-            presente: 'pendente' as const,
-            trouxe_biblia: false,
-            trouxe_revista: false,
-            justificativa: '',
-          }))
+          (alunosData ?? []).map(a => {
+            const profId = (a.responsavel ?? '').startsWith('professor:')
+              ? (a.responsavel as string).replace('professor:', '')
+              : null
+            return {
+              aluno_id: a.id,
+              nome: a.nome,
+              presente: 'pendente' as const,
+              trouxe_biblia: false,
+              trouxe_revista: false,
+              justificativa: '',
+              isProfessor: profId !== null,
+              professorId: profId,
+              cargo: a.cargo ?? '',
+              dadoAula: profId !== null && professorIdsDaEscala.has(profId),
+            }
+          })
         )
       }
 
@@ -328,6 +359,10 @@ export default function ChamadaTurmaPage() {
       trouxe_biblia: visitante.trouxe_biblia,
       trouxe_revista: visitante.trouxe_revista,
       justificativa: '',
+      isProfessor: false,
+      professorId: null,
+      cargo: '',
+      dadoAula: false,
     }])
   }
 
@@ -538,14 +573,42 @@ export default function ChamadaTurmaPage() {
               {alunos.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">Nenhum aluno cadastrado nesta turma</p>
               ) : (
-                alunos.map((aluno, index) => (
-                  <div key={aluno.aluno_id} className="p-4 border rounded-lg space-y-3">
+                alunos.map((aluno, index) => {
+                  const cargoInfo = getCargo(aluno.cargo)
+                  return (
+                  <div
+                    key={aluno.aluno_id}
+                    className={`p-4 border rounded-lg space-y-3 ${aluno.dadoAula ? 'border-red-500/60 bg-red-500/5' : ''}`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium flex-shrink-0">
                           {index + 1}
                         </div>
-                        <span className="font-medium">{aluno.nome}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">{aluno.nome}</span>
+                            {aluno.isProfessor && (
+                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 px-1.5 py-0">
+                                Professor
+                              </Badge>
+                            )}
+                            {cargoInfo && (
+                              <span
+                                className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+                                style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
+                              >
+                                {cargoInfo.label}
+                              </span>
+                            )}
+                          </div>
+                          {aluno.dadoAula && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <GraduationCap className="h-3 w-3 text-red-400" />
+                              <span className="text-[11px] font-semibold text-red-400">Lecionando hoje nesta turma</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -602,7 +665,8 @@ export default function ChamadaTurmaPage() {
                       </div>
                     )}
                   </div>
-                ))
+                  )
+                })
               )}
             </CardContent>
           </Card>
