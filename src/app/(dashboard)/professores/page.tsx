@@ -173,14 +173,14 @@ export default function ProfessoresPage() {
           </div>
 
           <div className="rounded-md border overflow-x-auto">
-            <Table className="min-w-[700px]">
+            <Table className="min-w-[500px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
-                  <TableHead>Especialidade</TableHead>
+                  <TableHead className="hidden sm:table-cell">Especialidade</TableHead>
                   <TableHead><div className="flex items-center gap-1"><GraduationCap className="h-3 w-3" />Leciona em</div></TableHead>
-                  <TableHead><div className="flex items-center gap-1"><BookOpen className="h-3 w-3" />Aluno em</div></TableHead>
-                  <TableHead>Contato</TableHead>
+                  <TableHead className="hidden md:table-cell"><div className="flex items-center gap-1"><BookOpen className="h-3 w-3" />Aluno em</div></TableHead>
+                  <TableHead className="hidden lg:table-cell">Contato</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -206,8 +206,13 @@ export default function ProfessoresPage() {
                         <Calendar className="h-3 w-3" />
                         Desde {new Date(prof.dataIngresso).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}
                       </div>
+                      {/* Contato visível apenas no mobile */}
+                      <div className="flex flex-col gap-0.5 mt-1 lg:hidden">
+                        {prof.telefone && <div className="flex items-center gap-1 text-xs text-muted-foreground"><Phone className="h-3 w-3" />{prof.telefone}</div>}
+                        {prof.email && <div className="flex items-center gap-1 text-xs text-muted-foreground"><Mail className="h-3 w-3" />{prof.email}</div>}
+                      </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       {prof.especialidade ? <Badge variant="outline">{prof.especialidade}</Badge> : <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
@@ -217,12 +222,12 @@ export default function ProfessoresPage() {
                           : <span className="text-xs text-muted-foreground">Nenhuma</span>}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">
                       {prof.turmaAluno
                         ? <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs">{getTurmaNome(prof.turmaAluno)}</Badge>
                         : <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2 text-sm"><Phone className="h-3 w-3 text-muted-foreground" /><span className="text-muted-foreground">{prof.telefone || '—'}</span></div>
                         <div className="flex items-center gap-2 text-sm"><Mail className="h-3 w-3 text-muted-foreground" /><span className="text-muted-foreground">{prof.email || '—'}</span></div>
@@ -246,7 +251,7 @@ export default function ProfessoresPage() {
 
       {/* Dialog: Adicionar/Editar */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editMode ? 'Editar Professor' : 'Novo Professor'}</DialogTitle>
             <DialogDescription>{editMode ? 'Atualize as informações do professor abaixo.' : 'Preencha os dados do novo professor.'}</DialogDescription>
@@ -320,7 +325,7 @@ export default function ProfessoresPage() {
 
       {/* Dialog: Confirmar Exclusão */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>Tem certeza que deseja excluir o professor <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</DialogDescription>

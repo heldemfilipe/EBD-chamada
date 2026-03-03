@@ -96,6 +96,7 @@ export default function RelatoriosPage() {
       }))
 
       for (const c of chamadas) {
+        if (!c.data) continue
         const m = parseISO(c.data).getMonth()
         if (!porMes[m]) porMes[m] = []
         const ps = c.presencas ?? []
@@ -322,11 +323,11 @@ export default function RelatoriosPage() {
             <p className="font-semibold">Período do Relatório</p>
             <p className="text-sm text-muted-foreground">{labelPeriodo}</p>
           </div>
-          <div className="flex items-center gap-1 p-1 rounded-lg border bg-muted/40 self-start sm:self-auto">
+          <div className="flex items-center gap-1 p-1 rounded-lg border bg-muted/40 self-start sm:self-auto flex-wrap">
             {(['dia', 'mes', 'trimestre', 'ano'] as Granularidade[]).map((g) => (
               <button key={g} onClick={() => setGranularidade(g)}
-                className={cn('px-3 py-1.5 rounded-md text-sm font-medium transition-all', granularidade === g ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}>
-                {g === 'dia' ? 'Dia' : g === 'mes' ? 'Mês' : g === 'trimestre' ? 'Trimestre' : 'Ano'}
+                className={cn('px-2.5 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all', granularidade === g ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}>
+                {g === 'dia' ? 'Dia' : g === 'mes' ? 'Mês' : g === 'trimestre' ? 'Trim.' : 'Ano'}
               </button>
             ))}
           </div>
@@ -466,19 +467,19 @@ export default function RelatoriosPage() {
               </ResponsiveContainer>
 
               <div className="rounded-lg border overflow-x-auto">
-                <Table className="min-w-[700px]">
+                <Table className="min-w-[480px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
                       <TableHead>Sala</TableHead>
-                      <TableHead className="text-center">Matrículas</TableHead>
-                      <TableHead className="text-center">Presentes</TableHead>
+                      <TableHead className="text-center hidden sm:table-cell">Mat.</TableHead>
+                      <TableHead className="text-center">Pres.</TableHead>
                       <TableHead className="text-center">Faltas</TableHead>
-                      <TableHead className="text-center">Visitantes</TableHead>
-                      <TableHead className="text-center">Bíblias</TableHead>
-                      <TableHead className="text-center">Revistas</TableHead>
-                      <TableHead className="text-center">Oferta</TableHead>
+                      <TableHead className="text-center hidden md:table-cell">Visit.</TableHead>
+                      <TableHead className="text-center hidden md:table-cell">Bíblias</TableHead>
+                      <TableHead className="text-center hidden lg:table-cell">Revistas</TableHead>
+                      <TableHead className="text-center hidden lg:table-cell">Oferta</TableHead>
                       <TableHead className="text-center">%</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="hidden sm:table-cell">Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -487,25 +488,25 @@ export default function RelatoriosPage() {
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: s.cor }} />
-                            <span className="font-medium text-sm">{s.sala}</span>
+                            <span className="font-medium text-sm">{s.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-center">{s.matriculados}</TableCell>
+                        <TableCell className="text-center hidden sm:table-cell">{s.matriculados}</TableCell>
                         <TableCell className="text-center text-green-600 font-semibold">{s.presentes}</TableCell>
                         <TableCell className="text-center text-red-600 font-semibold">{s.faltas}</TableCell>
-                        <TableCell className="text-center text-blue-600">{s.visitantes}</TableCell>
-                        <TableCell className="text-center text-purple-600">{s.biblias}</TableCell>
-                        <TableCell className="text-center text-orange-600">{s.revistas}</TableCell>
-                        <TableCell className="text-center text-emerald-600">R$ {s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-center text-blue-600 hidden md:table-cell">{s.visitantes}</TableCell>
+                        <TableCell className="text-center text-purple-600 hidden md:table-cell">{s.biblias}</TableCell>
+                        <TableCell className="text-center text-orange-600 hidden lg:table-cell">{s.revistas}</TableCell>
+                        <TableCell className="text-center text-emerald-600 hidden lg:table-cell">R$ {s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center gap-1.5 justify-center">
-                            <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
                               <div className="h-full rounded-full" style={{ width: `${s.presencaMedia}%`, backgroundColor: corPresenca(s.presencaMedia) }} />
                             </div>
                             <span className="text-xs font-bold" style={{ color: corPresenca(s.presencaMedia) }}>{s.presencaMedia}%</span>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="hidden sm:table-cell">
                           <Badge className={cn('text-xs border', badgePresenca(s.presencaMedia))}>{labelPresenca(s.presencaMedia)}</Badge>
                         </TableCell>
                       </TableRow>
@@ -532,14 +533,14 @@ export default function RelatoriosPage() {
               <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
             ) : (
               <div className="rounded-lg border overflow-x-auto">
-                <Table className="min-w-[500px]">
+                <Table className="min-w-[340px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
                       <TableHead className="w-8">#</TableHead>
                       <TableHead>Aluno</TableHead>
-                      <TableHead>Sala</TableHead>
+                      <TableHead className="hidden sm:table-cell">Sala</TableHead>
                       <TableHead className="text-center">Presença</TableHead>
-                      <TableHead className="text-center">Faltas</TableHead>
+                      <TableHead className="text-center hidden sm:table-cell">Faltas</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -548,13 +549,16 @@ export default function RelatoriosPage() {
                         <TableCell className={`font-bold text-center ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
                           {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
                         </TableCell>
-                        <TableCell className="font-medium text-sm">{a.nome}</TableCell>
-                        <TableCell><span className="text-xs text-muted-foreground">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span></TableCell>
+                        <TableCell className="font-medium text-sm">
+                          {a.nome}
+                          <p className="text-[11px] text-muted-foreground sm:hidden">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell"><span className="text-xs text-muted-foreground">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span></TableCell>
                         <TableCell className="text-center">
                           <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
                           <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="text-center hidden sm:table-cell">
                           <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
                         </TableCell>
                       </TableRow>
@@ -618,22 +622,28 @@ export default function RelatoriosPage() {
             <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
           ) : (
             <div className="rounded-lg border overflow-x-auto">
-              <Table className="min-w-[600px]">
+              <Table className="min-w-[480px]">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Professor</TableHead>
-                    <TableHead>Turmas</TableHead>
+                    <TableHead className="hidden sm:table-cell">Turmas</TableHead>
                     <TableHead className="text-center">Aulas</TableHead>
-                    <TableHead className="text-center">Presença Média</TableHead>
-                    <TableHead className="text-center">Bíblias %</TableHead>
+                    <TableHead className="text-center">Presença</TableHead>
+                    <TableHead className="text-center hidden sm:table-cell">Bíblias %</TableHead>
                     <TableHead>Avaliação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {professores.map((p, i) => (
                     <TableRow key={i}>
-                      <TableCell className="font-medium">{p.nome}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium">
+                        {p.nome}
+                        {/* Turmas inline no mobile */}
+                        <div className="sm:hidden flex flex-wrap gap-0.5 mt-0.5">
+                          {p.turmas.map((t, j) => <span key={j} className="text-[11px] text-muted-foreground">{t}</span>)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         <div className="flex flex-col gap-0.5">
                           {p.turmas.length > 0
                             ? p.turmas.map((t, j) => <span key={j} className="text-xs text-muted-foreground">{t}</span>)
@@ -643,13 +653,13 @@ export default function RelatoriosPage() {
                       <TableCell className="text-center font-semibold">{p.aulas}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
                             <div className="h-full rounded-full" style={{ width: `${p.presMedia}%`, backgroundColor: corPresenca(p.presMedia) }} />
                           </div>
                           <span className="text-xs font-bold" style={{ color: corPresenca(p.presMedia) }}>{p.presMedia}%</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="text-center hidden sm:table-cell">
                         <span className="text-xs font-semibold text-purple-600">{p.biblias}%</span>
                       </TableCell>
                       <TableCell>

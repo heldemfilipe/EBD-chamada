@@ -447,7 +447,7 @@ export default function AlunosPage() {
 
       {/* Dialog: Adicionar/Editar */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editMode ? 'Editar Aluno' : 'Novo Aluno'}</DialogTitle>
             <DialogDescription>{editMode ? 'Atualize as informações do aluno abaixo.' : 'Preencha os dados do novo aluno.'}</DialogDescription>
@@ -518,7 +518,7 @@ export default function AlunosPage() {
 
       {/* Dialog: Confirmar Exclusão */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>Tem certeza que deseja excluir o aluno <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</DialogDescription>

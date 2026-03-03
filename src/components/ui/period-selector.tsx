@@ -65,13 +65,13 @@ export function PeriodSelector({
               key={p}
               onClick={() => onPeriodo(p)}
               className={cn(
-                'px-3 py-1.5 rounded-md text-sm font-medium transition-all',
+                'px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all',
                 periodo === p
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted',
               )}
             >
-              {p === 'mensal' ? 'Mensal' : p === 'trimestral' ? 'Trimestral' : 'Anual'}
+              {p === 'mensal' ? 'Mês' : p === 'trimestral' ? 'Trim.' : 'Anual'}
             </button>
           ))}
         </div>

@@ -25,6 +25,20 @@ import { ptBR } from 'date-fns/locale'
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Periodo = 'mensal' | 'trimestral' | 'anual'
 
+/** Filtra chamadas pelo período selecionado usando o campo `data` */
+function filtrarPorPeriodo(
+  chamadas: any[],
+  opts: { periodo: Periodo; mes: number; trimestre: number }
+): any[] {
+  return chamadas.filter((c: any) => {
+    if (!c.data) return opts.periodo === 'anual'
+    const m = parseISO(c.data).getMonth()
+    if (opts.periodo === 'mensal')    return m === opts.mes
+    if (opts.periodo === 'trimestral') return TRIMESTRES[opts.trimestre].meses.includes(m)
+    return true
+  })
+}
+
 type PontoDado = { periodo: string; presentes: number; total: number; pct: number }
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
@@ -78,6 +92,7 @@ export default function DashboardPage() {
       for (let i = 0; i < 12; i++) porMes[i] = { presentes: 0, total: 0 }
 
       for (const c of chamadas) {
+        if (!c.data) continue
         const m = parseISO(c.data).getMonth()
         const ps = c.presencas ?? []
         porMes[m].total += ps.length
@@ -122,22 +137,13 @@ export default function DashboardPage() {
       const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
       if (!turmas?.length) { setDadosPorSala([]); return }
 
-      let dataInicio = `${ano}-01-01`, dataFim = `${ano}-12-31`
-      if (periodo === 'trimestral') {
-        const mi = TRIMESTRES[trimestre].meses[0] + 1, mf = TRIMESTRES[trimestre].meses[2] + 1
-        dataInicio = `${ano}-${String(mi).padStart(2, '0')}-01`
-        dataFim    = `${ano}-${String(mf).padStart(2, '0')}-31`
-      } else if (periodo === 'mensal') {
-        const m = String(mes + 1).padStart(2, '0')
-        dataInicio = `${ano}-${m}-01`; dataFim = `${ano}-${m}-31`
-      }
-
       const resultado = await Promise.all(turmas.map(async (turma: any, idx: number) => {
-        const { data: chamadas } = await db
-          .from('chamadas').select('id, presencas(presente)')
-          .eq('turma_id', turma.id).gte('data', dataInicio).lte('data', dataFim)
+        const { data: chamadasRaw } = await db
+          .from('chamadas').select('id, data, presencas(presente)')
+          .eq('turma_id', turma.id).eq('ano', ano)
+        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
         let total = 0, presentes = 0
-        for (const c of chamadas ?? []) {
+        for (const c of chamadas) {
           const ps = c.presencas ?? []
           total += ps.length
           presentes += ps.filter((p: any) => p.presente).length
@@ -153,7 +159,8 @@ export default function DashboardPage() {
   // Top alunos
   useEffect(() => {
     async function load() {
-      const { data: chamadas } = await db.from('chamadas').select('id, turma_id').eq('ano', ano)
+      const { data: chamadasRaw } = await db.from('chamadas').select('id, turma_id, data').eq('ano', ano)
+      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
       const { data: alunos } = await db.from('alunos').select('id, nome, turma_id, turmas(nome)').eq('ativo', true)
       if (!chamadas?.length || !alunos?.length) { setTopPorSala({}); setTop10([]); return }
 
@@ -189,7 +196,7 @@ export default function DashboardPage() {
       if (!salaSelecionada && Object.keys(topS).length > 0) setSalaSelecionada(Object.keys(topS)[0])
     }
     load()
-  }, [ano])
+  }, [ano, periodo, mes, trimestre])
 
   // Turmas ativas
   useEffect(() => {

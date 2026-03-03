@@ -266,7 +266,7 @@ export default function EscalaPage() {
                 <div className="space-y-1.5">
                   <Label className="text-xs">Trimestre</Label>
                   <Select value={filtroTrim} onValueChange={setFiltroTrim}>
-                    <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-full sm:w-[220px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TRIMESTRES_LABEL.map((t, i) => (
                         <SelectItem key={i + 1} value={String(i + 1)}>{t}</SelectItem>
@@ -280,7 +280,7 @@ export default function EscalaPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Professor</Label>
                 <Select value={filtroProf} onValueChange={setFiltroProf}>
-                  <SelectTrigger className="w-[220px]"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                  <SelectTrigger className="w-full sm:w-[220px]"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                   <SelectContent>
                     {professoresData.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
                   </SelectContent>
@@ -404,7 +404,7 @@ export default function EscalaPage() {
 
       {/* Dialog Nova/Editar Escala */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editMode ? 'Editar Escala' : 'Nova Escala'}</DialogTitle>
             <DialogDescription>
@@ -506,7 +506,7 @@ export default function EscalaPage() {
 
       {/* Dialog Confirmar Exclusão */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Confirmar Exclusão</DialogTitle>
             <DialogDescription>Tem certeza que deseja excluir esta escala? Esta ação não pode ser desfeita.</DialogDescription>

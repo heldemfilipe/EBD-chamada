@@ -396,7 +396,7 @@ export default function ChamadaTurmaPage() {
       const { data: chamada, error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
         .select('id')
@@ -560,7 +560,7 @@ export default function ChamadaTurmaPage() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20 lg:pb-0">
       {/* Header */}
       <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -915,7 +915,7 @@ export default function ChamadaTurmaPage() {
 
       {/* Dialog Adicionar Visitante */}
       <Dialog open={dialogVisitanteOpen} onOpenChange={setDialogVisitanteOpen}>
-        <DialogContent>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Novo Visitante</DialogTitle>
             <DialogDescription>Preencha os dados do visitante</DialogDescription>
@@ -956,6 +956,14 @@ export default function ChamadaTurmaPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Botão salvar sticky — visível apenas no mobile */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t p-4 z-20">
+        <Button className="w-full" size="lg" onClick={handleSalvarChamada} disabled={salvando}>
+          <Save className="h-4 w-4 mr-2" />
+          {salvando ? 'Salvando...' : 'Salvar Chamada'}
+        </Button>
+      </div>
     </div>
   )
 }
