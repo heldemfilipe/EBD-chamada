@@ -28,8 +28,10 @@ import { Plus, Users, GraduationCap, Edit, Trash2, Eye, UserPlus, Loader2 } from
 import { supabase } from '@/lib/supabase'
 import { StatCard } from '@/components/ui/stat-card'
 import { PresenceBar } from '@/components/ui/presence-bar'
+import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { salvarCargo } from '@/lib/utils'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 interface Turma {
@@ -264,13 +266,6 @@ export default function TurmasPage() {
     setEnrollOpen(true)
   }
 
-  // Salva cargo separadamente — ignora silenciosamente se a coluna ainda não existir no banco
-  async function tentarSalvarCargo(tabela: string, id: string, cargo: string) {
-    try {
-      await db.from(tabela).update({ cargo: cargo || null }).eq('id', id)
-    } catch (_) { /* coluna ainda não criada */ }
-  }
-
   async function handleEnrollNovo() {
     if (!enrollForm.nome || !selectedTurma) { toast('Preencha o nome do aluno.', 'error'); return }
     setEnrollLoading(true)
@@ -284,7 +279,7 @@ export default function TurmasPage() {
     }).select('id').single()
     setEnrollLoading(false)
     if (error || !data) { toast('Erro ao matricular aluno.', 'error'); return }
-    if (enrollForm.cargo) await tentarSalvarCargo('alunos', data.id, enrollForm.cargo)
+    if (enrollForm.cargo) await salvarCargo(db, 'alunos', data.id, enrollForm.cargo)
 
     const novoAluno: AlunoDetalhe = {
       id: data.id, nome: enrollForm.nome,
@@ -665,22 +660,12 @@ export default function TurmasPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog: Confirmar Exclusão ────────────────────────────────────────── */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirmar Exclusão</DialogTitle>
-            <DialogDescription>
-              Tem certeza que deseja excluir a turma <strong>{selectedTurma?.nome}</strong>?
-              Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleDeleteTurma}>Excluir</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        description={<>Tem certeza que deseja excluir a turma <strong>{selectedTurma?.nome}</strong>? Esta ação não pode ser desfeita.</>}
+        onConfirm={handleDeleteTurma}
+      />
     </div>
   )
 }

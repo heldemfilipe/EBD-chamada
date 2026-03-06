@@ -17,6 +17,8 @@ import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, A
 import { supabase } from '@/lib/supabase'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { salvarCargo, cn } from '@/lib/utils'
+import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Aluno {
@@ -202,13 +204,6 @@ export default function AlunosPage() {
     setDialogOpen(false); setEditMode(false); setSelected(null); setForm(FORM_VAZIO)
   }
 
-  // Salva cargo separadamente — ignora silenciosamente se a coluna ainda não existir no banco
-  async function tentarSalvarCargo(tabela: string, id: string, cargo: string) {
-    try {
-      await db.from(tabela).update({ cargo: cargo || null }).eq('id', id)
-    } catch (_) { /* coluna ainda não criada */ }
-  }
-
   async function handleSave() {
     if (!form.nome) { toast('Por favor, preencha o nome do aluno.', 'error'); return }
     const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
@@ -223,7 +218,7 @@ export default function AlunosPage() {
     if (editMode && selected) {
       const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
       if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
-      await tentarSalvarCargo('alunos', selected.id, form.cargo)
+      await salvarCargo(db, 'alunos', selected.id, form.cargo)
       setAlunos(alunos.map(a => a.id === selected.id
         ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, isProfessor: false }
         : a))
@@ -231,7 +226,7 @@ export default function AlunosPage() {
     } else {
       const { data, error } = await db.from('alunos').insert(payload).select('id').single()
       if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
-      await tentarSalvarCargo('alunos', data.id, form.cargo)
+      await salvarCargo(db, 'alunos', data.id, form.cargo)
       setAlunos([...alunos, {
         id: data.id, nome: form.nome, idade, turma: turmaNome,
         turmaId: form.turmaId || null, telefone: form.telefone,
@@ -336,6 +331,19 @@ export default function AlunosPage() {
                 </SelectContent>
               </Select>
             )}
+          </div>
+
+          {/* Controles de sort para mobile */}
+          <div className="flex flex-wrap gap-1.5 md:hidden mb-2">
+            <span className="text-xs text-muted-foreground self-center">Ordenar:</span>
+            {(['nome', 'turma', 'presenca'] as const).map(key => (
+              <button key={key} onClick={() => handleSort(key)}
+                className={cn('px-2.5 py-1 rounded text-xs font-medium border transition-all',
+                  sortKey === key ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted text-muted-foreground border-border')}>
+                {key === 'nome' ? 'Nome' : key === 'turma' ? 'Turma' : 'Presença'}
+                {sortKey === key && (sortDir === 'asc' ? ' ↑' : ' ↓')}
+              </button>
+            ))}
           </div>
 
           <div className="rounded-md border overflow-x-auto">
@@ -516,19 +524,12 @@ export default function AlunosPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Confirmar Exclusão */}
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirmar Exclusão</DialogTitle>
-            <DialogDescription>Tem certeza que deseja excluir o aluno <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleDelete}>Excluir</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        description={<>Tem certeza que deseja excluir o aluno <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

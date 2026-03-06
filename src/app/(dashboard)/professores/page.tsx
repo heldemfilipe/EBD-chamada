@@ -13,10 +13,12 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { cn } from '@/lib/utils'
+import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Professor {
@@ -34,6 +36,8 @@ export default function ProfessoresPage() {
   const [professores, setProfessores] = useState<Professor[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<'nome' | 'turmas'>('nome')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -57,11 +61,26 @@ export default function ProfessoresPage() {
     load()
   }, [])
 
-  const filtered = professores.filter(p =>
-    p.nome.toLowerCase().includes(search.toLowerCase()) ||
-    p.especialidade.toLowerCase().includes(search.toLowerCase()) ||
-    p.email.toLowerCase().includes(search.toLowerCase())
-  )
+  function handleSort(key: 'nome' | 'turmas') {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+  function SortIcon({ col }: { col: string }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />
+    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />
+  }
+
+  const filtered = professores
+    .filter(p =>
+      p.nome.toLowerCase().includes(search.toLowerCase()) ||
+      p.especialidade.toLowerCase().includes(search.toLowerCase()) ||
+      p.email.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1
+      if (sortKey === 'turmas') return (a.turmas.length - b.turmas.length) * dir
+      return a.nome.localeCompare(b.nome, 'pt-BR') * dir
+    })
 
   const getTurmasNomes = (ids: string[]) => turmas.filter(t => ids.includes(t.id)).map(t => t.nome)
   const getTurmaNome = (id: string | null) => id ? (turmas.find(t => t.id === id)?.nome ?? '—') : '—'
@@ -91,14 +110,9 @@ export default function ProfessoresPage() {
   }
 
   // Salva cargo no professor e sincroniza com o aluno correspondente (se existir)
-  async function tentarSalvarCargo(profId: string, cargo: string) {
-    try {
-      await db.from('professores').update({ cargo: cargo || null }).eq('id', profId)
-    } catch (_) { /* coluna ainda não criada */ }
-    try {
-      // Atualiza o cargo no registro de aluno vinculado ao professor
-      await db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`)
-    } catch (_) { /* sem aluno vinculado ou coluna não criada */ }
+  async function salvarCargoProf(profId: string, cargo: string) {
+    await db.from('professores').update({ cargo: cargo || null }).eq('id', profId)
+    await db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`)
   }
 
   async function handleSave() {
@@ -110,7 +124,7 @@ export default function ProfessoresPage() {
     if (editMode && selected) {
       const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
       if (error) { toast('Erro ao atualizar professor.', 'error'); return }
-      await tentarSalvarCargo(selected.id, form.cargo)
+      await salvarCargoProf(selected.id, form.cargo)
       await db.from('professor_turmas').delete().eq('professor_id', selected.id)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
       await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
@@ -119,7 +133,7 @@ export default function ProfessoresPage() {
     } else {
       const { data, error } = await db.from('professores').insert({ ...payloadBase, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
       if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
-      await tentarSalvarCargo(data.id, form.cargo)
+      await salvarCargoProf(data.id, form.cargo)
       if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
       await sincronizarAluno(data.id, form.nome, form.turmaAluno)
       setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
@@ -172,13 +186,34 @@ export default function ProfessoresPage() {
             </div>
           </div>
 
+          {/* Controles de sort para mobile */}
+          <div className="flex flex-wrap gap-1.5 sm:hidden mb-2">
+            <span className="text-xs text-muted-foreground self-center">Ordenar:</span>
+            {(['nome', 'turmas'] as const).map(key => (
+              <button key={key} onClick={() => handleSort(key)}
+                className={cn('px-2.5 py-1 rounded text-xs font-medium border transition-all',
+                  sortKey === key ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted text-muted-foreground border-border')}>
+                {key === 'nome' ? 'Nome' : 'Turmas'}
+                {sortKey === key && (sortDir === 'asc' ? ' ↑' : ' ↓')}
+              </button>
+            ))}
+          </div>
+
           <div className="rounded-md border overflow-x-auto">
             <Table className="min-w-[500px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome</TableHead>
+                  <TableHead>
+                    <button onClick={() => handleSort('nome')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      Nome <SortIcon col="nome" />
+                    </button>
+                  </TableHead>
                   <TableHead className="hidden sm:table-cell">Especialidade</TableHead>
-                  <TableHead><div className="flex items-center gap-1"><GraduationCap className="h-3 w-3" />Leciona em</div></TableHead>
+                  <TableHead>
+                    <button onClick={() => handleSort('turmas')} className="flex items-center font-semibold hover:text-foreground transition-colors">
+                      <GraduationCap className="h-3 w-3 mr-1" />Leciona em <SortIcon col="turmas" />
+                    </button>
+                  </TableHead>
                   <TableHead className="hidden md:table-cell"><div className="flex items-center gap-1"><BookOpen className="h-3 w-3" />Aluno em</div></TableHead>
                   <TableHead className="hidden lg:table-cell">Contato</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
@@ -323,19 +358,12 @@ export default function ProfessoresPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Confirmar Exclusão */}
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirmar Exclusão</DialogTitle>
-            <DialogDescription>Tem certeza que deseja excluir o professor <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleDelete}>Excluir</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        description={<>Tem certeza que deseja excluir o professor <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

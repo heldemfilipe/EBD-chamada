@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, MESES, MESES_CURTOS, TRIMESTRES } from '@/lib/constants'
-import { calcularPct, resolverCor, corPresenca, badgePresenca, labelPresenca, rangeDoPeriodo } from '@/lib/presence'
+import { calcularPct, resolverCor, corPresenca, badgePresenca, labelPresenca } from '@/lib/presence'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
@@ -45,6 +45,29 @@ interface ProfessorDesempenho { nome: string; turmas: string[]; aulas: number; p
 
 function dadosVazios() {
   return { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0, total: 0, domingos: 0, pct: 0 }
+}
+
+/** Agrega entradas de múltiplas turmas no mesmo domingo em um único ponto por data */
+function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
+  const map = new Map<string, DadosDomingo>()
+  for (const dd of entries) {
+    const prev = map.get(dd.data)
+    if (!prev) {
+      map.set(dd.data, { ...dd })
+    } else {
+      map.set(dd.data, {
+        ...prev,
+        presentes: prev.presentes + dd.presentes,
+        faltas: prev.faltas + dd.faltas,
+        visitantes: prev.visitantes + dd.visitantes,
+        biblias: prev.biblias + dd.biblias,
+        revistas: prev.revistas + dd.revistas,
+        oferta: prev.oferta + dd.oferta,
+        total: prev.total + dd.total,
+      })
+    }
+  }
+  return [...map.values()]
 }
 
 /** Filtra chamadas pelo período selecionado usando o campo `data` */
@@ -131,7 +154,6 @@ export default function RelatoriosPage() {
   // ── Dados por sala ──
   useEffect(() => {
     async function load() {
-      const { dataInicio, dataFim } = rangeDoPeriodo({ granularidade, ano, mes, trimestre: trim })
       const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
       if (!turmas?.length) { setDadosSala([]); return }
 
@@ -210,32 +232,41 @@ export default function RelatoriosPage() {
         .from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
       if (!profsList?.length) { setProfessores([]); return }
 
+      // Mapa professorId → alunoId (professores que são também alunos na turma)
+      const { data: profAlunos } = await db
+        .from('alunos').select('id, responsavel').like('responsavel', 'professor:%').eq('ativo', true)
+      const profIdToAlunoId = new Map<string, string>()
+      for (const a of profAlunos ?? []) {
+        const pid = (a.responsavel as string).replace('professor:', '')
+        if (pid) profIdToAlunoId.set(pid, a.id)
+      }
+
       const resultado: ProfessorDesempenho[] = await Promise.all(profsList.map(async (prof: any) => {
         const turmaIds = (prof.professor_turmas ?? []).map((pt: any) => pt.turma_id).filter(Boolean)
         const turmasNomes = (prof.professor_turmas ?? []).map((pt: any) => pt.turmas?.nome).filter(Boolean)
 
         if (!turmaIds.length) return { nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 }
 
+        // Chamadas das turmas do professor (para contar aulas ministradas)
         const { data: chamadasRaw } = await db
-          .from('chamadas').select('id, data, presencas(presente, trouxe_biblia)')
-          .in('turma_id', turmaIds).eq('ano', ano)
-
+          .from('chamadas').select('id, data').in('turma_id', turmaIds).eq('ano', ano)
         const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
+        const aulas = chamadas.length
 
-        let totalPresentes = 0, totalAlunos = 0, totalBiblias = 0, aulas = 0
-        for (const c of chamadas) {
-          aulas++
-          const ps = c.presencas ?? []
-          totalAlunos   += ps.length
-          totalPresentes += ps.filter((p: any) => p.presente).length
-          totalBiblias  += ps.filter((p: any) => p.trouxe_biblia).length
+        // Presença pessoal do professor como aluno no período
+        const alunoId = profIdToAlunoId.get(prof.id) ?? null
+        let presMedia = 0, biblias = 0
+        if (alunoId && chamadas.length > 0) {
+          const { data: pPresencas } = await db
+            .from('presencas').select('presente, trouxe_biblia')
+            .eq('aluno_id', alunoId).in('chamada_id', chamadas.map((c: any) => c.id))
+          const presentes = pPresencas?.filter((p: any) => p.presente).length ?? 0
+          const bibCount  = pPresencas?.filter((p: any) => p.trouxe_biblia).length ?? 0
+          presMedia = calcularPct(presentes, aulas)
+          biblias   = presentes > 0 ? calcularPct(bibCount, presentes) : 0
         }
 
-        return {
-          nome: prof.nome, turmas: turmasNomes, aulas,
-          presMedia: calcularPct(totalPresentes, totalAlunos),
-          biblias: totalPresentes > 0 ? calcularPct(totalBiblias, totalPresentes) : 0,
-        }
+        return { nome: prof.nome, turmas: turmasNomes, aulas, presMedia, biblias }
       }))
 
       setProfessores(resultado.sort((a, b) => b.presMedia - a.presMedia))
@@ -244,15 +275,16 @@ export default function RelatoriosPage() {
   }, [ano, mes, trim, granularidade])
 
   // ── Cálculo do resumo do período ──
-  const { dados, grafico, labelPeriodo } = (() => {
-    const domingos = domingosPorMes[mes] ?? []
+  // Agrega entradas de múltiplas turmas no mesmo domingo (1 ponto por data única)
+  const domingosList = agregarPorData(domingosPorMes[mes] ?? [])
 
+  const { dados, grafico, labelPeriodo } = (() => {
     if (granularidade === 'dia') {
-      const d = domingos[domingoIdx] ?? { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0, total: 0 }
+      const d = domingosList[domingoIdx] ?? { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0, total: 0 }
       return {
         dados: { ...d, domingos: 1, pct: calcularPct(d.presentes, d.total) },
-        grafico: domingos.map(dd => ({ periodo: dd.data, presentes: dd.presentes, pct: calcularPct(dd.presentes, dd.total) })),
-        labelPeriodo: domingos[domingoIdx] ? `${domingos[domingoIdx].data}/${ano} — ${MESES[mes]}` : `${MESES[mes]} ${ano}`,
+        grafico: domingosList.map(dd => ({ periodo: dd.data, presentes: dd.presentes, pct: calcularPct(dd.presentes, dd.total) })),
+        labelPeriodo: domingosList[domingoIdx] ? `${domingosList[domingoIdx].data}/${ano} — ${MESES[mes]}` : `${MESES[mes]} ${ano}`,
       }
     }
 
@@ -260,8 +292,8 @@ export default function RelatoriosPage() {
       const d = resumoMensal[mes] ?? dadosVazios()
       return {
         dados: { ...d, pct: calcularPct(d.presentes, d.total) },
-        grafico: domingos.length > 0
-          ? domingos.map(dd => ({ periodo: dd.data, presentes: dd.presentes, pct: calcularPct(dd.presentes, dd.total) }))
+        grafico: domingosList.length > 0
+          ? domingosList.map(dd => ({ periodo: dd.data, presentes: dd.presentes, pct: calcularPct(dd.presentes, dd.total) }))
           : [{ periodo: MESES_CURTOS[mes], presentes: d.presentes, pct: calcularPct(d.presentes, d.total) }],
         labelPeriodo: `${MESES[mes]} de ${ano}`,
       }
@@ -297,7 +329,6 @@ export default function RelatoriosPage() {
   })()
 
   const anoIdx = ANOS_DISPONIVEIS.indexOf(ano)
-  const domingosList = domingosPorMes[mes] ?? []
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -414,7 +445,7 @@ export default function RelatoriosPage() {
           <CardDescription>{labelPeriodo}</CardDescription>
         </CardHeader>
         <CardContent>
-          {grafico.every(g => g.presentes === 0) ? (
+          {grafico.length === 0 ? (
             <EmptyState message="Sem dados para o período selecionado" minHeight="h-[230px]" />
           ) : (
             <ResponsiveContainer width="100%" height={230}>
@@ -615,7 +646,7 @@ export default function RelatoriosPage() {
           <CardTitle className="text-base flex items-center gap-2">
             <Star className="h-4 w-4 text-orange-500" />Desempenho dos Professores
           </CardTitle>
-          <CardDescription>Aulas ministradas, presença média e engajamento das turmas</CardDescription>
+          <CardDescription>Aulas ministradas e presença pessoal de cada professor no período</CardDescription>
         </CardHeader>
         <CardContent>
           {professores.length === 0 ? (
