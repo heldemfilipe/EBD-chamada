@@ -120,6 +120,8 @@ export default function ChamadaTurmaPage() {
   const [dialogVisitanteOpen, setDialogVisitanteOpen] = useState(false)
   const [novoVisitante, setNovoVisitante] = useState({ nome: '', telefone: '', observacao: '' })
   const [salvando, setSalvando] = useState(false)
+  const [qtdBiblias, setQtdBiblias] = useState<string>('')
+  const [qtdRevistas, setQtdRevistas] = useState<string>('')
 
   // ── Busca inicial ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -305,6 +307,30 @@ export default function ChamadaTurmaPage() {
   const handleJustificativaChange = (alunoId: string, justificativa: string) =>
     setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, justificativa } : a))
 
+  const handleMarcarTodosBiblia = () =>
+    setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_biblia: true } : a))
+
+  const handleMarcarTodosRevista = () =>
+    setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_revista: true } : a))
+
+  const handleAplicarQuantidades = () => {
+    const nBiblia = qtdBiblias !== '' ? Math.max(0, parseInt(qtdBiblias) || 0) : null
+    const nRevista = qtdRevistas !== '' ? Math.max(0, parseInt(qtdRevistas) || 0) : null
+    if (nBiblia === null && nRevista === null) return
+    const presentes = alunos.filter(a => a.presente === 'presente')
+    setAlunos(alunos.map(a => {
+      if (a.presente !== 'presente') return a
+      const idx = presentes.findIndex(p => p.aluno_id === a.aluno_id)
+      return {
+        ...a,
+        trouxe_biblia: nBiblia !== null ? idx < nBiblia : a.trouxe_biblia,
+        trouxe_revista: nRevista !== null ? idx < nRevista : a.trouxe_revista,
+      }
+    }))
+    setQtdBiblias('')
+    setQtdRevistas('')
+  }
+
   // ── Handlers Visitantes ──────────────────────────────────────────────────────
 
   const handleMarcarPresencaVisitante = (visitanteId: string, status: 'presente' | 'ausente') => {
@@ -396,7 +422,7 @@ export default function ChamadaTurmaPage() {
       const { data: chamada, error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
         .select('id')
@@ -584,9 +610,52 @@ export default function ChamadaTurmaPage() {
 
           {/* Lista de Alunos */}
           <Card>
-            <CardHeader>
-              <CardTitle>Lista de Presença</CardTitle>
-              <CardDescription>Marque a presença de cada aluno</CardDescription>
+            <CardHeader className="space-y-3">
+              <div>
+                <CardTitle>Lista de Presença</CardTitle>
+                <CardDescription>Marque a presença de cada aluno</CardDescription>
+              </div>
+              {alunos.some(a => a.presente === 'presente') && (
+                <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg text-sm">
+                  <span className="text-xs font-medium text-muted-foreground shrink-0">Preencher rápido:</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Book className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        className="h-7 w-14 text-center text-sm px-1"
+                        placeholder="Qtd"
+                        min={0}
+                        max={resumo.presentes}
+                        value={qtdBiblias}
+                        onChange={e => setQtdBiblias(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        className="h-7 w-14 text-center text-sm px-1"
+                        placeholder="Qtd"
+                        min={0}
+                        max={resumo.presentes}
+                        value={qtdRevistas}
+                        onChange={e => setQtdRevistas(e.target.value)}
+                      />
+                    </div>
+                    <Button size="sm" className="h-7 px-3 text-xs" onClick={handleAplicarQuantidades}>
+                      Aplicar
+                    </Button>
+                    <span className="text-muted-foreground text-xs">ou todos:</span>
+                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={handleMarcarTodosBiblia}>
+                      <Book className="h-3 w-3 mr-1" /> Bíblia
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={handleMarcarTodosRevista}>
+                      <BookOpen className="h-3 w-3 mr-1" /> Revista
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               {alunos.length === 0 ? (
