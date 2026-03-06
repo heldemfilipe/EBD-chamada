@@ -82,54 +82,42 @@ export default function DashboardPage() {
     load()
   }, [])
 
-  // Gráfico anual
+  // Gráfico anual + domingos — uma única query por ano, filtragem por mês client-side
   useEffect(() => {
     async function load() {
       const { data: chamadas } = await db.from('chamadas').select('id, data, presencas(presente)').eq('ano', ano)
-      if (!chamadas?.length) { setDadosAnual([]); return }
+      if (!chamadas?.length) {
+        setDadosAnual([])
+        setDadosDomingos(prev => ({ ...prev, [ano]: {} }))
+        return
+      }
 
       const porMes: Record<number, { presentes: number; total: number }> = {}
+      const porMesDomingos: Record<number, PontoDado[]> = {}
       for (let i = 0; i < 12; i++) porMes[i] = { presentes: 0, total: 0 }
 
       for (const c of chamadas) {
         if (!c.data) continue
         const m = parseISO(c.data).getMonth()
         const ps = c.presencas ?? []
+        const presentes = ps.filter((p: any) => p.presente).length
         porMes[m].total += ps.length
-        porMes[m].presentes += ps.filter((p: any) => p.presente).length
+        porMes[m].presentes += presentes
+        if (!porMesDomingos[m]) porMesDomingos[m] = []
+        porMesDomingos[m].push({
+          periodo: format(parseISO(c.data), 'dd/MM', { locale: ptBR }),
+          presentes, total: ps.length, pct: calcularPct(presentes, ps.length),
+        })
       }
 
       setDadosAnual(MESES_CURTOS.map((label, i) => ({
-        periodo: label,
-        presentes: porMes[i].presentes,
-        total: porMes[i].total,
+        periodo: label, presentes: porMes[i].presentes, total: porMes[i].total,
         pct: calcularPct(porMes[i].presentes, porMes[i].total),
       })))
+      setDadosDomingos(prev => ({ ...prev, [ano]: porMesDomingos }))
     }
     load()
   }, [ano])
-
-  // Gráfico domingos do mês
-  useEffect(() => {
-    async function load() {
-      const m = String(mes + 1).padStart(2, '0')
-      const { data: chamadas } = await db
-        .from('chamadas')
-        .select('id, data, presencas(presente)')
-        .eq('ano', ano)
-        .gte('data', `${ano}-${m}-01`)
-        .lte('data', `${ano}-${m}-31`)
-
-      const dados: PontoDado[] = chamadas?.map((c: any) => {
-        const ps = c.presencas ?? []
-        const presentes = ps.filter((p: any) => p.presente).length
-        return { periodo: format(parseISO(c.data), 'dd/MM', { locale: ptBR }), presentes, total: ps.length, pct: calcularPct(presentes, ps.length) }
-      }) ?? []
-
-      setDadosDomingos(prev => ({ ...prev, [ano]: { ...(prev[ano] ?? {}), [mes]: dados } }))
-    }
-    load()
-  }, [ano, mes])
 
   // Presença por sala
   useEffect(() => {
