@@ -232,13 +232,13 @@ export default function RelatoriosPage() {
         .from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
       if (!profsList?.length) { setProfessores([]); return }
 
-      // Mapa professorId → alunoId (professores que são também alunos na turma)
+      // Mapa professorId → { alunoId, turmaId } (professores que são também alunos)
       const { data: profAlunos } = await db
-        .from('alunos').select('id, responsavel').like('responsavel', 'professor:%').eq('ativo', true)
-      const profIdToAlunoId = new Map<string, string>()
+        .from('alunos').select('id, responsavel, turma_id').like('responsavel', 'professor:%').eq('ativo', true)
+      const profIdToAluno = new Map<string, { alunoId: string; turmaId: string | null }>()
       for (const a of profAlunos ?? []) {
         const pid = (a.responsavel as string).replace('professor:', '')
-        if (pid) profIdToAlunoId.set(pid, a.id)
+        if (pid) profIdToAluno.set(pid, { alunoId: a.id, turmaId: a.turma_id ?? null })
       }
 
       const resultado: ProfessorDesempenho[] = await Promise.all(profsList.map(async (prof: any) => {
@@ -247,23 +247,28 @@ export default function RelatoriosPage() {
 
         if (!turmaIds.length) return { nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 }
 
-        // Chamadas das turmas do professor (para contar aulas ministradas)
+        // Chamadas das turmas que o professor leciona (para contar aulas ministradas)
         const { data: chamadasRaw } = await db
           .from('chamadas').select('id, data').in('turma_id', turmaIds).eq('ano', ano)
         const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
         const aulas = chamadas.length
 
-        // Presença pessoal do professor como aluno no período
-        const alunoId = profIdToAlunoId.get(prof.id) ?? null
+        // Presença pessoal: chamadas da turma onde o professor É ALUNO (pode ser diferente das que leciona)
+        const alunoInfo = profIdToAluno.get(prof.id) ?? null
         let presMedia = 0, biblias = 0
-        if (alunoId && chamadas.length > 0) {
-          const { data: pPresencas } = await db
-            .from('presencas').select('presente, trouxe_biblia')
-            .eq('aluno_id', alunoId).in('chamada_id', chamadas.map((c: any) => c.id))
-          const presentes = pPresencas?.filter((p: any) => p.presente).length ?? 0
-          const bibCount  = pPresencas?.filter((p: any) => p.trouxe_biblia).length ?? 0
-          presMedia = calcularPct(presentes, aulas)
-          biblias   = presentes > 0 ? calcularPct(bibCount, presentes) : 0
+        if (alunoInfo?.turmaId) {
+          const { data: alunoChRaw } = await db
+            .from('chamadas').select('id, data').eq('turma_id', alunoInfo.turmaId).eq('ano', ano)
+          const alunoChFilt = filtrarPorPeriodo(alunoChRaw ?? [], { granularidade, mes, trim })
+          if (alunoChFilt.length > 0) {
+            const { data: pPresencas } = await db
+              .from('presencas').select('presente, trouxe_biblia')
+              .eq('aluno_id', alunoInfo.alunoId).in('chamada_id', alunoChFilt.map((c: any) => c.id))
+            const presentes = pPresencas?.filter((p: any) => p.presente).length ?? 0
+            const bibCount  = pPresencas?.filter((p: any) => p.trouxe_biblia).length ?? 0
+            presMedia = calcularPct(presentes, alunoChFilt.length)
+            biblias   = presentes > 0 ? calcularPct(bibCount, presentes) : 0
+          }
         }
 
         return { nome: prof.nome, turmas: turmasNomes, aulas, presMedia, biblias }
