@@ -2,7 +2,7 @@
 
 # EBD — Sistema de Gestão de Escola Bíblica Dominical
 
-Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, alunos, professores, turmas, escala e relatórios.
+Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, alunos, professores, turmas, escala e relatórios. Desenvolvido com foco em **mobile-first** — funciona plenamente em celulares sem scroll horizontal.
 
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue?logo=typescript)](https://www.typescriptlang.org/)
@@ -43,13 +43,13 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 
 | Módulo | Descrição |
 |---|---|
-| **Dashboard** | Visão geral com KPIs, gráficos de presença anuais/trimestrais/mensais e atividades recentes |
-| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes |
-| **Alunos** | CRUD completo com histórico de frequência e distribuição por faixas etárias |
-| **Professores** | Cadastro e vínculo com turmas; sincronização automática como aluno quando necessário |
+| **Dashboard** | KPIs compactos (mobile 2×2 / desktop 4 cards), gráfico de evolução de presença, presença por sala, top 10 alunos com badge de cargo eclesiástico, destaques por turma e histórico recente com tempo relativo (chamadas + visitantes) |
+| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes; resumo geral compacto no mobile |
+| **Alunos** | CRUD completo com histórico de frequência; lista mobile em cards com presença, turma, idade e contato |
+| **Professores** | Cadastro e vínculo com turmas; sincronização automática como aluno; lista mobile em cards com cargo, turmas e contato |
 | **Turmas** | Criação e gerenciamento de salas com faixas etárias (Cordeirinhos → Adultos) |
 | **Escala** | Planejamento de professores por domingo |
-| **Relatórios** | Estatísticas por dia, mês, trimestre e ano com gráficos e exportação |
+| **Relatórios** | Estatísticas por dia, mês, trimestre e ano; gráficos e tabelas com versão mobile em cards para Presença por Sala, Top 10 e Desempenho dos Professores |
 | **Usuários** *(admin)* | Cadastro de colaboradores com controle granular de permissões por módulo e por turma |
 
 ### Faixas Etárias
@@ -75,6 +75,7 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 | **Autenticação** | `@supabase/auth-helpers-nextjs` — sessão persistida em cookies |
 | **Formulários** | [React Hook Form](https://react-hook-form.com/) + [Zod](https://zod.dev/) |
 | **Gráficos** | [Recharts 2](https://recharts.org/) |
+| **Datas** | [date-fns](https://date-fns.org/) com locale `pt-BR` |
 | **Ícones** | [Lucide React](https://lucide.dev/) |
 | **Deploy** | [Vercel](https://vercel.com/) |
 
@@ -94,8 +95,8 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/seu-usuario/ebd-chamada.git
-cd ebd-chamada
+git clone https://github.com/heldemfilipe/EBD-chamada.git
+cd EBD-chamada
 ```
 
 ### 2. Instale as dependências
@@ -233,6 +234,16 @@ auth.users  (Supabase Auth)
         └─< permissoes_turmas    # turmas acessíveis por colaborador
 ```
 
+### Campos relevantes
+
+| Tabela | Campo | Observação |
+|---|---|---|
+| `chamadas` | `ano` (int) | Filtro principal — use `.eq('ano', ano)` em vez de range de datas |
+| `chamadas` | `data` (date) | Data do domingo; pode ser nulo em registros antigos |
+| `chamadas` | `oferta` | Armazenado em centavos (int); formatar com `toLocaleString('pt-BR')` |
+| `presencas` | `presente`, `trouxe_biblia`, `trouxe_revista` | Booleanos por aluno por chamada |
+| `alunos` | `responsavel` | `professor:<uuid>` indica aluno sincronizado de professor |
+
 ---
 
 ## Estrutura do Projeto
@@ -241,15 +252,15 @@ auth.users  (Supabase Auth)
 src/
 ├── app/
 │   ├── (dashboard)/
-│   │   ├── dashboard/page.tsx          # KPIs + gráficos de presença
+│   │   ├── dashboard/page.tsx          # KPIs + gráficos + histórico recente + tempo relativo
 │   │   ├── chamada/
-│   │   │   ├── page.tsx                # Seletor de domingo + resumo por turma
+│   │   │   ├── page.tsx                # Seletor de domingo + resumo compacto mobile por turma
 │   │   │   └── [turmaId]/page.tsx      # Registro de presença da turma
-│   │   ├── alunos/page.tsx             # CRUD de alunos
-│   │   ├── professores/page.tsx        # CRUD de professores
+│   │   ├── alunos/page.tsx             # CRUD + lista mobile em cards
+│   │   ├── professores/page.tsx        # CRUD + lista mobile em cards + stats 2×2 mobile
 │   │   ├── turmas/page.tsx             # CRUD de turmas
 │   │   ├── escala/page.tsx             # Planejamento de escala
-│   │   ├── relatorios/page.tsx         # Relatórios com gráficos
+│   │   ├── relatorios/page.tsx         # Relatórios com gráficos + cards mobile por seção
 │   │   └── usuarios/page.tsx           # Gestão de usuários (admin)
 │   ├── api/
 │   │   └── usuarios/route.ts           # CRUD de usuários via service role
@@ -262,6 +273,7 @@ src/
 │   │   ├── empty-state.tsx             # Estado vazio padronizado
 │   │   ├── period-selector.tsx         # Seletor de período (mensal/trimestral/anual)
 │   │   ├── chart-tooltip.tsx           # Tooltip reutilizável para Recharts
+│   │   ├── delete-confirm-dialog.tsx   # Dialog de confirmação de exclusão (reutilizável)
 │   │   └── ...                         # shadcn/ui components (button, dialog, etc.)
 │   ├── layout/
 │   │   └── Sidebar.tsx                 # Menu lateral filtrado por permissões + logout
@@ -269,10 +281,11 @@ src/
 ├── contexts/
 │   └── AuthContext.tsx                 # Sessão, perfil e permissões do usuário
 ├── lib/
-│   ├── constants.ts                    # Constantes globais (anos, meses, trimestres, cores)
+│   ├── constants.ts                    # Constantes globais (anos, meses, trimestres, cores, cargos)
 │   ├── presence.ts                     # Utilitários de presença (calcularPct, corPresenca, etc.)
 │   ├── supabase.ts                     # Cliente Supabase (cookie-based SSR)
 │   ├── logger.ts                       # Logger dual-mode (terminal colorido / JSON Vercel)
+│   ├── utils.ts                        # Utilitários gerais (cn, salvarCargo, etc.)
 │   └── chamada-utils.ts                # Utilitários de data para chamada
 └── middleware.ts                       # Proteção de rotas no edge
 
@@ -343,35 +356,44 @@ As permissões granulares por módulo e turma são verificadas:
 
 ## Responsividade Mobile
 
-Todas as telas foram auditadas e ajustadas para funcionar corretamente em celulares de qualquer tamanho (a partir de 320px de largura). Os breakpoints do Tailwind CSS utilizados são: `sm` (≥640px), `md` (≥768px) e `lg` (≥1024px).
+Todas as telas foram projetadas **mobile-first** e funcionam corretamente em celulares a partir de 320px de largura. A estratégia principal é exibir **cards compactos** no mobile e **tabelas/grids** no desktop, sem scroll horizontal em nenhuma tela.
 
-### Correções aplicadas
+Os breakpoints Tailwind utilizados são: `sm` (≥640px), `md` (≥768px) e `lg` (≥1024px).
+
+### Padrão de layout por módulo
+
+| Módulo | Mobile (`< sm`) | Desktop (`≥ sm`) |
+|---|---|---|
+| **Dashboard** | Stats 2×2 compacto + histórico com tempo relativo | 4 StatCards lado a lado |
+| **Chamada** | Card compacto por turma + resumo geral compacto | StatCards completos |
+| **Alunos** | Lista de cards (nome, presença, turma, contato) | Tabela com colunas responsivas |
+| **Professores** | Stats 2×2 + lista de cards (turmas, cargo, contato) | StatCards + tabela |
+| **Relatórios — Presença por Sala** | Cards com barra + grid 4-cols (Pres/Faltas/Visit/Mat) + grid 3-cols (Bíblias/Revistas/Oferta) | Tabela com colunas responsive |
+| **Relatórios — Top 10** | Lista compacta (rank, nome, sala, %) | Tabela |
+| **Relatórios — Desempenho Professores** | Cards com turmas badges + grid 3-cols (Aulas/Presença/Bíblias) + badge avaliação | Tabela |
+
+### Histórico de correções mobile
 
 | Área | Problema | Solução |
 |---|---|---|
 | **Layout geral** | Botão hambúrguer sobrepunha o conteúdo no mobile | Adicionado `pt-16` no `<main>` para mobile (`DashboardLayout.tsx`) |
-| **Tabelas** | `overflow-hidden` causava corte de colunas em telas pequenas | Substituído por `overflow-x-auto` + `min-w-[Xpx]` em todas as tabelas |
-| **Grids de KPIs** | `md:grid-cols-2 lg:grid-cols-4` sem classe padrão causava overflow | Adicionado `sm:grid-cols-2` como passo intermediário |
-| **Dashboard** | `col-span-4` / `col-span-3` dentro de `md:grid-cols-2 lg:grid-cols-7` transbordava no breakpoint `md` | Removido `md:grid-cols-2`, col-spans limitados a `lg:col-span-N` |
+| **Tabelas** | `overflow-hidden` causava corte de colunas em telas pequenas | Substituído por `overflow-x-auto` + `min-w-[Xpx]`; adicionados cards `sm:hidden` como alternativa |
+| **Grids de KPIs** | `md:grid-cols-2 lg:grid-cols-4` sem classe padrão causava overflow | Adicionado card 2×2 compacto `sm:hidden`; grid desktop em `hidden sm:grid` |
+| **Dashboard** | `col-span-4` / `col-span-3` transbordava no breakpoint `md` | Removido `md:grid-cols-2`, col-spans limitados a `lg:col-span-N` |
+| **Dashboard — BarChart** | Labels de sala longas se sobrepunham no mobile | Adicionado `tickFormatter` no `XAxis` para remover prefixos e truncar em 12 chars |
+| **Dashboard — Histórico** | Sem informação de quando o registro foi feito | Adicionado `tempoRelativo()` com `created_at` ("Hoje às 14:30", "Ontem às 09:15", "Há 3 dias") |
+| **Dashboard — Top 10** | Alunos-professores indistinguíveis | Adicionado badge "Prof" (azul) e pill de cargo eclesiástico inline com o nome |
 | **Chamada** | Botões "Presente / Ausente" saíam da tela em celulares estreitos | Adicionado `flex-wrap` no container dos botões |
-| **Chamada** | Margem `ml-11` fixa em checkboxes de bíblia/revista causava overflow | Substituído por `ml-8 sm:ml-11` |
-| **Chamada** | Cabeçalho com título + botão "Salvar" não cabia em uma linha | Adicionado `flex-wrap items-start sm:items-center` |
+| **Chamada — Resumo** | Nenhuma visão compacta no mobile para o resumo geral | Adicionado card `sm:hidden` com presença bar + grid 2-linhas × 4 colunas |
+| **Alunos** | Todas as colunas visíveis no mobile causavam scroll horizontal | Adicionada lista `md:hidden` de cards com todas as informações; tabela em `hidden md:block` |
+| **Professores** | Tabela com scroll horizontal no mobile sem alternativa | Adicionados stats 2×2 `sm:hidden` e lista de cards `sm:hidden`; tabela em `hidden sm:block` |
+| **Relatórios — Evolução** | Datas repetidas no eixo X (múltiplas turmas por domingo) | Agrupamento por data única via `agregarPorData()` antes de renderizar o gráfico |
+| **Relatórios — Desempenho** | Presença do professor mostrava dados dos alunos da turma | Corrigido para buscar presença pessoal do professor como aluno (`profIdToAluno` map) |
 | **Títulos** | `text-3xl` em todas as páginas era grande demais no mobile | Padronizado para `text-2xl sm:text-3xl` em todas as páginas |
 | **Stat-card** | Valor `text-2xl font-bold` comprimia em cards pequenos | Ajustado para `text-xl sm:text-2xl font-bold` |
 | **Escala** | Cabeçalho de data com professor transbordava em mobile | Adicionado `flex-wrap gap-2` no grupo de data |
 | **Relatórios** | Botões de exportar lado a lado saíam da tela | Adicionado `flex-wrap` no container dos botões |
-| **Alunos** | Colunas Idade, Contato e Presença desnecessárias no mobile | Ocultadas com `hidden sm:table-cell` / `hidden md:table-cell` |
-
-### Breakpoints de exibição de colunas (tabela Alunos)
-
-| Coluna | Mobile (< 640px) | Tablet (≥ 640px) | Desktop (≥ 768px) |
-|---|---|---|---|
-| Nome | ✔ | ✔ | ✔ |
-| Turma | ✔ | ✔ | ✔ |
-| Idade | ✘ | ✔ | ✔ |
-| Contato | ✘ | ✘ | ✔ |
-| Presença | ✘ | ✘ | ✔ |
-| Ações | ✔ | ✔ | ✔ |
+| **Delete dialogs** | Código do dialog de confirmação duplicado em 3 páginas | Extraído para `DeleteConfirmDialog` reutilizável |
 
 ---
 
