@@ -19,8 +19,23 @@ import {
 import { supabase } from '@/lib/supabase'
 import { MESES_CURTOS, TRIMESTRES, getCargo } from '@/lib/constants'
 import { calcularPct, resolverCor } from '@/lib/presence'
-import { format, parseISO } from 'date-fns'
+import { format, parseISO, isToday, isYesterday, differenceInCalendarDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Retorna tempo relativo de modificação: "Hoje às 14:30", "Ontem às 09:15", "Há 3 dias", "dd/MM/yyyy" */
+function tempoRelativo(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    if (isToday(d))     return `Hoje às ${format(d, 'HH:mm')}`
+    if (isYesterday(d)) return `Ontem às ${format(d, 'HH:mm')}`
+    const dias = differenceInCalendarDays(new Date(), d)
+    if (dias < 7) return `Há ${dias} dias`
+    return format(d, 'dd/MM/yyyy', { locale: ptBR })
+  } catch { return '—' }
+}
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Periodo = 'mensal' | 'trimestral' | 'anual'
@@ -60,8 +75,12 @@ export default function DashboardPage() {
     cargo: string; isProfessor: boolean;
   }[]>([])
   const [turmasAtivas, setTurmasAtivas] = useState<{ id: string; turma: string; professor: string; alunos: number }[]>([])
-  const [chamadasRecentes, setChamadasRecentes] = useState<{ id: string; description: string; time: string }[]>([])
-  const [visitantesRecentes, setVisitantesRecentes] = useState<{ id: string; nome: string; turma: string; data: string }[]>([])
+  const [chamadasRecentes, setChamadasRecentes] = useState<{
+    id: string; description: string; ebdDate: string; modificadoEm: string
+  }[]>([])
+  const [visitantesRecentes, setVisitantesRecentes] = useState<{
+    id: string; nome: string; turma: string; ebdDate: string; modificadoEm: string
+  }[]>([])
 
   // Stats gerais
   useEffect(() => {
@@ -203,37 +222,43 @@ export default function DashboardPage() {
     load()
   }, [])
 
-  // Chamadas recentes
+  // Chamadas recentes — ordena por created_at (quando foi registrada), fallback para data
   useEffect(() => {
     async function load() {
-      const { data: chamadas } = await db.from('chamadas').select('id, data, turmas(nome), presencas(presente)').order('data', { ascending: false }).limit(5)
+      const { data: chamadas } = await db
+        .from('chamadas')
+        .select('id, data, created_at, turmas(nome), presencas(presente)')
+        .order('created_at', { ascending: false })
+        .limit(5)
       setChamadasRecentes((chamadas ?? []).map((c: any) => {
         const presentes = (c.presencas ?? []).filter((p: any) => p.presente).length
         const total = (c.presencas ?? []).length
         return {
           id: c.id,
           description: `${c.turmas?.nome ?? 'Turma'} — ${presentes}/${total} presentes`,
-          time: c.data ? format(parseISO(c.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
+          ebdDate: c.data ? format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR }) : '—',
+          modificadoEm: tempoRelativo(c.created_at ?? c.data),
         }
       }))
     }
     load()
   }, [])
 
-  // Visitantes recentes
+  // Visitantes recentes — ordena por created_at
   useEffect(() => {
     async function load() {
       const { data } = await db
         .from('historico_visitantes')
-        .select('id, data, presente, visitantes(nome), turmas(nome)')
+        .select('id, data, created_at, presente, visitantes(nome), turmas(nome)')
         .eq('presente', true)
-        .order('data', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(8)
       setVisitantesRecentes((data ?? []).map((v: any) => ({
         id: v.id,
         nome: v.visitantes?.nome ?? 'Visitante',
         turma: v.turmas?.nome ?? '—',
-        data: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
+        ebdDate: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
+        modificadoEm: tempoRelativo(v.created_at ?? v.data),
       })))
     }
     load()
@@ -540,7 +565,12 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium leading-none">{c.description}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{c.time}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        <span className="font-medium text-foreground/70">{c.modificadoEm}</span>
+                        {c.ebdDate !== '—' && (
+                          <span className="ml-1 text-muted-foreground/60">· EBD {c.ebdDate}</span>
+                        )}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -554,7 +584,10 @@ export default function DashboardPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium leading-none">{v.nome}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{v.turma} · {v.data}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            <span className="font-medium text-foreground/70">{v.modificadoEm}</span>
+                            <span className="ml-1 text-muted-foreground/60">· {v.turma}</span>
+                          </p>
                         </div>
                       </div>
                     ))}
