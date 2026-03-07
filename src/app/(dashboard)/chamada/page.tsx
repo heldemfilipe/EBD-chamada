@@ -270,7 +270,69 @@ export default function ChamadaPage() {
       {/* Resumo Geral do Dia */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Resumo Geral do Dia</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+
+        {/* Mobile: card compacto estilo resumo por sala */}
+        <div className="sm:hidden rounded-xl border bg-card overflow-hidden">
+          <div className="px-4 pt-3 pb-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>Presença geral</span>
+              <span className="font-semibold text-foreground">{presencaPct}%</span>
+            </div>
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${presencaPct >= 75 ? 'bg-green-500' : presencaPct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                style={{ width: `${presencaPct}%` }}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-0 border-t">
+            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
+              <Users className="h-4 w-4 text-muted-foreground mb-1" />
+              <span className="text-lg font-bold">{resumoDia.total_matriculados}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
+              <CheckCircle2 className="h-4 w-4 text-primary mb-1" />
+              <span className="text-lg font-bold text-primary">{resumoDia.total_presentes + resumoDia.total_visitantes}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
+              <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
+              <span className="text-lg font-bold text-green-600">{resumoDia.total_presentes}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Presentes</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-3 px-1">
+              <XCircle className="h-4 w-4 text-red-500 mb-1" />
+              <span className="text-lg font-bold text-red-600">{resumoDia.total_faltas}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Faltas</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
+            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+              <UserPlus className="h-3.5 w-3.5 text-blue-500 mb-0.5" />
+              <span className="text-sm font-semibold text-blue-600">{resumoDia.total_visitantes}</span>
+              <span className="text-[9px] text-muted-foreground">Visitantes</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+              <Book className="h-3.5 w-3.5 text-purple-500 mb-0.5" />
+              <span className="text-sm font-semibold text-purple-600">{resumoDia.total_biblias}</span>
+              <span className="text-[9px] text-muted-foreground">Bíblias</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+              <BookOpen className="h-3.5 w-3.5 text-orange-500 mb-0.5" />
+              <span className="text-sm font-semibold text-orange-600">{resumoDia.total_revistas}</span>
+              <span className="text-[9px] text-muted-foreground">Revistas</span>
+            </div>
+            <div className="flex flex-col items-center justify-center py-2 px-1">
+              <DollarSign className="h-3.5 w-3.5 text-green-500 mb-0.5" />
+              <span className="text-sm font-semibold text-green-600">{resumoDia.total_oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-[9px] text-muted-foreground">Oferta R$</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop: grid de StatCards */}
+        <div className="hidden sm:grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users}         description="Todas as turmas" />
           <StatCard title="Total Ausentes"     value={resumoDia.total_faltas}       icon={XCircle}       description="Ausências"               valueClassName="text-red-600" />
           <StatCard title="Total Presentes"    value={resumoDia.total_presentes}    icon={CheckCircle2}  description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
