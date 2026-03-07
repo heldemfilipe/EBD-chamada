@@ -208,12 +208,13 @@ export default function ChamadaPage() {
         <h2 className="text-xl font-semibold mb-4">Resumo Geral do Dia</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users} description="Todas as turmas" />
+          <StatCard title="Total no Dia" value={resumoDia.total_presentes + resumoDia.total_visitantes} icon={CheckCircle2} description="Presentes + visitantes" valueClassName="text-primary" />
           <StatCard title="Total Presentes" value={resumoDia.total_presentes} icon={CheckCircle2} description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
           <StatCard title="Total Faltas"    value={resumoDia.total_faltas}    icon={XCircle}     description="Ausências"        valueClassName="text-red-600" />
           <StatCard title="Total Visitantes" value={resumoDia.total_visitantes} icon={UserPlus}  description="Novos visitantes"  valueClassName="text-blue-600" />
           <StatCard title="Total Bíblias"   value={resumoDia.total_biblias}   icon={Book}        description="Trouxeram bíblia"  valueClassName="text-purple-600" />
           <StatCard title="Total Revistas"  value={resumoDia.total_revistas}  icon={BookOpen}    description="Trouxeram revista" valueClassName="text-orange-600" />
-          <StatCard title="Total Oferta" value={`R$ ${resumoDia.total_oferta.toFixed(2)}`} icon={DollarSign} description="Arrecadado no dia" valueClassName="text-green-600" className="md:col-span-2" />
+          <StatCard title="Total Oferta" value={`R$ ${resumoDia.total_oferta.toFixed(2)}`} icon={DollarSign} description="Arrecadado no dia" valueClassName="text-green-600" />
         </div>
       </div>
 
@@ -256,11 +257,16 @@ export default function ChamadaPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-0 border-t">
+                <div className="grid grid-cols-4 gap-0 border-t">
                   <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
                     <Users className="h-4 w-4 text-muted-foreground mb-1" />
                     <span className="text-lg font-bold">{turma.totalAlunos}</span>
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
+                    <CheckCircle2 className="h-4 w-4 text-primary mb-1" />
+                    <span className="text-lg font-bold text-primary">{resumo.presentes + resumo.visitantes}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
                     <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
