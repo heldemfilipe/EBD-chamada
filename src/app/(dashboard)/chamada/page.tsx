@@ -9,6 +9,7 @@ import { StatCard } from '@/components/ui/stat-card'
 import {
   Users, CheckCircle2, XCircle, UserPlus, Book, BookOpen, DollarSign,
   CalendarDays, ChevronRight, ChevronLeft, ClipboardList,
+  Sun, CloudSun, Cloud, CloudDrizzle, CloudRain, CloudLightning, Zap, Thermometer,
 } from 'lucide-react'
 import { getDomingoAtual, getProximoDomingo, formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
@@ -25,8 +26,22 @@ interface ResumoTurma {
   presentes: number; faltas: number; visitantes: number; biblias: number; revistas: number; oferta: number
 }
 
+const getSalaNum = (sala: string) => parseInt(sala.match(/\d+/)?.[0] ?? '0') || 0
+
 const STORAGE_KEY_DATA   = 'ebd-chamada-data'
 const STORAGE_KEY_OFFSET = 'ebd-chamada-offset'
+const STORAGE_KEY_TEMPO  = (data: string) => `ebd-tempo-${data}`
+
+const TEMPO_OPTIONS = [
+  { value: 'ensolarado', label: 'Ensolarado', Icon: Sun,            cor: 'text-yellow-500' },
+  { value: 'bom',        label: 'Bom',        Icon: CloudSun,       cor: 'text-blue-400'   },
+  { value: 'nublado',    label: 'Nublado',    Icon: Cloud,          cor: 'text-slate-400'  },
+  { value: 'garoa',      label: 'Garoa',      Icon: CloudDrizzle,   cor: 'text-sky-400'    },
+  { value: 'chuvoso',    label: 'Chuvoso',    Icon: CloudRain,      cor: 'text-blue-600'   },
+  { value: 'ameacador',  label: 'Ameaçador',  Icon: CloudLightning, cor: 'text-yellow-600' },
+  { value: 'tempestade', label: 'Tempestade', Icon: Zap,            cor: 'text-purple-500' },
+  { value: 'frio',       label: 'Frio',       Icon: Thermometer,    cor: 'text-cyan-500'   },
+]
 
 function getDataInicial(): Date {
   if (typeof window === 'undefined') return getDomingoAtual()
@@ -55,16 +70,30 @@ export default function ChamadaPage() {
   const [turmasData, setTurmasData] = useState<Turma[]>([])
   const [dataSelecionada, setDataSelecionada] = useState<Date>(getDataInicial)
   const [semanaOffset, setSemanaOffset] = useState<number>(getOffsetInicial)
+  const [tempo, setTempo] = useState('')
   const [resumoDia, setResumoDia] = useState({ total_matriculados: 0, total_presentes: 0, total_faltas: 0, total_visitantes: 0, total_biblias: 0, total_revistas: 0, total_oferta: 0 })
   const [resumosPorTurma, setResumosPorTurma] = useState<Record<string, ResumoTurma>>({})
 
-  // Persistir no localStorage
+  // Persistir data/offset no localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_DATA, converterParaISO(dataSelecionada))
       localStorage.setItem(STORAGE_KEY_OFFSET, String(semanaOffset))
     } catch {}
   }, [dataSelecionada, semanaOffset])
+
+  // Carregar/salvar tempo por data
+  useEffect(() => {
+    try { setTempo(localStorage.getItem(STORAGE_KEY_TEMPO(converterParaISO(dataSelecionada))) ?? '') }
+    catch { setTempo('') }
+  }, [dataSelecionada])
+
+  function handleTempoChange(value: string) {
+    const key = STORAGE_KEY_TEMPO(converterParaISO(dataSelecionada))
+    const novo = value === tempo ? '' : value
+    try { novo ? localStorage.setItem(key, novo) : localStorage.removeItem(key) } catch {}
+    setTempo(novo)
+  }
 
   // Carregar turmas
   useEffect(() => {
@@ -77,9 +106,10 @@ export default function ChamadaPage() {
         return { id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', totalAlunos: count ?? 0, sala: t.sala ?? '', cor: t.cor ?? 'bg-blue-500' }
       }))
 
+      const sorted = [...comContagem].sort((a, b) => getSalaNum(a.sala) - getSalaNum(b.sala))
       setTurmasData(isAdmin || turmasPermitidas.includes('*')
-        ? comContagem
-        : comContagem.filter(t => turmasPermitidas.includes(t.id)))
+        ? sorted
+        : sorted.filter(t => turmasPermitidas.includes(t.id)))
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,18 +233,52 @@ export default function ChamadaPage() {
         </div>
       </div>
 
+      {/* Condições do Tempo */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/30">
+          <Sun className="h-4 w-4 text-yellow-500" />
+          <span className="font-semibold text-sm">Condições do Tempo</span>
+          {tempo && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {TEMPO_OPTIONS.find(t => t.value === tempo)?.label}
+            </span>
+          )}
+        </div>
+        <div className="px-5 py-3">
+          <div className="flex flex-wrap gap-2">
+            {TEMPO_OPTIONS.map(({ value, label, Icon, cor }) => {
+              const ativo = tempo === value
+              return (
+                <button
+                  key={value}
+                  onClick={() => handleTempoChange(value)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
+                    ativo
+                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                      : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 ${ativo ? 'text-primary-foreground' : cor}`} />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* Resumo Geral do Dia */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Resumo Geral do Dia</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users} description="Todas as turmas" />
-          <StatCard title="Total no Dia" value={resumoDia.total_presentes + resumoDia.total_visitantes} icon={CheckCircle2} description="Presentes + visitantes" valueClassName="text-primary" />
-          <StatCard title="Total Presentes" value={resumoDia.total_presentes} icon={CheckCircle2} description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
-          <StatCard title="Total Faltas"    value={resumoDia.total_faltas}    icon={XCircle}     description="Ausências"        valueClassName="text-red-600" />
-          <StatCard title="Total Visitantes" value={resumoDia.total_visitantes} icon={UserPlus}  description="Novos visitantes"  valueClassName="text-blue-600" />
-          <StatCard title="Total Bíblias"   value={resumoDia.total_biblias}   icon={Book}        description="Trouxeram bíblia"  valueClassName="text-purple-600" />
-          <StatCard title="Total Revistas"  value={resumoDia.total_revistas}  icon={BookOpen}    description="Trouxeram revista" valueClassName="text-orange-600" />
-          <StatCard title="Total Oferta" value={`R$ ${resumoDia.total_oferta.toFixed(2)}`} icon={DollarSign} description="Arrecadado no dia" valueClassName="text-green-600" />
+          <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users}         description="Todas as turmas" />
+          <StatCard title="Total Ausentes"     value={resumoDia.total_faltas}       icon={XCircle}       description="Ausências"               valueClassName="text-red-600" />
+          <StatCard title="Total Presentes"    value={resumoDia.total_presentes}    icon={CheckCircle2}  description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
+          <StatCard title="Total Visitantes"   value={resumoDia.total_visitantes}   icon={UserPlus}      description="Novos visitantes"        valueClassName="text-blue-600" />
+          <StatCard title="Total no Dia"       value={resumoDia.total_presentes + resumoDia.total_visitantes} icon={CheckCircle2} description="Presentes + visitantes" valueClassName="text-primary" />
+          <StatCard title="Total Bíblias"      value={resumoDia.total_biblias}      icon={Book}          description="Trouxeram bíblia"        valueClassName="text-purple-600" />
+          <StatCard title="Total Revistas"     value={resumoDia.total_revistas}     icon={BookOpen}      description="Trouxeram revista"       valueClassName="text-orange-600" />
+          <StatCard title="Total Oferta"       value={`R$ ${resumoDia.total_oferta.toFixed(2)}`} icon={DollarSign} description="Arrecadado no dia" valueClassName="text-green-600" />
         </div>
       </div>
 
