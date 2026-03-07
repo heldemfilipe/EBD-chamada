@@ -502,7 +502,59 @@ export default function RelatoriosPage() {
                 </BarChart>
               </ResponsiveContainer>
 
-              <div className="rounded-lg border overflow-x-auto">
+              {/* Cards mobile – Presença por Sala */}
+              <div className="sm:hidden space-y-3">
+                {dadosSala.map((s, i) => (
+                  <div key={i} className="rounded-xl border bg-card overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: s.cor }} />
+                        <span className="font-semibold text-sm truncate">{s.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span>
+                      </div>
+                      <Badge className={cn('text-xs border flex-shrink-0 ml-2', badgePresenca(s.presencaMedia))}>{s.presencaMedia}%</Badge>
+                    </div>
+                    <div className="px-4 pb-2">
+                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${s.presencaMedia}%`, backgroundColor: s.cor }} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 divide-x border-t">
+                      <div className="flex flex-col items-center py-2.5">
+                        <span className="text-sm font-bold text-green-600">{s.presentes}</span>
+                        <span className="text-[10px] text-muted-foreground">Pres.</span>
+                      </div>
+                      <div className="flex flex-col items-center py-2.5">
+                        <span className="text-sm font-bold text-red-600">{s.faltas}</span>
+                        <span className="text-[10px] text-muted-foreground">Faltas</span>
+                      </div>
+                      <div className="flex flex-col items-center py-2.5">
+                        <span className="text-sm font-bold text-blue-600">{s.visitantes}</span>
+                        <span className="text-[10px] text-muted-foreground">Visit.</span>
+                      </div>
+                      <div className="flex flex-col items-center py-2.5">
+                        <span className="text-sm font-bold">{s.matriculados}</span>
+                        <span className="text-[10px] text-muted-foreground">Mat.</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 divide-x border-t bg-muted/30">
+                      <div className="flex flex-col items-center py-2">
+                        <span className="text-xs font-semibold text-purple-600">{s.biblias}</span>
+                        <span className="text-[10px] text-muted-foreground">Bíblias</span>
+                      </div>
+                      <div className="flex flex-col items-center py-2">
+                        <span className="text-xs font-semibold text-orange-600">{s.revistas}</span>
+                        <span className="text-[10px] text-muted-foreground">Revistas</span>
+                      </div>
+                      <div className="flex flex-col items-center py-2">
+                        <span className="text-xs font-semibold text-emerald-600">{s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-[10px] text-muted-foreground">Oferta R$</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden sm:block rounded-lg border overflow-x-auto">
                 <Table className="min-w-[480px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
@@ -568,7 +620,27 @@ export default function RelatoriosPage() {
             {topAlunos.length === 0 ? (
               <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
             ) : (
-              <div className="rounded-lg border overflow-x-auto">
+              <>
+              {/* Lista mobile – Top 10 */}
+              <div className="sm:hidden space-y-2">
+                {topAlunos.map((a, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+                    <span className={`w-7 text-center font-bold flex-shrink-0 text-sm ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
+                      {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{a.nome}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{a.presentes}/{a.total}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden sm:block rounded-lg border overflow-x-auto">
                 <Table className="min-w-[340px]">
                   <TableHeader>
                     <TableRow className="bg-muted/40">
@@ -602,6 +674,7 @@ export default function RelatoriosPage() {
                   </TableBody>
                 </Table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -657,7 +730,43 @@ export default function RelatoriosPage() {
           {professores.length === 0 ? (
             <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
           ) : (
-            <div className="rounded-lg border overflow-x-auto">
+            <>
+            {/* Cards mobile – Desempenho dos Professores */}
+            <div className="sm:hidden space-y-3">
+              {professores.map((p, i) => (
+                <div key={i} className="rounded-xl border bg-card overflow-hidden">
+                  <div className="px-4 py-3">
+                    <p className="font-semibold text-sm">{p.nome}</p>
+                    {p.turmas.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {p.turmas.map((t, j) => <Badge key={j} variant="secondary" className="text-xs">{t}</Badge>)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 divide-x border-t bg-muted/30">
+                    <div className="flex flex-col items-center py-2.5">
+                      <span className="text-sm font-bold">{p.aulas}</span>
+                      <span className="text-[10px] text-muted-foreground">Aulas</span>
+                    </div>
+                    <div className="flex flex-col items-center py-2.5">
+                      <span className="text-sm font-bold" style={{ color: corPresenca(p.presMedia) }}>{p.presMedia}%</span>
+                      <span className="text-[10px] text-muted-foreground">Presença</span>
+                    </div>
+                    <div className="flex flex-col items-center py-2.5">
+                      <span className="text-sm font-bold text-purple-600">{p.biblias}%</span>
+                      <span className="text-[10px] text-muted-foreground">Bíblias</span>
+                    </div>
+                  </div>
+                  <div className="px-4 py-2 border-t flex items-center justify-end">
+                    <Badge className={cn('text-xs border', p.aulas > 0 ? badgePresenca(p.presMedia) : 'bg-muted text-muted-foreground border-muted')}>
+                      {p.aulas > 0 ? labelPresenca(p.presMedia) : 'Sem aulas'}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden sm:block rounded-lg border overflow-x-auto">
               <Table className="min-w-[480px]">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
@@ -708,6 +817,7 @@ export default function RelatoriosPage() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

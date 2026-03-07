@@ -164,8 +164,30 @@ export default function ProfessoresPage() {
         <Button onClick={() => openDialog()}><Plus className="h-4 w-4 mr-2" />Novo Professor</Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Stats Mobile */}
+      <div className="sm:hidden rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-2 divide-x divide-y">
+          <div className="flex items-center gap-3 p-4">
+            <div className="p-2 rounded-lg bg-muted"><Users className="h-4 w-4 text-muted-foreground" /></div>
+            <div><p className="text-xl font-bold">{professores.length}</p><p className="text-xs text-muted-foreground">Professores</p></div>
+          </div>
+          <div className="flex items-center gap-3 p-4">
+            <div className="p-2 rounded-lg bg-muted"><GraduationCap className="h-4 w-4 text-muted-foreground" /></div>
+            <div><p className="text-xl font-bold">{professores.reduce((a, p) => a + p.turmas.length, 0)}</p><p className="text-xs text-muted-foreground">Atribuições</p></div>
+          </div>
+          <div className="flex items-center gap-3 p-4">
+            <div className="p-2 rounded-lg bg-muted"><BookOpen className="h-4 w-4 text-muted-foreground" /></div>
+            <div><p className="text-xl font-bold">{professores.filter(p => p.turmaAluno !== null).length}</p><p className="text-xs text-muted-foreground">Tb. Alunos</p></div>
+          </div>
+          <div className="flex items-center gap-3 p-4">
+            <div className="p-2 rounded-lg bg-muted"><Search className="h-4 w-4 text-muted-foreground" /></div>
+            <div><p className="text-xl font-bold">{new Set(professores.map(p => p.especialidade).filter(Boolean)).size}</p><p className="text-xs text-muted-foreground">Especialidades</p></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Desktop */}
+      <div className="hidden sm:grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total de Professores" value={professores.length} icon={Users} description="Ativos no sistema" />
         <StatCard title="Atribuições" value={professores.reduce((a, p) => a + p.turmas.length, 0)} icon={GraduationCap} description="Turmas lecionadas" />
         <StatCard title="Também Alunos" value={professores.filter(p => p.turmaAluno !== null).length} icon={BookOpen} description="Matriculados em turma" />
@@ -199,7 +221,79 @@ export default function ProfessoresPage() {
             ))}
           </div>
 
-          <div className="rounded-md border overflow-x-auto">
+          {/* Lista mobile */}
+          <div className="sm:hidden space-y-3 mt-2">
+            {filtered.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8 text-sm">Nenhum professor encontrado</p>
+            ) : filtered.map((prof) => {
+              const cargoInfo = getCargo(prof.cargo)
+              const turmasNomesList = getTurmasNomes(prof.turmas)
+              return (
+                <div key={prof.id} className="rounded-xl border bg-card overflow-hidden">
+                  {/* Cabeçalho */}
+                  <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{prof.nome}</span>
+                        {cargoInfo && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                            style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}>
+                            {cargoInfo.label}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                        <Calendar className="h-3 w-3 flex-shrink-0" />
+                        Desde {new Date(prof.dataIngresso).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })}
+                        {prof.especialidade && <span className="ml-1 truncate">· {prof.especialidade}</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setSelected(prof); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                    </div>
+                  </div>
+                  {/* Turmas */}
+                  <div className="px-4 pb-3">
+                    <div className="flex items-start gap-1.5">
+                      <GraduationCap className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      {turmasNomesList.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {turmasNomesList.map((t, i) => <Badge key={i} variant="secondary" className="text-xs">{t}</Badge>)}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Sem turma atribuída</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Rodapé: turma aluno + contato */}
+                  {(prof.turmaAluno || prof.telefone || prof.email) && (
+                    <div className="border-t bg-muted/30 px-4 py-2 flex flex-wrap gap-x-4 gap-y-1">
+                      {prof.turmaAluno && (
+                        <div className="flex items-center gap-1.5">
+                          <BookOpen className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Aluno em</span>
+                          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-[10px] py-0 px-1.5">{getTurmaNome(prof.turmaAluno)}</Badge>
+                        </div>
+                      )}
+                      {prof.telefone && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Phone className="h-3 w-3" />{prof.telefone}
+                        </div>
+                      )}
+                      {prof.email && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Mail className="h-3 w-3" />{prof.email}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="hidden sm:block rounded-md border overflow-x-auto">
             <Table className="min-w-[500px]">
               <TableHeader>
                 <TableRow>

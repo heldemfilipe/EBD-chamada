@@ -391,7 +391,12 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={dadosPorSala} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barSize={30}>
                     <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
-                    <XAxis dataKey="sala" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="sala" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
+                      tickFormatter={(v) => {
+                        const s = (v as string).replace('Crianças - ', '').replace('Adultos - ', '')
+                        return s.length > 12 ? s.slice(0, 11) + '…' : s
+                      }}
+                    />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
                     <Tooltip formatter={(v: any) => [`${v}%`, 'Presença média']} labelStyle={{ fontWeight: 600 }} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
                     <Bar dataKey="presencaMedia" name="Presença %" radius={[6, 6, 0, 0]}>
