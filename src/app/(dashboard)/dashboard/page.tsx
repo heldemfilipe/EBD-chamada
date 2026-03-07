@@ -10,22 +10,21 @@ import { PeriodSelector, labelDoPeriodo } from '@/components/ui/period-selector'
 import { ChartTooltip } from '@/components/ui/chart-tooltip'
 import {
   Users, GraduationCap, BookOpen, TrendingUp,
-  CheckCircle2, Calendar, Trophy, Star,
+  CheckCircle2, Calendar, Trophy, Star, UserPlus,
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
 import { supabase } from '@/lib/supabase'
-import { ANOS_DISPONIVEIS, MESES_CURTOS, TRIMESTRES } from '@/lib/constants'
-import { calcularPct, resolverCor, corBarraPresenca } from '@/lib/presence'
+import { MESES_CURTOS, TRIMESTRES, getCargo } from '@/lib/constants'
+import { calcularPct, resolverCor } from '@/lib/presence'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Periodo = 'mensal' | 'trimestral' | 'anual'
 
-/** Filtra chamadas pelo período selecionado usando o campo `data` */
 function filtrarPorPeriodo(
   chamadas: any[],
   opts: { periodo: Periodo; mes: number; trimestre: number }
@@ -33,7 +32,7 @@ function filtrarPorPeriodo(
   return chamadas.filter((c: any) => {
     if (!c.data) return opts.periodo === 'anual'
     const m = parseISO(c.data).getMonth()
-    if (opts.periodo === 'mensal')    return m === opts.mes
+    if (opts.periodo === 'mensal')     return m === opts.mes
     if (opts.periodo === 'trimestral') return TRIMESTRES[opts.trimestre].meses.includes(m)
     return true
   })
@@ -56,9 +55,13 @@ export default function DashboardPage() {
   const [dadosDomingos, setDadosDomingos] = useState<Record<number, Record<number, PontoDado[]>>>({})
   const [dadosPorSala, setDadosPorSala] = useState<{ sala: string; cor: string; presencaMedia: number }[]>([])
   const [topPorSala, setTopPorSala] = useState<Record<string, { nome: string; presenca: number; total: number }[]>>({})
-  const [top10, setTop10] = useState<{ nome: string; sala: string; presenca: number; total: number; pct: number }[]>([])
+  const [top10, setTop10] = useState<{
+    nome: string; sala: string; presenca: number; total: number; pct: number;
+    cargo: string; isProfessor: boolean;
+  }[]>([])
   const [turmasAtivas, setTurmasAtivas] = useState<{ id: string; turma: string; professor: string; alunos: number }[]>([])
   const [chamadasRecentes, setChamadasRecentes] = useState<{ id: string; description: string; time: string }[]>([])
+  const [visitantesRecentes, setVisitantesRecentes] = useState<{ id: string; nome: string; turma: string; data: string }[]>([])
 
   // Stats gerais
   useEffect(() => {
@@ -144,12 +147,12 @@ export default function DashboardPage() {
     load()
   }, [ano, periodo, trimestre, mes])
 
-  // Top alunos
+  // Top alunos (com cargo e isProfessor)
   useEffect(() => {
     async function load() {
       const { data: chamadasRaw } = await db.from('chamadas').select('id, turma_id, data').eq('ano', ano)
       const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
-      const { data: alunos } = await db.from('alunos').select('id, nome, turma_id, turmas(nome)').eq('ativo', true)
+      const { data: alunos } = await db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true)
       if (!chamadas?.length || !alunos?.length) { setTopPorSala({}); setTop10([]); return }
 
       const { data: presencas } = await db.from('presencas').select('aluno_id, presente').in('chamada_id', chamadas.map((c: any) => c.id))
@@ -168,6 +171,8 @@ export default function DashboardPage() {
           id: a.id, nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma',
           presenca: ppa[a.id]?.presentes ?? 0, total: ppa[a.id]?.total ?? 0,
           pct: calcularPct(ppa[a.id]?.presentes ?? 0, ppa[a.id]?.total ?? 0),
+          cargo: a.cargo ?? '',
+          isProfessor: (a.responsavel ?? '').startsWith('professor:'),
         }))
         .sort((a: any, b: any) => b.pct - a.pct || b.presenca - a.presenca)
 
@@ -207,15 +212,33 @@ export default function DashboardPage() {
         const total = (c.presencas ?? []).length
         return {
           id: c.id,
-          description: `Chamada "${c.turmas?.nome ?? 'Turma'}" — ${presentes}/${total} presentes`,
-          time: format(parseISO(c.data), 'dd/MM/yyyy', { locale: ptBR }),
+          description: `${c.turmas?.nome ?? 'Turma'} — ${presentes}/${total} presentes`,
+          time: c.data ? format(parseISO(c.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
         }
       }))
     }
     load()
   }, [])
 
-  // Dados para o gráfico de linha
+  // Visitantes recentes
+  useEffect(() => {
+    async function load() {
+      const { data } = await db
+        .from('historico_visitantes')
+        .select('id, data, presente, visitantes(nome), turmas(nome)')
+        .eq('presente', true)
+        .order('data', { ascending: false })
+        .limit(8)
+      setVisitantesRecentes((data ?? []).map((v: any) => ({
+        id: v.id,
+        nome: v.visitantes?.nome ?? 'Visitante',
+        turma: v.turmas?.nome ?? '—',
+        data: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
+      })))
+    }
+    load()
+  }, [])
+
   const dadosGrafico: PontoDado[] = (() => {
     if (periodo === 'anual') return dadosAnual
     if (periodo === 'trimestral') return TRIMESTRES[trimestre].meses.map((m) => dadosAnual[m]).filter(Boolean)
@@ -227,30 +250,79 @@ export default function DashboardPage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="space-y-6">
+      {/* Header + Ações Rápidas minimalistas */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-2">Bem-vindo ao sistema de gestão EBD</p>
+        <p className="text-muted-foreground mt-1 mb-3">Bem-vindo ao sistema de gestão EBD</p>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { title: 'Chamada',    href: '/chamada',    Icon: CheckCircle2 },
+            { title: 'Alunos',     href: '/alunos',     Icon: Users        },
+            { title: 'Escalas',    href: '/escala',     Icon: Calendar     },
+            { title: 'Relatórios', href: '/relatorios', Icon: TrendingUp   },
+          ] as const).map(({ title, href, Icon }) => (
+            <a
+              key={href} href={href}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-card hover:bg-accent hover:border-primary/50 transition-all text-sm font-medium"
+            >
+              <Icon className="h-3.5 w-3.5 text-primary" />
+              {title}
+            </a>
+          ))}
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total de Alunos"  value={stats.totalAlunos}      icon={Users}         description="Ativos no sistema" />
-        <StatCard title="Professores"       value={stats.totalProfessores}  icon={GraduationCap} description="Cadastrados" />
-        <StatCard title="Turmas Ativas"     value={stats.totalTurmas}       icon={BookOpen}      description="Todas as faixas etárias" />
-        <StatCard title="Presença Média"    value={stats.presencaMedia > 0 ? `${stats.presencaMedia}%` : '—'} icon={TrendingUp} description="No período atual" />
+      {/* Stats mobile: card compacto 2×2 */}
+      <div className="sm:hidden rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-2 gap-0">
+          <div className="flex items-center gap-3 p-4 border-r border-b">
+            <div className="p-2 rounded-lg bg-primary/10 flex-shrink-0"><Users className="h-4 w-4 text-primary" /></div>
+            <div>
+              <div className="text-xl font-bold">{stats.totalAlunos}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Alunos</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 border-b">
+            <div className="p-2 rounded-lg bg-primary/10 flex-shrink-0"><GraduationCap className="h-4 w-4 text-primary" /></div>
+            <div>
+              <div className="text-xl font-bold">{stats.totalProfessores}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Professores</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4 border-r">
+            <div className="p-2 rounded-lg bg-primary/10 flex-shrink-0"><BookOpen className="h-4 w-4 text-primary" /></div>
+            <div>
+              <div className="text-xl font-bold">{stats.totalTurmas}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Turmas</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-4">
+            <div className="p-2 rounded-lg bg-green-500/10 flex-shrink-0"><TrendingUp className="h-4 w-4 text-green-500" /></div>
+            <div>
+              <div className="text-xl font-bold text-green-600">{stats.presencaMedia > 0 ? `${stats.presencaMedia}%` : '—'}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Presença</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats desktop: grid de StatCards */}
+      <div className="hidden sm:grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard title="Total de Alunos" value={stats.totalAlunos}      icon={Users}         description="Ativos no sistema" />
+        <StatCard title="Professores"      value={stats.totalProfessores}  icon={GraduationCap} description="Cadastrados" />
+        <StatCard title="Turmas Ativas"    value={stats.totalTurmas}       icon={BookOpen}      description="Todas as faixas etárias" />
+        <StatCard title="Presença Média"   value={stats.presencaMedia > 0 ? `${stats.presencaMedia}%` : '—'} icon={TrendingUp} description="No período atual" />
       </div>
 
       {/* Seção de análise */}
       <div className="space-y-5">
-        {/* Seletor de período */}
+        {/* Seletor de período + gráfico evolução */}
         <PeriodSelector
           periodo={periodo} ano={ano} mes={mes} trimestre={trimestre}
           onPeriodo={setPeriodo} onAno={setAno} onMes={setMes} onTrimestre={setTrimestre}
           label={labelPeriodo}
         >
-          {/* Gráfico de evolução */}
           <div className="px-5 pt-4 pb-2">
             <p className="text-sm font-semibold mb-1">Evolução de Presença</p>
             <p className="text-xs text-muted-foreground mb-3">Total de presentes e % no período selecionado</p>
@@ -367,7 +439,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Top 10 Geral */}
+          {/* Top 10 Geral — com cargo e badge professor */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -379,23 +451,39 @@ export default function DashboardPage() {
             <CardContent>
               {top10.length > 0 ? (
                 <div className="space-y-2">
-                  {top10.map((aluno, idx) => (
-                    <div key={aluno.nome} className="flex items-center gap-3 py-1">
-                      <span className={`flex-shrink-0 w-6 text-center text-sm font-bold ${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                        {idx + 1}º
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium truncate">{aluno.nome}</span>
-                        <p className="text-[10px] text-muted-foreground">{aluno.sala}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${aluno.pct === 100 ? 'bg-green-500/15 text-green-600' : aluno.pct >= 90 ? 'bg-primary/15 text-primary' : 'bg-yellow-500/15 text-yellow-600'}`}>
-                          {aluno.pct}%
+                  {top10.map((aluno, idx) => {
+                    const cargoInfo = getCargo(aluno.cargo)
+                    return (
+                      <div key={`${aluno.nome}-${idx}`} className="flex items-center gap-3 py-1">
+                        <span className={`flex-shrink-0 w-6 text-center text-sm font-bold ${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
+                          {idx + 1}º
                         </span>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{aluno.presenca}/{aluno.total}</p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-sm font-medium">{aluno.nome}</span>
+                            {aluno.isProfessor && (
+                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-blue-400 text-blue-400">Prof</Badge>
+                            )}
+                            {cargoInfo && (
+                              <span
+                                className="text-[9px] font-semibold px-1.5 rounded-full border leading-4 inline-flex items-center"
+                                style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
+                              >
+                                {cargoInfo.label}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">{aluno.sala}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${aluno.pct === 100 ? 'bg-green-500/15 text-green-600' : aluno.pct >= 90 ? 'bg-primary/15 text-primary' : 'bg-yellow-500/15 text-yellow-600'}`}>
+                            {aluno.pct}%
+                          </span>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{aluno.presenca}/{aluno.total}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
@@ -405,7 +493,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Turmas + Chamadas Recentes */}
+      {/* Turmas + Histórico */}
       <div className="grid gap-4 lg:grid-cols-7">
         <Card className="lg:col-span-4">
           <CardHeader>
@@ -434,63 +522,49 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {/* Histórico: chamadas + visitantes cadastrados */}
         <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>Chamadas Recentes</CardTitle>
-            <CardDescription>Últimas chamadas registradas no sistema</CardDescription>
+            <CardTitle>Histórico Recente</CardTitle>
+            <CardDescription>Chamadas e visitantes registrados recentemente</CardDescription>
           </CardHeader>
           <CardContent>
-            {chamadasRecentes.length > 0 ? (
-              <div className="space-y-4">
+            {chamadasRecentes.length === 0 && visitantesRecentes.length === 0 ? (
+              <EmptyState message="Nenhum registro encontrado" />
+            ) : (
+              <div className="space-y-1">
                 {chamadasRecentes.map((c) => (
-                  <div key={c.id} className="flex items-start gap-4">
-                    <div className="p-2 rounded-lg bg-green-500/10 text-green-500">
-                      <CheckCircle2 className="h-4 w-4" />
+                  <div key={c.id} className="flex items-start gap-3 py-2">
+                    <div className="p-1.5 rounded-lg bg-green-500/10 text-green-500 flex-shrink-0 mt-0.5">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
                     </div>
-                    <div className="flex-1 space-y-1">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium leading-none">{c.description}</p>
-                      <p className="text-xs text-muted-foreground">{c.time}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{c.time}</p>
                     </div>
                   </div>
                 ))}
+                {visitantesRecentes.length > 0 && (
+                  <div className="pt-2 mt-1 border-t">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Visitantes cadastrados</p>
+                    {visitantesRecentes.map((v) => (
+                      <div key={v.id} className="flex items-start gap-3 py-1.5">
+                        <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500 flex-shrink-0 mt-0.5">
+                          <UserPlus className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium leading-none">{v.nome}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{v.turma} · {v.data}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : (
-              <EmptyState message="Nenhuma chamada registrada ainda" />
             )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Ações Rápidas */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Ações Rápidas</CardTitle>
-          <CardDescription>Acesso rápido às funcionalidades mais usadas</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <QuickAction title="Fazer Chamada"      description="Registrar presença dos alunos" href="/chamada"   icon={<CheckCircle2 className="h-5 w-5" />} />
-            <QuickAction title="Cadastrar Aluno"    description="Adicionar novo aluno"          href="/alunos"    icon={<Users className="h-5 w-5" />} />
-            <QuickAction title="Ver Escalas"        description="Gerenciar escalas"             href="/escala"    icon={<Calendar className="h-5 w-5" />} />
-            <QuickAction title="Relatórios"         description="Visualizar estatísticas"       href="/relatorios" icon={<TrendingUp className="h-5 w-5" />} />
-          </div>
-        </CardContent>
-      </Card>
     </div>
-  )
-}
-
-// ─── Subcomponentes ───────────────────────────────────────────────────────────
-function QuickAction({ title, description, href, icon }: { title: string; description: string; href: string; icon: React.ReactNode }) {
-  return (
-    <a href={href} className="flex items-start gap-3 p-3 sm:p-4 rounded-lg border hover:bg-accent hover:border-primary/50 transition-all cursor-pointer group">
-      <div className="p-2 rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-        {icon}
-      </div>
-      <div className="space-y-1">
-        <p className="font-medium text-sm">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-    </a>
   )
 }

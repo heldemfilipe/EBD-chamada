@@ -346,7 +346,95 @@ export default function AlunosPage() {
             ))}
           </div>
 
-          <div className="rounded-md border overflow-x-auto">
+          {/* Mobile: lista de cards compactos */}
+          <div className="md:hidden space-y-3">
+            {filtered.length > 0 ? filtered.map((aluno) => {
+              const turmaObj = aluno.turmaId ? turmaMap[aluno.turmaId] : null
+              const turmaCor = turmaObj?.cor ? (BG_TO_HEX[turmaObj.cor] ?? null) : null
+              const cargoInfo = getCargo(aluno.cargo)
+              return (
+                <div key={aluno.id} className="rounded-xl border bg-card overflow-hidden">
+                  {/* Nome + badges + ações */}
+                  <div className="flex items-start justify-between gap-2 px-4 pt-3 pb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-sm">{aluno.nome}</span>
+                        {aluno.isProfessor && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-400 text-blue-400">Professor</Badge>
+                        )}
+                        {cargoInfo && (
+                          <span
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                            style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
+                          >
+                            {cargoInfo.label}
+                          </span>
+                        )}
+                      </div>
+                      {turmaObj && (
+                        <Badge
+                          variant="secondary"
+                          className="mt-1.5 text-xs"
+                          style={turmaCor ? {
+                            backgroundColor: turmaCor + '25', color: turmaCor,
+                            borderColor: turmaCor + '55', borderWidth: '1px', borderStyle: 'solid',
+                          } : undefined}
+                        >
+                          {turmaObj.nome}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
+                      {aluno.isProfessor ? (
+                        <span className="text-[10px] text-muted-foreground italic pr-1">em Professores</span>
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(aluno)}><Edit className="h-3.5 w-3.5" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setSelected(aluno); setDeleteOpen(true) }}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {/* Stats row: idade + presença */}
+                  <div className="grid grid-cols-3 gap-0 border-t">
+                    <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                      <span className="text-[10px] text-muted-foreground mb-0.5">Idade</span>
+                      <span className="text-sm font-bold">{aluno.idade > 0 ? `${aluno.idade}a` : '—'}</span>
+                    </div>
+                    <div className="flex flex-col justify-center py-2 px-3 col-span-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-muted-foreground">Presença</span>
+                        <span className="text-sm font-bold">{aluno.presenca}%</span>
+                      </div>
+                      <PresenceBar pct={aluno.presenca} />
+                    </div>
+                  </div>
+                  {/* Contato */}
+                  {(aluno.telefone || aluno.email) && (
+                    <div className="flex items-center gap-4 px-4 py-2 border-t bg-muted/30 text-xs text-muted-foreground">
+                      {aluno.telefone && (
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="h-3 w-3 flex-shrink-0" />
+                          <span>{aluno.telefone}</span>
+                        </div>
+                      )}
+                      {aluno.email && (
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Mail className="h-3 w-3 flex-shrink-0" />
+                          <span className="truncate">{aluno.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            }) : (
+              <div className="text-center py-8 text-muted-foreground text-sm">Nenhum aluno encontrado</div>
+            )}
+          </div>
+
+          {/* Desktop: tabela */}
+          <div className="hidden md:block rounded-md border overflow-x-auto">
             <Table className="min-w-[600px]">
               <TableHeader>
                 <TableRow>
