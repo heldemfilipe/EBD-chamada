@@ -448,28 +448,28 @@ export default function ChamadaTurmaPage() {
         await db.from('presencas').upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
       }
 
-      // 3. Salvar visitantes (todos, inclusive pendentes são ignorados)
+      // 3. Salvar visitantes
+      // Apaga todos os registros do dia para esta turma antes de reinserir,
+      // garantindo que visitantes removidos da lista sejam de fato excluídos.
+      await db.from('historico_visitantes')
+        .delete()
+        .eq('turma_id', turmaId)
+        .eq('data', dataSelecionada)
+
       for (const v of visitantes) {
-        // Pendente = não marcar nada, mas se for novo e ainda pendente, também ignora
-        if (v.presenteHoje === 'pendente' && !v.isNovo) continue
         if (v.presenteHoje === 'pendente') continue
 
         let visitanteId: string | null = v.isNovo ? null : v.id
 
         if (v.isNovo) {
-          // Criar visitante novo no banco
           const { data: visitanteSalvo, error: errV } = await db
             .from('visitantes')
             .insert({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
             .select('id')
             .single()
-          if (errV || !visitanteSalvo) {
-            console.error('Erro ao salvar visitante:', errV)
-            continue
-          }
+          if (errV || !visitanteSalvo) { console.error('Erro ao salvar visitante:', errV); continue }
           visitanteId = visitanteSalvo.id
         } else {
-          // Atualizar dados do visitante existente
           await db.from('visitantes')
             .update({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
             .eq('id', v.id)
@@ -477,16 +477,7 @@ export default function ChamadaTurmaPage() {
 
         if (!visitanteId) continue
 
-        // Verificar se já existe registro no histórico para esse visitante/data/turma
-        const { data: histExistente } = await db
-          .from('historico_visitantes')
-          .select('id')
-          .eq('visitante_id', visitanteId)
-          .eq('data', dataSelecionada)
-          .eq('turma_id', turmaId)
-          .maybeSingle()
-
-        const histPayload = {
+        const { error: errHist } = await db.from('historico_visitantes').insert({
           visitante_id: visitanteId,
           turma_id: turmaId,
           chamada_id: chamada.id,
@@ -494,16 +485,8 @@ export default function ChamadaTurmaPage() {
           presente: v.presenteHoje === 'presente',
           trouxe_biblia: v.trouxe_biblia,
           trouxe_revista: v.trouxe_revista,
-        }
-
-        if (histExistente) {
-          // Atualizar registro existente
-          await db.from('historico_visitantes').update(histPayload).eq('id', histExistente.id)
-        } else {
-          // Inserir novo registro
-          const { error: errHist } = await db.from('historico_visitantes').insert(histPayload)
-          if (errHist) console.error('Erro ao salvar histórico visitante:', errHist)
-        }
+        })
+        if (errHist) console.error('Erro ao salvar histórico visitante:', errHist)
       }
 
       toast('Chamada salva com sucesso!')
