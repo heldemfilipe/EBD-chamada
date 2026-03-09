@@ -307,11 +307,15 @@ export default function ChamadaTurmaPage() {
   const handleJustificativaChange = (alunoId: string, justificativa: string) =>
     setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, justificativa } : a))
 
-  const handleMarcarTodosBiblia = () =>
+  const handleMarcarTodosBiblia = () => {
     setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_biblia: true } : a))
+    setVisitantes(visitantes.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_biblia: true } : v))
+  }
 
-  const handleMarcarTodosRevista = () =>
+  const handleMarcarTodosRevista = () => {
     setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_revista: true } : a))
+    setVisitantes(visitantes.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_revista: true } : v))
+  }
 
   const handleAplicarQuantidades = () => {
     const nBiblia = qtdBiblias !== '' ? Math.max(0, parseInt(qtdBiblias) || 0) : null

@@ -134,8 +134,14 @@ export default function ChamadaPage() {
             oferta: Number(c.oferta) || 0, visitantes: 0,
           }
         }
-        const { data: visitantes } = await db.from('historico_visitantes').select('turma_id').eq('data', dataISO).eq('presente', true)
-        visitantes?.forEach((v: any) => { if (resumos[v.turma_id]) resumos[v.turma_id].visitantes++ })
+        const { data: visitantes } = await db.from('historico_visitantes').select('turma_id, trouxe_biblia, trouxe_revista').eq('data', dataISO).eq('presente', true)
+        visitantes?.forEach((v: any) => {
+          if (resumos[v.turma_id]) {
+            resumos[v.turma_id].visitantes++
+            if (v.trouxe_biblia)  resumos[v.turma_id].biblias++
+            if (v.trouxe_revista) resumos[v.turma_id].revistas++
+          }
+        })
       }
 
       setResumosPorTurma(resumos)
