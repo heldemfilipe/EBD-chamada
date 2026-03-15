@@ -36,7 +36,7 @@ type FormatoExport = 'pdf' | 'excel' | 'csv'
 
 interface ExportSecoes {
   resumo: boolean; grafico: boolean; porSala: boolean
-  topAlunos: boolean; atencao: boolean; professores: boolean
+  alunosTurma: boolean; topAlunos: boolean; atencao: boolean; professores: boolean
 }
 interface ExportCampos {
   presenca: boolean; faltas: boolean; visitantes: boolean
@@ -58,10 +58,15 @@ interface DadosSala {
 interface AlunoFrequente { nome: string; sala: string; presentes: number; total: number; pct: number; faltas: number }
 interface ProfessorDesempenho { nome: string; turmas: string[]; aulas: number; presMedia: number; biblias: number }
 interface TurmaSimples { id: string; nome: string }
+interface AlunoTurmaStats {
+  id: string; nome: string; cargo: string
+  presentes: number; faltas: number; total: number; pct: number
+  biblias: number; revistas: number
+}
 
 const SECOES_INICIAL: ExportSecoes = {
   resumo: true, grafico: true, porSala: true,
-  topAlunos: true, atencao: true, professores: true,
+  alunosTurma: true, topAlunos: true, atencao: true, professores: true,
 }
 const CAMPOS_INICIAL: ExportCampos = {
   presenca: true, faltas: true, visitantes: true,
@@ -126,6 +131,8 @@ export default function RelatoriosPage() {
   const [topAlunos, setTopAlunos] = useState<AlunoFrequente[]>([])
   const [alunosAtencao, setAlunosAtencao] = useState<AlunoFrequente[]>([])
   const [professores, setProfessores] = useState<ProfessorDesempenho[]>([])
+  const [alunosTurma, setAlunosTurma] = useState<AlunoTurmaStats[]>([])
+  const [sortAlunosTurma, setSortAlunosTurma] = useState<'pct' | 'nome' | 'faltas'>('pct')
 
   useEffect(() => {
     db.from('turmas').select('id, nome').eq('ativa', true).order('nome')
@@ -238,7 +245,7 @@ export default function RelatoriosPage() {
           return { nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma', presentes: d.presentes, total: d.total, pct, faltas: d.total - d.presentes }
         })
       setTopAlunos([...lista].sort((a, b) => b.pct - a.pct || b.presentes - a.presentes).slice(0, 10))
-      setAlunosAtencao([...lista].filter(a => a.pct < 75).sort((a, b) => a.pct - b.pct))
+      setAlunosAtencao([...lista].filter(a => a.pct < 50).sort((a, b) => a.pct - b.pct))
     }
     load()
   }, [ano, mes, trim, granularidade, turmaFiltro])
@@ -284,6 +291,47 @@ export default function RelatoriosPage() {
     }
     load()
   }, [ano, mes, trim, granularidade, turmaFiltro])
+
+  useEffect(() => {
+    async function load() {
+      if (turmaFiltro === 'all') { setAlunosTurma([]); return }
+
+      const [{ data: alunosData }, { data: chamadasRaw }] = await Promise.all([
+        db.from('alunos').select('id, nome, cargo').eq('turma_id', turmaFiltro).eq('ativo', true).order('nome'),
+        db.from('chamadas').select('id, data').eq('turma_id', turmaFiltro).eq('ano', ano),
+      ])
+      if (!alunosData?.length) { setAlunosTurma([]); return }
+
+      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
+      const totalChamadas = chamadas.length
+
+      const ppa: Record<string, { presentes: number; faltas: number; biblias: number; revistas: number }> = {}
+
+      if (chamadas.length > 0) {
+        const { data: presencas } = await db
+          .from('presencas')
+          .select('aluno_id, presente, trouxe_biblia, trouxe_revista')
+          .in('chamada_id', chamadas.map((c: any) => c.id))
+
+        for (const p of presencas ?? []) {
+          if (!ppa[p.aluno_id]) ppa[p.aluno_id] = { presentes: 0, faltas: 0, biblias: 0, revistas: 0 }
+          if (p.presente) {
+            ppa[p.aluno_id].presentes++
+            if (p.trouxe_biblia) ppa[p.aluno_id].biblias++
+            if (p.trouxe_revista) ppa[p.aluno_id].revistas++
+          } else {
+            ppa[p.aluno_id].faltas++
+          }
+        }
+      }
+
+      setAlunosTurma(alunosData.map((a: any) => {
+        const d = ppa[a.id] ?? { presentes: 0, faltas: 0, biblias: 0, revistas: 0 }
+        return { id: a.id, nome: a.nome, cargo: a.cargo ?? '', ...d, total: totalChamadas, pct: calcularPct(d.presentes, totalChamadas) }
+      }))
+    }
+    load()
+  }, [turmaFiltro, ano, mes, trim, granularidade])
 
   // ── Cálculo do período ──
   const domingosList = agregarPorData(domingosPorMes[mes] ?? [])
@@ -339,6 +387,17 @@ export default function RelatoriosPage() {
   const labelRelatorio = `${labelPeriodo}${turmaFiltro !== 'all' ? ` — ${labelTurma}` : ''}`
   const anoIdx = ANOS_DISPONIVEIS.indexOf(ano)
 
+  // ── Computed: Alunos da Turma ──
+  const alunosTurmaOrdenados = [...alunosTurma].sort((a, b) => {
+    if (sortAlunosTurma === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR')
+    if (sortAlunosTurma === 'faltas') return b.faltas - a.faltas
+    return b.pct - a.pct
+  })
+  const top3Turma = [...alunosTurma].filter(a => a.total > 0).sort((a, b) => b.pct - a.pct).slice(0, 3)
+  const mediaPresencaTurma = alunosTurma.length > 0
+    ? Math.round(alunosTurma.reduce((s, a) => s + a.pct, 0) / alunosTurma.length)
+    : 0
+
   // ── Funções de montagem de dados para exportação ──
   function buildResumoRows(campos: ExportCampos) {
     return [{
@@ -382,6 +441,16 @@ export default function RelatoriosPage() {
     }))
   }
 
+  function buildAlunosTurmaRows(campos: ExportCampos) {
+    return alunosTurmaOrdenados.map((a, i) => ({
+      '#': i + 1, Aluno: a.nome,
+      ...(campos.presenca ? { 'Presença (%)': a.pct, Presentes: a.presentes, Total: a.total } : {}),
+      ...(campos.faltas   ? { Faltas: a.faltas } : {}),
+      ...(campos.biblias  ? { Bíblias: a.biblias } : {}),
+      ...(campos.revistas ? { Revistas: a.revistas } : {}),
+    }))
+  }
+
   function buildFilename(ext: string) {
     const safe = labelRelatorio.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, '-').toLowerCase()
     return `relatorio-ebd-${safe}.${ext}`
@@ -398,6 +467,7 @@ export default function RelatoriosPage() {
         ['resumo', 'section-resumo'],
         ['grafico', 'section-grafico'],
         ['porSala', 'section-porSala'],
+        ['alunosTurma', 'section-alunosTurma'],
         ['topAlunos', 'section-topAlunos'],
         ['atencao', 'section-atencao'],
         ['professores', 'section-professores'],
@@ -420,6 +490,7 @@ export default function RelatoriosPage() {
       const sheets: { nome: string; rows: Record<string, any>[] }[] = []
       if (sec.resumo)     sheets.push({ nome: 'Resumo',      rows: buildResumoRows(cam) })
       if (sec.porSala && dadosSala.length > 0)   sheets.push({ nome: 'Por Sala', rows: buildSalaRows(cam) })
+      if (sec.alunosTurma && alunosTurmaOrdenados.length > 0) sheets.push({ nome: 'Alunos da Turma', rows: buildAlunosTurmaRows(cam) })
       if (sec.topAlunos && topAlunos.length > 0) sheets.push({ nome: 'Top Alunos', rows: buildAlunoRows(cam) })
       if (sec.professores && professores.length > 0) sheets.push({ nome: 'Professores', rows: buildProfRows(cam) })
       if (sheets.length > 0) exportarExcel(sheets, buildFilename('xlsx'))
@@ -438,6 +509,11 @@ export default function RelatoriosPage() {
       if (sec.porSala && dadosSala.length > 0) {
         blocos.push({ '': '=== POR SALA ===' })
         blocos.push(...buildSalaRows(cam))
+        blocos.push({})
+      }
+      if (sec.alunosTurma && alunosTurmaOrdenados.length > 0) {
+        blocos.push({ '': '=== ALUNOS DA TURMA ===' })
+        blocos.push(...buildAlunosTurmaRows(cam))
         blocos.push({})
       }
       if (sec.topAlunos && topAlunos.length > 0) {
@@ -526,6 +602,7 @@ export default function RelatoriosPage() {
                     ['resumo',     'Resumo / KPIs'],
                     ['grafico',    'Gráfico de evolução'],
                     ['porSala',    'Presença por sala'],
+                    ...(turmaFiltro !== 'all' ? [['alunosTurma', 'Lista de alunos da turma'] as const] : []),
                     ['topAlunos',  'Top 10 alunos'],
                     ['atencao',    'Alunos em atenção'],
                     ['professores','Desempenho professores'],
@@ -845,6 +922,143 @@ export default function RelatoriosPage() {
           </Card>
         </div>
 
+        {/* Alunos da Turma */}
+        {turmaFiltro !== 'all' && alunosTurma.length > 0 && (
+          <div id="section-alunosTurma">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Alunos — {labelTurma}</CardTitle>
+                <CardDescription>{labelPeriodo}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Resumo rápido */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-xl font-bold">{alunosTurma.length}</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Matriculados</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-xl font-bold" style={{ color: corPresenca(mediaPresencaTurma) }}>{mediaPresencaTurma}%</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Média presença</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-xl font-bold text-green-600">{alunosTurma.reduce((s, a) => s + a.presentes, 0)}</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Total presenças</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 text-center">
+                    <p className="text-xl font-bold text-red-600">{alunosTurma.reduce((s, a) => s + a.faltas, 0)}</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Total faltas</p>
+                  </div>
+                </div>
+
+                {/* Top 3 destaques */}
+                {top3Turma.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Destaques</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {top3Turma.map((a, i) => (
+                        <div key={a.id} className={cn('flex items-center gap-3 p-3 rounded-lg border', i === 0 ? 'bg-yellow-500/5 border-yellow-500/30' : i === 1 ? 'bg-slate-500/5 border-slate-400/30' : 'bg-orange-600/5 border-orange-600/30')}>
+                          <span className="text-xl flex-shrink-0">{['🥇', '🥈', '🥉'][i]}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">{a.nome}</p>
+                            <p className="text-[11px] text-muted-foreground">{a.presentes}/{a.total} aulas</p>
+                          </div>
+                          <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sort chips */}
+                <div className="flex items-center gap-2 flex-wrap" data-no-print>
+                  <span className="text-xs text-muted-foreground">Ordenar:</span>
+                  {([['pct', 'Presença'], ['nome', 'Nome'], ['faltas', 'Faltas']] as const).map(([val, label]) => (
+                    <button key={val} onClick={() => setSortAlunosTurma(val)}
+                      className={cn('px-2.5 py-1 rounded-md text-xs font-medium border transition-all',
+                        sortAlunosTurma === val ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:bg-muted border-border')}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Mobile: cards */}
+                <div className="sm:hidden space-y-2">
+                  {alunosTurmaOrdenados.map((a) => (
+                    <div key={a.id} className="rounded-xl border bg-card overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm truncate">{a.nome}</p>
+                          {a.cargo && <p className="text-[11px] text-muted-foreground truncate">{a.cargo}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                          <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${a.pct}%`, backgroundColor: corPresenca(a.pct) }} />
+                          </div>
+                          <span className="text-xs font-bold" style={{ color: corPresenca(a.pct) }}>{a.pct}%</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 divide-x border-t bg-muted/20">
+                        <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-green-600">{a.presentes}</span><span className="text-[10px] text-muted-foreground">Pres.</span></div>
+                        <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-red-600">{a.faltas}</span><span className="text-[10px] text-muted-foreground">Faltas</span></div>
+                        <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-purple-600">{a.biblias}</span><span className="text-[10px] text-muted-foreground">Bíblias</span></div>
+                        <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-orange-600">{a.revistas}</span><span className="text-[10px] text-muted-foreground">Revistas</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop: tabela */}
+                <div className="hidden sm:block rounded-lg border overflow-x-auto">
+                  <Table className="min-w-[480px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/40">
+                        <TableHead className="w-8">#</TableHead>
+                        <TableHead>Aluno</TableHead>
+                        <TableHead className="text-center">Presença</TableHead>
+                        <TableHead className="text-center">Faltas</TableHead>
+                        <TableHead className="text-center hidden md:table-cell">Bíblias</TableHead>
+                        <TableHead className="text-center hidden md:table-cell">Revistas</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {alunosTurmaOrdenados.map((a, i) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="text-center text-muted-foreground text-xs font-medium">{i + 1}</TableCell>
+                          <TableCell>
+                            <p className="font-medium text-sm">{a.nome}</p>
+                            {a.cargo && <p className="text-[11px] text-muted-foreground">{a.cargo}</p>}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <div className="flex items-center gap-1.5 justify-center">
+                              <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
+                                <div className="h-full rounded-full" style={{ width: `${a.pct}%`, backgroundColor: corPresenca(a.pct) }} />
+                              </div>
+                              <span className="text-xs font-bold" style={{ color: corPresenca(a.pct) }}>{a.pct}%</span>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
+                          </TableCell>
+                          <TableCell className="text-center text-purple-600 hidden md:table-cell">{a.biblias}</TableCell>
+                          <TableCell className="text-center text-orange-600 hidden md:table-cell">{a.revistas}</TableCell>
+                          <TableCell>
+                            <Badge className={cn('text-xs border', a.total > 0 ? badgePresenca(a.pct) : 'bg-muted text-muted-foreground border-muted')}>
+                              {a.total > 0 ? labelPresenca(a.pct) : 'Sem dados'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* Alunos: Destaques + Atenção */}
         <div className="grid gap-6 lg:grid-cols-2">
           <div id="section-topAlunos">
@@ -923,7 +1137,7 @@ export default function RelatoriosPage() {
                 <CardTitle className="text-base flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-red-500" />Alunos que Precisam de Atenção
                 </CardTitle>
-                <CardDescription>Presença abaixo de 75% no período</CardDescription>
+                <CardDescription>Presença abaixo de 50% no período</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {alunosAtencao.length === 0 ? (
