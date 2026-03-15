@@ -8,6 +8,9 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { ChartTooltip } from '@/components/ui/chart-tooltip'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
@@ -15,10 +18,9 @@ import {
   Tooltip, ResponsiveContainer, Cell, Legend,
 } from 'recharts'
 import {
-  TrendingUp, Download, Calendar, Users, CheckCircle2, XCircle,
+  Download, Calendar, CheckCircle2, XCircle,
   FileText, BookOpen, Book, DollarSign, UserPlus, Trophy,
-  AlertTriangle, ChevronLeft, ChevronRight, BarChart3, Star,
-  Settings2, Filter,
+  AlertTriangle, ChevronLeft, ChevronRight, BarChart3, Star, Filter,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, MESES, MESES_CURTOS, TRIMESTRES } from '@/lib/constants'
@@ -30,6 +32,16 @@ import { exportarCSV, exportarExcel } from '@/lib/export'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type Granularidade = 'dia' | 'mes' | 'trimestre' | 'ano'
+type FormatoExport = 'pdf' | 'excel' | 'csv'
+
+interface ExportSecoes {
+  resumo: boolean; grafico: boolean; porSala: boolean
+  topAlunos: boolean; atencao: boolean; professores: boolean
+}
+interface ExportCampos {
+  presenca: boolean; faltas: boolean; visitantes: boolean
+  biblias: boolean; revistas: boolean; oferta: boolean
+}
 
 interface DadosDomingo {
   data: string; presentes: number; faltas: number; visitantes: number
@@ -47,6 +59,15 @@ interface AlunoFrequente { nome: string; sala: string; presentes: number; total:
 interface ProfessorDesempenho { nome: string; turmas: string[]; aulas: number; presMedia: number; biblias: number }
 interface TurmaSimples { id: string; nome: string }
 
+const SECOES_INICIAL: ExportSecoes = {
+  resumo: true, grafico: true, porSala: true,
+  topAlunos: true, atencao: true, professores: true,
+}
+const CAMPOS_INICIAL: ExportCampos = {
+  presenca: true, faltas: true, visitantes: true,
+  biblias: true, revistas: true, oferta: true,
+}
+
 function dadosVazios() {
   return { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0, total: 0, domingos: 0, pct: 0 }
 }
@@ -55,17 +76,12 @@ function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
   const map = new Map<string, DadosDomingo>()
   for (const dd of entries) {
     const prev = map.get(dd.data)
-    if (!prev) {
-      map.set(dd.data, { ...dd })
-    } else {
+    if (!prev) { map.set(dd.data, { ...dd }) } else {
       map.set(dd.data, {
         ...prev,
-        presentes: prev.presentes + dd.presentes,
-        faltas: prev.faltas + dd.faltas,
-        visitantes: prev.visitantes + dd.visitantes,
-        biblias: prev.biblias + dd.biblias,
-        revistas: prev.revistas + dd.revistas,
-        oferta: prev.oferta + dd.oferta,
+        presentes: prev.presentes + dd.presentes, faltas: prev.faltas + dd.faltas,
+        visitantes: prev.visitantes + dd.visitantes, biblias: prev.biblias + dd.biblias,
+        revistas: prev.revistas + dd.revistas, oferta: prev.oferta + dd.oferta,
         total: prev.total + dd.total,
       })
     }
@@ -74,8 +90,7 @@ function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
 }
 
 function filtrarPorPeriodo(
-  chamadas: any[],
-  opts: { granularidade: Granularidade; mes: number; trim: number }
+  chamadas: any[], opts: { granularidade: Granularidade; mes: number; trim: number }
 ): any[] {
   return chamadas.filter((c: any) => {
     if (!c.data) return opts.granularidade === 'ano'
@@ -96,20 +111,14 @@ export default function RelatoriosPage() {
   const [trim, setTrim] = useState(Math.floor(new Date().getMonth() / 3))
   const [domingoIdx, setDomingoIdx] = useState(0)
 
-  // Filtro por turma
   const [turmaFiltro, setTurmaFiltro] = useState<string>('all')
   const [turmasDisponiveis, setTurmasDisponiveis] = useState<TurmaSimples[]>([])
 
-  // Configurador
-  const [showConfig, setShowConfig] = useState(false)
-  const [secoes, setSecoes] = useState({
-    resumo: true, grafico: true, porSala: true,
-    topAlunos: true, atencao: true, professores: true,
-  })
-  const [camposExport, setCamposExport] = useState({
-    presenca: true, faltas: true, visitantes: true,
-    biblias: true, revistas: true, oferta: true,
-  })
+  // Estado do dialog de exportação
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportFormato, setExportFormato] = useState<FormatoExport>('pdf')
+  const [exportSecoes, setExportSecoes] = useState<ExportSecoes>(SECOES_INICIAL)
+  const [exportCampos, setExportCampos] = useState<ExportCampos>(CAMPOS_INICIAL)
 
   const [domingosPorMes, setDomingosPorMes] = useState<Record<number, DadosDomingo[]>>({})
   const [resumoMensal, setResumoMensal] = useState<DadosMes[]>([])
@@ -118,22 +127,18 @@ export default function RelatoriosPage() {
   const [alunosAtencao, setAlunosAtencao] = useState<AlunoFrequente[]>([])
   const [professores, setProfessores] = useState<ProfessorDesempenho[]>([])
 
-  // ── Carregar turmas disponíveis ──
   useEffect(() => {
     db.from('turmas').select('id, nome').eq('ativa', true).order('nome')
       .then(({ data }: any) => setTurmasDisponiveis(data ?? []))
   }, [])
 
-  // ── Dados anuais: chamadas + presenças ──
   useEffect(() => {
     async function load() {
       let q = db.from('chamadas')
         .select('id, data, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
-        .eq('ano', ano)
-        .order('data', { ascending: true })
+        .eq('ano', ano).order('data', { ascending: true })
       if (turmaFiltro !== 'all') q = q.eq('turma_id', turmaFiltro)
       const { data: chamadas } = await q
-
       if (!chamadas?.length) { setDomingosPorMes({}); setResumoMensal([]); return }
 
       const porMes: Record<number, DadosDomingo[]> = {}
@@ -152,50 +157,35 @@ export default function RelatoriosPage() {
         const faltas    = ps.filter((p: any) => !p.presente).length
         const biblias   = ps.filter((p: any) => p.trouxe_biblia).length
         const revistas  = ps.filter((p: any) => p.trouxe_revista).length
-
         porMes[m].push({
           data: format(parseISO(c.data), 'dd/MM', { locale: ptBR }),
           presentes, faltas, visitantes: vs.length, biblias, revistas,
           oferta: Number(c.oferta) || 0, total: ps.length,
         })
-
         mensal[m].domingos++
-        mensal[m].total     += ps.length
-        mensal[m].presentes += presentes
-        mensal[m].faltas    += faltas
-        mensal[m].biblias   += biblias
-        mensal[m].revistas  += revistas
-        mensal[m].visitantes += vs.length
-        mensal[m].oferta    += Number(c.oferta) || 0
+        mensal[m].total += ps.length; mensal[m].presentes += presentes
+        mensal[m].faltas += faltas;   mensal[m].biblias   += biblias
+        mensal[m].revistas += revistas; mensal[m].visitantes += vs.length
+        mensal[m].oferta += Number(c.oferta) || 0
       }
-
       setDomingosPorMes(porMes)
       setResumoMensal(mensal)
     }
     load()
   }, [ano, turmaFiltro])
 
-  // ── Dados por sala ──
   useEffect(() => {
     async function load() {
       const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
       if (!turmas?.length) { setDadosSala([]); return }
-
-      // Filtrar apenas a turma selecionada (se houver)
-      const turmasFiltradas = turmaFiltro !== 'all'
-        ? turmas.filter((t: any) => t.id === turmaFiltro)
-        : turmas
-
+      const turmasFiltradas = turmaFiltro !== 'all' ? turmas.filter((t: any) => t.id === turmaFiltro) : turmas
       const resultado: DadosSala[] = await Promise.all(turmasFiltradas.map(async (turma: any, idx: number) => {
         const [{ count: matriculados }, { data: chamadasRaw }] = await Promise.all([
           db.from('alunos').select('id', { count: 'exact', head: true }).eq('turma_id', turma.id).eq('ativo', true),
-          db.from('chamadas')
-            .select('id, data, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
+          db.from('chamadas').select('id, data, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
             .eq('turma_id', turma.id).eq('ano', ano),
         ])
-
         const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
-
         let presentes = 0, faltas = 0, biblias = 0, revistas = 0, visitantes = 0, oferta = 0, total = 0
         for (const c of chamadas) {
           const ps = c.presencas ?? []
@@ -205,22 +195,19 @@ export default function RelatoriosPage() {
           biblias   += ps.filter((p: any) => p.trouxe_biblia).length
           revistas  += ps.filter((p: any) => p.trouxe_revista).length
           visitantes += (c.historico_visitantes ?? []).length
-          oferta    += Number(c.oferta) || 0
+          oferta += Number(c.oferta) || 0
         }
-
         return {
           sala: turma.nome, cor: resolverCor(turma.cor, idx),
           matriculados: matriculados ?? 0, presencaMedia: calcularPct(presentes, total),
           presentes, faltas, visitantes, biblias, revistas, oferta,
         }
       }))
-
       setDadosSala(resultado)
     }
     load()
   }, [ano, mes, trim, granularidade, turmaFiltro])
 
-  // ── Top alunos + atenção ──
   useEffect(() => {
     async function load() {
       let qCh = db.from('chamadas').select('id, data').eq('ano', ano)
@@ -238,7 +225,6 @@ export default function RelatoriosPage() {
         ppa[p.aluno_id].total++
         if (p.presente) ppa[p.aluno_id].presentes++
       }
-
       let qAlunos = db.from('alunos').select('id, nome, turmas(nome)').in('id', Object.keys(ppa)).eq('ativo', true)
       if (turmaFiltro !== 'all') qAlunos = qAlunos.eq('turma_id', turmaFiltro)
       const { data: alunos } = await qAlunos
@@ -251,55 +237,40 @@ export default function RelatoriosPage() {
           const pct = calcularPct(d.presentes, d.total)
           return { nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma', presentes: d.presentes, total: d.total, pct, faltas: d.total - d.presentes }
         })
-
       setTopAlunos([...lista].sort((a, b) => b.pct - a.pct || b.presentes - a.presentes).slice(0, 10))
       setAlunosAtencao([...lista].filter(a => a.pct < 75).sort((a, b) => a.pct - b.pct))
     }
     load()
   }, [ano, mes, trim, granularidade, turmaFiltro])
 
-  // ── Professores ──
   useEffect(() => {
     async function load() {
-      let qProfs = db.from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
-      const { data: profsList } = await qProfs
+      const { data: profsList } = await db.from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
       if (!profsList?.length) { setProfessores([]); return }
-
-      // Filtrar professores da turma selecionada
       const profsFiltered = turmaFiltro !== 'all'
         ? profsList.filter((p: any) => (p.professor_turmas ?? []).some((pt: any) => pt.turma_id === turmaFiltro))
         : profsList
-
-      const { data: profAlunos } = await db
-        .from('alunos').select('id, responsavel, turma_id').like('responsavel', 'professor:%').eq('ativo', true)
+      const { data: profAlunos } = await db.from('alunos').select('id, responsavel, turma_id').like('responsavel', 'professor:%').eq('ativo', true)
       const profIdToAluno = new Map<string, { alunoId: string; turmaId: string | null }>()
       for (const a of profAlunos ?? []) {
         const pid = (a.responsavel as string).replace('professor:', '')
         if (pid) profIdToAluno.set(pid, { alunoId: a.id, turmaId: a.turma_id ?? null })
       }
-
       const resultado: ProfessorDesempenho[] = await Promise.all(profsFiltered.map(async (prof: any) => {
         const turmaIds = (prof.professor_turmas ?? []).map((pt: any) => pt.turma_id).filter(Boolean)
         const turmasNomes = (prof.professor_turmas ?? []).map((pt: any) => pt.turmas?.nome).filter(Boolean)
-
         if (!turmaIds.length) return { nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 }
-
         const filteredTurmaIds = turmaFiltro !== 'all' ? turmaIds.filter((id: string) => id === turmaFiltro) : turmaIds
-
-        const { data: chamadasRaw } = await db
-          .from('chamadas').select('id, data').in('turma_id', filteredTurmaIds).eq('ano', ano)
+        const { data: chamadasRaw } = await db.from('chamadas').select('id, data').in('turma_id', filteredTurmaIds).eq('ano', ano)
         const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
         const aulas = chamadas.length
-
         const alunoInfo = profIdToAluno.get(prof.id) ?? null
         let presMedia = 0, biblias = 0
         if (alunoInfo?.turmaId) {
-          const { data: alunoChRaw } = await db
-            .from('chamadas').select('id, data').eq('turma_id', alunoInfo.turmaId).eq('ano', ano)
+          const { data: alunoChRaw } = await db.from('chamadas').select('id, data').eq('turma_id', alunoInfo.turmaId).eq('ano', ano)
           const alunoChFilt = filtrarPorPeriodo(alunoChRaw ?? [], { granularidade, mes, trim })
           if (alunoChFilt.length > 0) {
-            const { data: pPresencas } = await db
-              .from('presencas').select('presente, trouxe_biblia')
+            const { data: pPresencas } = await db.from('presencas').select('presente, trouxe_biblia')
               .eq('aluno_id', alunoInfo.alunoId).in('chamada_id', alunoChFilt.map((c: any) => c.id))
             const presentes = pPresencas?.filter((p: any) => p.presente).length ?? 0
             const bibCount  = pPresencas?.filter((p: any) => p.trouxe_biblia).length ?? 0
@@ -307,10 +278,8 @@ export default function RelatoriosPage() {
             biblias   = presentes > 0 ? calcularPct(bibCount, presentes) : 0
           }
         }
-
         return { nome: prof.nome, turmas: turmasNomes, aulas, presMedia, biblias }
       }))
-
       setProfessores(resultado.sort((a, b) => b.presMedia - a.presMedia))
     }
     load()
@@ -328,7 +297,6 @@ export default function RelatoriosPage() {
         labelPeriodo: domingosList[domingoIdx] ? `${domingosList[domingoIdx].data}/${ano} — ${MESES[mes]}` : `${MESES[mes]} ${ano}`,
       }
     }
-
     if (granularidade === 'mes') {
       const d = resumoMensal[mes] ?? dadosVazios()
       return {
@@ -339,7 +307,6 @@ export default function RelatoriosPage() {
         labelPeriodo: `${MESES[mes]} de ${ano}`,
       }
     }
-
     if (granularidade === 'trimestre') {
       const mesesIdx = TRIMESTRES[trim].meses
       const mesesTrim = mesesIdx.map(i => resumoMensal[i]).filter(Boolean)
@@ -355,12 +322,11 @@ export default function RelatoriosPage() {
         labelPeriodo: `${TRIMESTRES[trim].label} ${ano} (${TRIMESTRES[trim].desc})`,
       }
     }
-
-    // anual
     const d = resumoMensal.reduce((acc, m) => ({
       ...acc, presentes: acc.presentes + m.presentes, faltas: acc.faltas + m.faltas,
       visitantes: acc.visitantes + m.visitantes, biblias: acc.biblias + m.biblias,
-      revistas: acc.revistas + m.revistas, oferta: acc.oferta + m.oferta, domingos: acc.domingos + m.domingos, total: acc.total + m.total,
+      revistas: acc.revistas + m.revistas, oferta: acc.oferta + m.oferta,
+      domingos: acc.domingos + m.domingos, total: acc.total + m.total,
     }), dadosVazios())
     return {
       dados: { ...d, pct: calcularPct(d.presentes, d.total) },
@@ -373,94 +339,130 @@ export default function RelatoriosPage() {
   const labelRelatorio = `${labelPeriodo}${turmaFiltro !== 'all' ? ` — ${labelTurma}` : ''}`
   const anoIdx = ANOS_DISPONIVEIS.indexOf(ano)
 
-  // ── Handlers de exportação ──
-  function buildFilename(ext: string) {
-    const safe = labelRelatorio.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').toLowerCase()
-    return `relatorio-ebd-${safe}.${ext}`
-  }
-
-  function buildResumoRows() {
+  // ── Funções de montagem de dados para exportação ──
+  function buildResumoRows(campos: ExportCampos) {
     return [{
       Período: labelRelatorio,
-      ...(camposExport.presenca ? { 'Presença (%)': dados.pct, Presentes: dados.presentes } : {}),
-      ...(camposExport.faltas   ? { Faltas: dados.faltas } : {}),
-      ...(camposExport.visitantes ? { Visitantes: dados.visitantes } : {}),
-      ...(camposExport.biblias  ? { Bíblias: dados.biblias } : {}),
-      ...(camposExport.revistas ? { Revistas: dados.revistas } : {}),
-      ...(camposExport.oferta   ? { 'Oferta (R$)': (dados.oferta / 100).toFixed(2) } : {}),
+      ...(campos.presenca   ? { 'Presença (%)': dados.pct, Presentes: dados.presentes } : {}),
+      ...(campos.faltas     ? { Faltas: dados.faltas } : {}),
+      ...(campos.visitantes ? { Visitantes: dados.visitantes } : {}),
+      ...(campos.biblias    ? { Bíblias: dados.biblias } : {}),
+      ...(campos.revistas   ? { Revistas: dados.revistas } : {}),
+      ...(campos.oferta     ? { 'Oferta (R$)': dados.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) } : {}),
       'Domingos/Aulas': dados.domingos,
     }]
   }
 
-  function buildSalaRows() {
+  function buildSalaRows(campos: ExportCampos) {
     return dadosSala.map(s => ({
       Sala: s.sala,
       Matriculados: s.matriculados,
-      ...(camposExport.presenca ? { 'Presença (%)': s.presencaMedia, Presentes: s.presentes } : {}),
-      ...(camposExport.faltas   ? { Faltas: s.faltas } : {}),
-      ...(camposExport.visitantes ? { Visitantes: s.visitantes } : {}),
-      ...(camposExport.biblias  ? { Bíblias: s.biblias } : {}),
-      ...(camposExport.revistas ? { Revistas: s.revistas } : {}),
-      ...(camposExport.oferta   ? { 'Oferta (R$)': (s.oferta / 100).toFixed(2) } : {}),
+      ...(campos.presenca   ? { 'Presença (%)': s.presencaMedia, Presentes: s.presentes } : {}),
+      ...(campos.faltas     ? { Faltas: s.faltas } : {}),
+      ...(campos.visitantes ? { Visitantes: s.visitantes } : {}),
+      ...(campos.biblias    ? { Bíblias: s.biblias } : {}),
+      ...(campos.revistas   ? { Revistas: s.revistas } : {}),
+      ...(campos.oferta     ? { 'Oferta (R$)': s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) } : {}),
     }))
   }
 
-  function buildAlunoRows() {
+  function buildAlunoRows(campos: ExportCampos) {
     return topAlunos.map((a, i) => ({
-      '#': i + 1,
-      Aluno: a.nome,
-      Sala: a.sala,
-      ...(camposExport.presenca ? { 'Presença (%)': a.pct, Presentes: a.presentes, Total: a.total } : {}),
-      ...(camposExport.faltas   ? { Faltas: a.faltas } : {}),
+      '#': i + 1, Aluno: a.nome, Sala: a.sala,
+      ...(campos.presenca ? { 'Presença (%)': a.pct, Presentes: a.presentes, Total: a.total } : {}),
+      ...(campos.faltas   ? { Faltas: a.faltas } : {}),
     }))
   }
 
-  function buildProfRows() {
+  function buildProfRows(campos: ExportCampos) {
     return professores.map(p => ({
-      Professor: p.nome,
-      Turmas: p.turmas.join(', '),
-      Aulas: p.aulas,
-      ...(camposExport.presenca ? { 'Presença pessoal (%)': p.presMedia } : {}),
-      ...(camposExport.biblias  ? { 'Bíblias (%)': p.biblias } : {}),
+      Professor: p.nome, Turmas: p.turmas.join(', '), Aulas: p.aulas,
+      ...(campos.presenca ? { 'Presença pessoal (%)': p.presMedia } : {}),
+      ...(campos.biblias  ? { 'Bíblias (%)': p.biblias } : {}),
     }))
   }
 
-  function handleExportCSV() {
-    const allRows: Record<string, any>[] = []
-    if (secoes.resumo) allRows.push(...buildResumoRows())
-    allRows.push({}) // linha vazia separadora
-    if (secoes.porSala && dadosSala.length > 0) allRows.push(...buildSalaRows())
-    allRows.push({})
-    if (secoes.topAlunos && topAlunos.length > 0) allRows.push(...buildAlunoRows())
-    allRows.push({})
-    if (secoes.professores && professores.length > 0) allRows.push(...buildProfRows())
-    exportarCSV(allRows.filter((r, i, arr) => !(Object.keys(r).length === 0 && i === arr.length - 1)), buildFilename('csv'))
+  function buildFilename(ext: string) {
+    const safe = labelRelatorio.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, '-').toLowerCase()
+    return `relatorio-ebd-${safe}.${ext}`
   }
 
-  function handleExportExcel() {
-    const sheets: { nome: string; rows: Record<string, any>[] }[] = []
-    if (secoes.resumo) sheets.push({ nome: 'Resumo', rows: buildResumoRows() })
-    if (secoes.porSala && dadosSala.length > 0) sheets.push({ nome: 'Por Sala', rows: buildSalaRows() })
-    if (secoes.topAlunos && topAlunos.length > 0) sheets.push({ nome: 'Top Alunos', rows: buildAlunoRows() })
-    if (secoes.professores && professores.length > 0) sheets.push({ nome: 'Professores', rows: buildProfRows() })
-    if (sheets.length > 0) exportarExcel(sheets, buildFilename('xlsx'))
-  }
+  // ── Geração de exportação ──
+  function gerarExport() {
+    const sec = exportSecoes
+    const cam = exportCampos
 
-  function handlePDF() {
-    window.print()
+    if (exportFormato === 'pdf') {
+      // Esconder seções não selecionadas durante a impressão
+      const sectionIds: [keyof ExportSecoes, string][] = [
+        ['resumo', 'section-resumo'],
+        ['grafico', 'section-grafico'],
+        ['porSala', 'section-porSala'],
+        ['topAlunos', 'section-topAlunos'],
+        ['atencao', 'section-atencao'],
+        ['professores', 'section-professores'],
+      ]
+      const toHide = sectionIds
+        .filter(([key]) => !sec[key])
+        .map(([, id]) => document.getElementById(id))
+        .filter(Boolean) as HTMLElement[]
+
+      toHide.forEach(el => el.setAttribute('data-print-hidden', ''))
+      setExportOpen(false)
+      setTimeout(() => {
+        window.print()
+        setTimeout(() => toHide.forEach(el => el.removeAttribute('data-print-hidden')), 500)
+      }, 150)
+      return
+    }
+
+    if (exportFormato === 'excel') {
+      const sheets: { nome: string; rows: Record<string, any>[] }[] = []
+      if (sec.resumo)     sheets.push({ nome: 'Resumo',      rows: buildResumoRows(cam) })
+      if (sec.porSala && dadosSala.length > 0)   sheets.push({ nome: 'Por Sala', rows: buildSalaRows(cam) })
+      if (sec.topAlunos && topAlunos.length > 0) sheets.push({ nome: 'Top Alunos', rows: buildAlunoRows(cam) })
+      if (sec.professores && professores.length > 0) sheets.push({ nome: 'Professores', rows: buildProfRows(cam) })
+      if (sheets.length > 0) exportarExcel(sheets, buildFilename('xlsx'))
+      setExportOpen(false)
+      return
+    }
+
+    if (exportFormato === 'csv') {
+      // CSV: seções selecionadas separadas por linha de título
+      const blocos: Record<string, any>[] = []
+      if (sec.resumo) {
+        blocos.push({ '': '=== RESUMO ===' })
+        blocos.push(...buildResumoRows(cam))
+        blocos.push({})
+      }
+      if (sec.porSala && dadosSala.length > 0) {
+        blocos.push({ '': '=== POR SALA ===' })
+        blocos.push(...buildSalaRows(cam))
+        blocos.push({})
+      }
+      if (sec.topAlunos && topAlunos.length > 0) {
+        blocos.push({ '': '=== TOP ALUNOS ===' })
+        blocos.push(...buildAlunoRows(cam))
+        blocos.push({})
+      }
+      if (sec.professores && professores.length > 0) {
+        blocos.push({ '': '=== PROFESSORES ===' })
+        blocos.push(...buildProfRows(cam))
+      }
+      if (blocos.length > 0) exportarCSV(blocos, buildFilename('csv'))
+      setExportOpen(false)
+    }
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* CSS de impressão */}
       <style>{`
         @media print {
           [data-no-print] { display: none !important; }
           [data-print-hidden] { display: none !important; }
           aside, nav { display: none !important; }
           body { background: white !important; }
-          .card { page-break-inside: avoid; }
         }
       `}</style>
 
@@ -471,93 +473,133 @@ export default function RelatoriosPage() {
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Relatórios</h1>
             <p className="text-muted-foreground mt-1">Visualize e exporte estatísticas por período e turma</p>
           </div>
-          <div className="flex flex-wrap gap-2" data-no-print>
-            <Button variant="outline" size="sm" onClick={() => setShowConfig(v => !v)}>
-              <Settings2 className="h-4 w-4 mr-2" />{showConfig ? 'Fechar config.' : 'Configurar'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handlePDF}>
-              <FileText className="h-4 w-4 mr-2" />PDF
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportExcel}>
-              <BarChart3 className="h-4 w-4 mr-2" />Excel
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportCSV}>
-              <Download className="h-4 w-4 mr-2" />CSV
-            </Button>
-          </div>
+          <Button onClick={() => { setExportSecoes(SECOES_INICIAL); setExportCampos(CAMPOS_INICIAL); setExportOpen(true) }}>
+            <Download className="h-4 w-4 mr-2" />Exportar Relatório
+          </Button>
         </div>
 
-        {/* Painel de configuração */}
-        {showConfig && (
-          <Card data-no-print>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Settings2 className="h-4 w-4" />Configurar Relatório
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {/* Seções visíveis */}
+        {/* Dialog de Exportação */}
+        <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+          <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Exportar Relatório</DialogTitle>
+              <DialogDescription>{labelRelatorio}</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-5 py-2">
+              {/* Formato */}
               <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Seções visíveis</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Formato</p>
+                <div className="flex gap-2">
+                  {([
+                    ['pdf',   'PDF',        <FileText key="pdf" className="h-4 w-4" />],
+                    ['excel', 'Excel .xlsx', <BarChart3 key="excel" className="h-4 w-4" />],
+                    ['csv',   'CSV',         <Download key="csv" className="h-4 w-4" />],
+                  ] as const).map(([val, label, icon]) => (
+                    <button
+                      key={val}
+                      onClick={() => setExportFormato(val)}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all flex-1 justify-center',
+                        exportFormato === val
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'text-muted-foreground hover:bg-muted border-border'
+                      )}
+                    >
+                      {icon}{label}
+                    </button>
+                  ))}
+                </div>
+                {exportFormato === 'pdf' && (
+                  <p className="text-xs text-muted-foreground mt-2 flex items-start gap-1.5">
+                    <span className="mt-0.5 text-blue-500">ℹ</span>
+                    O PDF imprime as seções selecionadas abaixo. Abre o diálogo de impressão do sistema.
+                  </p>
+                )}
+              </div>
+
+              {/* Seções */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Seções incluídas</p>
+                <div className="grid grid-cols-2 gap-2">
                   {([
                     ['resumo',     'Resumo / KPIs'],
-                    ['grafico',    'Gráfico evolução'],
+                    ['grafico',    'Gráfico de evolução'],
                     ['porSala',    'Presença por sala'],
                     ['topAlunos',  'Top 10 alunos'],
                     ['atencao',    'Alunos em atenção'],
-                    ['professores','Professores'],
+                    ['professores','Desempenho professores'],
                   ] as const).map(([key, label]) => (
                     <button
                       key={key}
-                      onClick={() => setSecoes(s => ({ ...s, [key]: !s[key] }))}
+                      onClick={() => setExportSecoes(s => ({ ...s, [key]: !s[key] }))}
                       className={cn(
-                        'px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
-                        secoes[key]
-                          ? 'bg-primary text-primary-foreground border-primary'
+                        'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all text-left',
+                        exportSecoes[key]
+                          ? 'bg-primary/10 text-primary border-primary/40 font-medium'
                           : 'text-muted-foreground hover:bg-muted border-border'
                       )}
                     >
+                      <span className={cn('w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
+                        exportSecoes[key] ? 'bg-primary border-primary' : 'border-muted-foreground/40')}>
+                        {exportSecoes[key] && <span className="text-primary-foreground text-[10px] font-bold">✓</span>}
+                      </span>
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Campos exportados */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Campos na exportação (CSV / Excel)</p>
-                <div className="flex flex-wrap gap-2">
-                  {([
-                    ['presenca',   'Presença %'],
-                    ['faltas',     'Faltas'],
-                    ['visitantes', 'Visitantes'],
-                    ['biblias',    'Bíblias'],
-                    ['revistas',   'Revistas'],
-                    ['oferta',     'Oferta'],
-                  ] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => setCamposExport(s => ({ ...s, [key]: !s[key] }))}
-                      className={cn(
-                        'px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
-                        camposExport[key]
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'text-muted-foreground hover:bg-muted border-border'
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {/* Campos (Excel/CSV apenas) */}
+              {exportFormato !== 'pdf' && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                    Campos incluídos
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ['presenca',   'Presença %'],
+                      ['faltas',     'Faltas'],
+                      ['visitantes', 'Visitantes'],
+                      ['biblias',    'Bíblias'],
+                      ['revistas',   'Revistas'],
+                      ['oferta',     'Oferta R$'],
+                    ] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => setExportCampos(s => ({ ...s, [key]: !s[key] }))}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
+                          exportCampos[key]
+                            ? 'bg-primary/10 text-primary border-primary/40'
+                            : 'text-muted-foreground hover:bg-muted border-border line-through opacity-60'
+                        )}
+                      >
+                        {exportCampos[key] && <span className="text-primary text-[10px]">✓</span>}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              )}
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setExportOpen(false)}>Cancelar</Button>
+              <Button
+                onClick={gerarExport}
+                disabled={!Object.values(exportSecoes).some(Boolean)}
+              >
+                {exportFormato === 'pdf'   && <><FileText className="h-4 w-4 mr-2" />Imprimir PDF</>}
+                {exportFormato === 'excel' && <><BarChart3 className="h-4 w-4 mr-2" />Gerar Excel</>}
+                {exportFormato === 'csv'   && <><Download className="h-4 w-4 mr-2" />Baixar CSV</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Filtros de Período */}
         <div className="rounded-xl border bg-card overflow-hidden">
-          {/* Granularidade */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-4 border-b bg-muted/30" data-no-print>
             <div>
               <p className="font-semibold">Período do Relatório</p>
@@ -573,7 +615,6 @@ export default function RelatoriosPage() {
             </div>
           </div>
 
-          {/* Ano */}
           <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/10 flex-wrap" data-no-print>
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide w-16">Ano</span>
             <div className="flex items-center gap-1">
@@ -585,7 +626,6 @@ export default function RelatoriosPage() {
             </div>
           </div>
 
-          {/* Turma */}
           <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/10 flex-wrap" data-no-print>
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide w-16">Turma</span>
             <Select value={turmaFiltro} onValueChange={v => { setTurmaFiltro(v); setDomingoIdx(0) }}>
@@ -600,7 +640,6 @@ export default function RelatoriosPage() {
             </Select>
           </div>
 
-          {/* Trimestre */}
           {granularidade === 'trimestre' && (
             <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/10 flex-wrap" data-no-print>
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide w-16">Trimestre</span>
@@ -615,7 +654,6 @@ export default function RelatoriosPage() {
             </div>
           )}
 
-          {/* Mês */}
           {(granularidade === 'mes' || granularidade === 'dia') && (
             <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/10 flex-wrap" data-no-print>
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide w-16">Mês</span>
@@ -628,7 +666,6 @@ export default function RelatoriosPage() {
             </div>
           )}
 
-          {/* Domingo */}
           {granularidade === 'dia' && domingosList.length > 0 && (
             <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/10 flex-wrap" data-no-print>
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide w-16">Domingo</span>
@@ -642,30 +679,28 @@ export default function RelatoriosPage() {
           )}
 
           {/* KPIs */}
-          {secoes.resumo && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 divide-x divide-y md:divide-y-0">
-              {[
-                { label: 'Presença',  value: `${dados.pct}%`,                              sub: `${dados.presentes} presentes`, icon: <CheckCircle2 className="h-4 w-4 text-green-500" />,  color: 'text-green-600' },
-                { label: 'Faltas',    value: dados.faltas,                                  sub: 'ausências',                    icon: <XCircle      className="h-4 w-4 text-red-500" />,    color: 'text-red-600' },
-                { label: 'Visitantes',value: dados.visitantes,                              sub: 'novos',                        icon: <UserPlus     className="h-4 w-4 text-blue-500" />,   color: 'text-blue-600' },
-                { label: 'Bíblias',   value: dados.biblias,                                 sub: 'trouxeram',                    icon: <Book         className="h-4 w-4 text-purple-500" />, color: 'text-purple-600' },
-                { label: 'Revistas',  value: dados.revistas,                                sub: 'trouxeram',                    icon: <BookOpen     className="h-4 w-4 text-orange-500" />, color: 'text-orange-600' },
-                { label: 'Oferta',    value: `R$ ${dados.oferta.toLocaleString('pt-BR')}`,  sub: 'arrecadado',                   icon: <DollarSign   className="h-4 w-4 text-emerald-500" />, color: 'text-emerald-600' },
-                { label: 'Domingos',  value: dados.domingos,                                sub: 'aulas realizadas',             icon: <Calendar     className="h-4 w-4 text-muted-foreground" />, color: '' },
-              ].map((kpi, i) => (
-                <div key={i} className="flex flex-col items-center justify-center py-4 px-3 text-center">
-                  <div className="mb-1">{kpi.icon}</div>
-                  <span className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">{kpi.label}</span>
-                  <span className="text-[10px] text-muted-foreground">{kpi.sub}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div id="section-resumo" className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 divide-x divide-y md:divide-y-0">
+            {[
+              { label: 'Presença',   value: `${dados.pct}%`,                             sub: `${dados.presentes} presentes`, icon: <CheckCircle2 className="h-4 w-4 text-green-500" />,    color: 'text-green-600' },
+              { label: 'Faltas',     value: dados.faltas,                                 sub: 'ausências',                    icon: <XCircle      className="h-4 w-4 text-red-500" />,      color: 'text-red-600' },
+              { label: 'Visitantes', value: dados.visitantes,                             sub: 'novos',                        icon: <UserPlus     className="h-4 w-4 text-blue-500" />,     color: 'text-blue-600' },
+              { label: 'Bíblias',    value: dados.biblias,                                sub: 'trouxeram',                    icon: <Book         className="h-4 w-4 text-purple-500" />,   color: 'text-purple-600' },
+              { label: 'Revistas',   value: dados.revistas,                               sub: 'trouxeram',                    icon: <BookOpen     className="h-4 w-4 text-orange-500" />,   color: 'text-orange-600' },
+              { label: 'Oferta',     value: `R$ ${dados.oferta.toLocaleString('pt-BR')}`, sub: 'arrecadado',                   icon: <DollarSign   className="h-4 w-4 text-emerald-500" />,  color: 'text-emerald-600' },
+              { label: 'Domingos',   value: dados.domingos,                               sub: 'aulas realizadas',             icon: <Calendar     className="h-4 w-4 text-muted-foreground" />, color: '' },
+            ].map((kpi, i) => (
+              <div key={i} className="flex flex-col items-center justify-center py-4 px-3 text-center">
+                <div className="mb-1">{kpi.icon}</div>
+                <span className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</span>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">{kpi.label}</span>
+                <span className="text-[10px] text-muted-foreground">{kpi.sub}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Gráfico de Evolução */}
-        {secoes.grafico && (
+        <div id="section-grafico">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Evolução de Presença no Período</CardTitle>
@@ -700,10 +735,10 @@ export default function RelatoriosPage() {
               )}
             </CardContent>
           </Card>
-        )}
+        </div>
 
         {/* Presença por Sala */}
-        {secoes.porSala && (
+        <div id="section-porSala">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Presença por Sala</CardTitle>
@@ -726,7 +761,6 @@ export default function RelatoriosPage() {
                     </BarChart>
                   </ResponsiveContainer>
 
-                  {/* Cards mobile */}
                   <div className="sm:hidden space-y-3">
                     {dadosSala.map((s, i) => (
                       <div key={i} className="rounded-xl border bg-card overflow-hidden">
@@ -809,127 +843,123 @@ export default function RelatoriosPage() {
               )}
             </CardContent>
           </Card>
-        )}
+        </div>
 
         {/* Alunos: Destaques + Atenção */}
-        {(secoes.topAlunos || secoes.atencao) && (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {secoes.topAlunos && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Trophy className="h-4 w-4 text-yellow-500" />Top 10 Mais Frequentes
-                  </CardTitle>
-                  <CardDescription>Alunos com maior presença no período</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {topAlunos.length === 0 ? (
-                    <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
-                  ) : (
-                    <>
-                      {/* Lista mobile */}
-                      <div className="sm:hidden space-y-2">
-                        {topAlunos.map((a, i) => (
-                          <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                            <span className={`w-7 text-center font-bold flex-shrink-0 text-sm ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                              {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">{a.nome}</p>
-                              <p className="text-[11px] text-muted-foreground truncate">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">{a.presentes}/{a.total}</p>
-                            </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div id="section-topAlunos">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-yellow-500" />Top 10 Mais Frequentes
+                </CardTitle>
+                <CardDescription>Alunos com maior presença no período</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {topAlunos.length === 0 ? (
+                  <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
+                ) : (
+                  <>
+                    <div className="sm:hidden space-y-2">
+                      {topAlunos.map((a, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
+                          <span className={`w-7 text-center font-bold flex-shrink-0 text-sm ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
+                            {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{a.nome}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
                           </div>
-                        ))}
-                      </div>
-
-                      <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                        <Table className="min-w-[340px]">
-                          <TableHeader>
-                            <TableRow className="bg-muted/40">
-                              <TableHead className="w-8">#</TableHead>
-                              <TableHead>Aluno</TableHead>
-                              <TableHead className="hidden sm:table-cell">Sala</TableHead>
-                              <TableHead className="text-center">Presença</TableHead>
-                              <TableHead className="text-center hidden sm:table-cell">Faltas</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {topAlunos.map((a, i) => (
-                              <TableRow key={i}>
-                                <TableCell className={`font-bold text-center ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                                  {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
-                                </TableCell>
-                                <TableCell className="font-medium text-sm">
-                                  {a.nome}
-                                  <p className="text-[11px] text-muted-foreground sm:hidden">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
-                                </TableCell>
-                                <TableCell className="hidden sm:table-cell"><span className="text-xs text-muted-foreground">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span></TableCell>
-                                <TableCell className="text-center">
-                                  <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
-                                  <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
-                                </TableCell>
-                                <TableCell className="text-center hidden sm:table-cell">
-                                  <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {secoes.atencao && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-red-500" />Alunos que Precisam de Atenção
-                  </CardTitle>
-                  <CardDescription>Presença abaixo de 75% no período</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {alunosAtencao.length === 0 ? (
-                    <div className="text-center py-8">
-                      <CheckCircle2 className="h-10 w-10 mx-auto text-green-500 mb-2" />
-                      <p className="text-muted-foreground text-sm">Nenhum aluno com presença crítica no período.</p>
+                          <div className="text-right flex-shrink-0">
+                            <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{a.presentes}/{a.total}</p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    alunosAtencao.map((a, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-red-500/5 border-red-500/20">
-                        <div className="p-2 rounded-lg bg-red-500/10">
-                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                    <div className="hidden sm:block rounded-lg border overflow-x-auto">
+                      <Table className="min-w-[340px]">
+                        <TableHeader>
+                          <TableRow className="bg-muted/40">
+                            <TableHead className="w-8">#</TableHead>
+                            <TableHead>Aluno</TableHead>
+                            <TableHead className="hidden sm:table-cell">Sala</TableHead>
+                            <TableHead className="text-center">Presença</TableHead>
+                            <TableHead className="text-center hidden sm:table-cell">Faltas</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {topAlunos.map((a, i) => (
+                            <TableRow key={i}>
+                              <TableCell className={`font-bold text-center ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
+                                {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
+                              </TableCell>
+                              <TableCell className="font-medium text-sm">
+                                {a.nome}
+                                <p className="text-[11px] text-muted-foreground sm:hidden">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
+                              </TableCell>
+                              <TableCell className="hidden sm:table-cell"><span className="text-xs text-muted-foreground">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span></TableCell>
+                              <TableCell className="text-center">
+                                <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
+                                <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
+                              </TableCell>
+                              <TableCell className="text-center hidden sm:table-cell">
+                                <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div id="section-atencao">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-red-500" />Alunos que Precisam de Atenção
+                </CardTitle>
+                <CardDescription>Presença abaixo de 75% no período</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {alunosAtencao.length === 0 ? (
+                  <div className="text-center py-8">
+                    <CheckCircle2 className="h-10 w-10 mx-auto text-green-500 mb-2" />
+                    <p className="text-muted-foreground text-sm">Nenhum aluno com presença crítica no período.</p>
+                  </div>
+                ) : (
+                  alunosAtencao.map((a, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-red-500/5 border-red-500/20">
+                      <div className="p-2 rounded-lg bg-red-500/10">
+                        <AlertTriangle className="h-4 w-4 text-red-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-sm">{a.nome}</span>
+                          <span className="text-xs font-bold text-red-600 ml-2">{a.pct}%</span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-medium text-sm">{a.nome}</span>
-                            <span className="text-xs font-bold text-red-600 ml-2">{a.pct}%</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-1">
-                            <div className="h-full rounded-full bg-red-500" style={{ width: `${a.pct}%` }} />
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-muted-foreground">{a.sala}</span>
-                            <span className="text-[11px] text-red-500">{a.faltas} falta{a.faltas !== 1 ? 's' : ''}</span>
-                          </div>
+                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-1">
+                          <div className="h-full rounded-full bg-red-500" style={{ width: `${a.pct}%` }} />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-muted-foreground">{a.sala}</span>
+                          <span className="text-[11px] text-red-500">{a.faltas} falta{a.faltas !== 1 ? 's' : ''}</span>
                         </div>
                       </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
           </div>
-        )}
+        </div>
 
         {/* Desempenho dos Professores */}
-        {secoes.professores && (
+        <div id="section-professores">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -942,7 +972,6 @@ export default function RelatoriosPage() {
                 <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
               ) : (
                 <>
-                  {/* Cards mobile */}
                   <div className="sm:hidden space-y-3">
                     {professores.map((p, i) => (
                       <div key={i} className="rounded-xl border bg-card overflow-hidden">
@@ -1022,30 +1051,7 @@ export default function RelatoriosPage() {
               )}
             </CardContent>
           </Card>
-        )}
-
-        {/* Exportar (mobile-friendly) */}
-        <Card data-no-print>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold">Exportar Relatório</CardTitle>
-            <CardDescription>
-              {labelRelatorio} — {Object.values(secoes).filter(Boolean).length} seção(ões) selecionada(s)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
-              <Button variant="outline" className="w-full" onClick={handlePDF}>
-                <FileText className="h-4 w-4 mr-2" />Exportar PDF
-              </Button>
-              <Button variant="outline" className="w-full" onClick={handleExportExcel}>
-                <BarChart3 className="h-4 w-4 mr-2" />Exportar Excel
-              </Button>
-              <Button variant="outline" className="w-full" onClick={handleExportCSV}>
-                <Download className="h-4 w-4 mr-2" />Exportar CSV
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        </div>
       </div>
     </>
   )
