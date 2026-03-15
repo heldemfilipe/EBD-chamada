@@ -298,9 +298,9 @@ export default function ChamadaPage() {
               <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
             </div>
             <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
-              <CheckCircle2 className="h-4 w-4 text-primary mb-1" />
-              <span className="text-lg font-bold text-primary">{resumoDia.total_presentes + resumoDia.total_visitantes}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</span>
+              <XCircle className="h-4 w-4 text-red-500 mb-1" />
+              <span className="text-lg font-bold text-red-600">{resumoDia.total_faltas}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Ausentes</span>
             </div>
             <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
               <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
@@ -308,16 +308,16 @@ export default function ChamadaPage() {
               <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Presentes</span>
             </div>
             <div className="flex flex-col items-center justify-center py-3 px-1">
-              <XCircle className="h-4 w-4 text-red-500 mb-1" />
-              <span className="text-lg font-bold text-red-600">{resumoDia.total_faltas}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Faltas</span>
+              <UserPlus className="h-4 w-4 text-blue-500 mb-1" />
+              <span className="text-lg font-bold text-blue-600">{resumoDia.total_visitantes}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Visitantes</span>
             </div>
           </div>
           <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
             <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-              <UserPlus className="h-3.5 w-3.5 text-blue-500 mb-0.5" />
-              <span className="text-sm font-semibold text-blue-600">{resumoDia.total_visitantes}</span>
-              <span className="text-[9px] text-muted-foreground">Visitantes</span>
+              <CheckCircle2 className="h-3.5 w-3.5 text-primary mb-0.5" />
+              <span className="text-sm font-semibold text-primary">{resumoDia.total_presentes + resumoDia.total_visitantes}</span>
+              <span className="text-[9px] text-muted-foreground">Total</span>
             </div>
             <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
               <Book className="h-3.5 w-3.5 text-purple-500 mb-0.5" />
@@ -396,9 +396,9 @@ export default function ChamadaPage() {
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
-                    <CheckCircle2 className="h-4 w-4 text-primary mb-1" />
-                    <span className="text-lg font-bold text-primary">{resumo.presentes + resumo.visitantes}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</span>
+                    <XCircle className="h-4 w-4 text-red-500 mb-1" />
+                    <span className="text-lg font-bold text-red-600">{resumo.faltas}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Ausentes</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
                     <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
@@ -406,17 +406,17 @@ export default function ChamadaPage() {
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Presentes</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-3 px-2">
-                    <XCircle className="h-4 w-4 text-red-500 mb-1" />
-                    <span className="text-lg font-bold text-red-600">{resumo.faltas}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Faltas</span>
+                    <UserPlus className="h-4 w-4 text-blue-500 mb-1" />
+                    <span className="text-lg font-bold text-blue-600">{resumo.visitantes}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Visitantes</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-                    <UserPlus className="h-3.5 w-3.5 text-blue-500 mb-0.5" />
-                    <span className="text-sm font-semibold text-blue-600">{resumo.visitantes}</span>
-                    <span className="text-[9px] text-muted-foreground">Visitantes</span>
+                    <CheckCircle2 className="h-3.5 w-3.5 text-primary mb-0.5" />
+                    <span className="text-sm font-semibold text-primary">{resumo.presentes + resumo.visitantes}</span>
+                    <span className="text-[9px] text-muted-foreground">Total</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
                     <Book className="h-3.5 w-3.5 text-purple-500 mb-0.5" />
