@@ -120,172 +120,133 @@ export default function ChamadaTurmaPage() {
   const [dialogVisitanteOpen, setDialogVisitanteOpen] = useState(false)
   const [novoVisitante, setNovoVisitante] = useState({ nome: '', telefone: '', observacao: '' })
   const [salvando, setSalvando] = useState(false)
+  const [carregando, setCarregando] = useState(true)
   const [qtdBiblias, setQtdBiblias] = useState<string>('')
   const [qtdRevistas, setQtdRevistas] = useState<string>('')
 
-  // ── Busca inicial ────────────────────────────────────────────────────────────
+  // ── Busca inicial (queries em paralelo) ──────────────────────────────────────
   useEffect(() => {
+    let cancelado = false
+
     async function fetchDados() {
-      const db = supabase as any
+      setCarregando(true)
+      try {
+        const db = supabase as any
 
-      // 1. Dados da turma
-      const { data: turmaData } = await db
-        .from('turmas')
-        .select('id, nome, sala')
-        .eq('id', turmaId)
-        .single() as { data: { id: string; nome: string; sala: string | null } | null }
-      if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
+        // Dispara as 5 queries independentes em paralelo
+        const [
+          { data: turmaData },
+          { data: alunosData },
+          { data: escalaDia },
+          { data: chamadaExistente },
+          { data: todoHistorico },
+        ] = await Promise.all([
+          db.from('turmas').select('id, nome, sala').eq('id', turmaId).single(),
+          db.from('alunos').select('id, nome, responsavel, cargo')
+            .eq('turma_id', turmaId).eq('ativo', true).order('nome'),
+          db.from('escalas').select('professor_id, turma_id').eq('data', dataSelecionada),
+          db.from('chamadas')
+            .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
+            .eq('turma_id', turmaId).eq('data', dataSelecionada).maybeSingle(),
+          db.from('historico_visitantes')
+            .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
+            .eq('turma_id', turmaId).order('data', { ascending: false }),
+        ])
 
-      // 2. Alunos da turma (com responsavel e cargo para identificar professores)
-      const { data: alunosData } = await db
-        .from('alunos')
-        .select('id, nome, responsavel, cargo')
-        .eq('turma_id', turmaId)
-        .eq('ativo', true)
-        .order('nome') as { data: { id: string; nome: string; responsavel: string | null; cargo: string | null }[] | null }
+        if (cancelado) return
 
-      // 2b. Escala do dia: todos os professores escalados hoje (qualquer turma)
-      const { data: escalaDia } = await db
-        .from('escalas')
-        .select('professor_id, turma_id')
-        .eq('data', dataSelecionada) as { data: { professor_id: string; turma_id: string }[] | null }
+        // Turma
+        if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-      // Buscar nomes das turmas da escala
-      const turmaIdsEscala = [...new Set((escalaDia ?? []).map(e => e.turma_id))]
-      const turmaNomesEscala: Record<string, string> = {}
-      if (turmaIdsEscala.length > 0) {
-        const { data: turmasEscala } = await db.from('turmas').select('id, nome').in('id', turmaIdsEscala)
-        for (const t of turmasEscala ?? []) turmaNomesEscala[t.id] = t.nome
-      }
-      // Map: professorId → { turmaId, turmaNome }
-      const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
-      for (const e of escalaDia ?? []) {
-        professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: turmaNomesEscala[e.turma_id] ?? '' })
-      }
-
-      // 3. Chamada existente para o dia
-      const { data: chamadaExistente } = await db
-        .from('chamadas')
-        .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
-        .eq('turma_id', turmaId)
-        .eq('data', dataSelecionada)
-        .single() as { data: { id: string; oferta: number; anotacoes: string | null; presencas: any[] } | null }
-
-      if (chamadaExistente) {
-        setOfertaCents(Math.round((chamadaExistente.oferta || 0) * 100))
-        setAnotacoes(chamadaExistente.anotacoes ?? '')
-        const presencasMap = new Map((chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p]))
-        setAlunos(
-          (alunosData ?? []).map(a => {
-            const p = presencasMap.get(a.id)
-            const profId = (a.responsavel ?? '').startsWith('professor:')
-              ? (a.responsavel as string).replace('professor:', '')
-              : null
-            return {
-              aluno_id: a.id,
-              nome: a.nome,
-              presente: p ? (p.presente ? 'presente' : 'ausente') : 'pendente',
-              trouxe_biblia: p?.trouxe_biblia ?? false,
-              trouxe_revista: p?.trouxe_revista ?? false,
-              justificativa: p?.justificativa ?? '',
-              isProfessor: profId !== null,
-              professorId: profId,
-              cargo: a.cargo ?? '',
-              dadoAula: profId !== null && professorEscalaMap.has(profId),
-              turmaDaAulaId: profId ? (professorEscalaMap.get(profId)?.turmaId ?? null) : null,
-              turmaDaAulaNome: profId ? (professorEscalaMap.get(profId)?.turmaNome ?? null) : null,
-            }
-          })
-        )
-      } else {
-        setOfertaCents(0)
-        setAnotacoes('')
-        setAlunos(
-          (alunosData ?? []).map(a => {
-            const profId = (a.responsavel ?? '').startsWith('professor:')
-              ? (a.responsavel as string).replace('professor:', '')
-              : null
-            return {
-              aluno_id: a.id,
-              nome: a.nome,
-              presente: 'pendente' as const,
-              trouxe_biblia: false,
-              trouxe_revista: false,
-              justificativa: '',
-              isProfessor: profId !== null,
-              professorId: profId,
-              cargo: a.cargo ?? '',
-              dadoAula: profId !== null && professorEscalaMap.has(profId),
-              turmaDaAulaId: profId ? (professorEscalaMap.get(profId)?.turmaId ?? null) : null,
-              turmaDaAulaNome: profId ? (professorEscalaMap.get(profId)?.turmaNome ?? null) : null,
-            }
-          })
-        )
-      }
-
-      // 4. Visitantes: buscar TODOS que já visitaram esta turma antes + os do dia atual
-      //    Busca todos os historico_visitantes desta turma (sem filtro de data)
-      const { data: todoHistorico } = await db
-        .from('historico_visitantes')
-        .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
-        .eq('turma_id', turmaId)
-        .order('data', { ascending: false }) as {
-          data: {
-            visitante_id: string
-            data: string
-            presente: boolean
-            trouxe_biblia: boolean
-            trouxe_revista: boolean
-            visitantes: { id: string; nome: string; telefone: string | null; observacao: string | null } | null
-          }[] | null
+        // Nomes das turmas da escala (query pequena e dependente de escalaDia)
+        const turmaIdsEscala = [...new Set((escalaDia ?? []).map((e: any) => e.turma_id))]
+        const turmaNomesEscala: Record<string, string> = {}
+        if (turmaIdsEscala.length > 0) {
+          const { data: turmasEscala } = await db.from('turmas').select('id, nome').in('id', turmaIdsEscala)
+          if (cancelado) return
+          for (const t of turmasEscala ?? []) turmaNomesEscala[t.id] = t.nome
+        }
+        const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
+        for (const e of (escalaDia ?? []) as any[]) {
+          professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: turmaNomesEscala[e.turma_id] ?? '' })
         }
 
-      if (todoHistorico && todoHistorico.length > 0) {
-        // Agrupar por visitante_id
-        const porVisitante = new Map<string, typeof todoHistorico>()
-        for (const h of todoHistorico) {
-          if (!porVisitante.has(h.visitante_id)) porVisitante.set(h.visitante_id, [])
-          porVisitante.get(h.visitante_id)!.push(h)
+        // Alunos + presenças
+        const mapAluno = (a: any) => {
+          const profId = (a.responsavel ?? '').startsWith('professor:')
+            ? (a.responsavel as string).replace('professor:', '') : null
+          return {
+            aluno_id: a.id, nome: a.nome,
+            trouxe_biblia: false, trouxe_revista: false, justificativa: '',
+            isProfessor: profId !== null, professorId: profId, cargo: a.cargo ?? '',
+            dadoAula: profId !== null && professorEscalaMap.has(profId),
+            turmaDaAulaId: profId ? (professorEscalaMap.get(profId)?.turmaId ?? null) : null,
+            turmaDaAulaNome: profId ? (professorEscalaMap.get(profId)?.turmaNome ?? null) : null,
+          }
         }
 
-        const visitantesCarregados: Visitante[] = []
-        for (const [visitanteId, registros] of porVisitante.entries()) {
-          const dadosVisitante = registros[0].visitantes
-          if (!dadosVisitante) continue
-
-          // Registro do dia atual (se existir)
-          const registroDia = registros.find(r => r.data === dataSelecionada)
-          // Histórico sem o dia atual (para mostrar visitas anteriores)
-          const historicoAnterior = registros
-            .filter(r => r.data !== dataSelecionada)
-            .slice(0, 3) // últimas 3 visitas anteriores
-            .map(r => ({ data: r.data, presente: r.presente }))
-
-          const totalVisitas = registros.filter(r => r.presente).length
-
-          visitantesCarregados.push({
-            id: visitanteId,
-            isNovo: false,
-            nome: dadosVisitante.nome,
-            telefone: dadosVisitante.telefone ?? '',
-            observacao: dadosVisitante.observacao ?? '',
-            presenteHoje: registroDia
-              ? (registroDia.presente ? 'presente' : 'ausente')
-              : 'pendente',
-            trouxe_biblia: registroDia?.trouxe_biblia ?? false,
-            trouxe_revista: registroDia?.trouxe_revista ?? false,
-            historico: historicoAnterior,
-            totalVisitas,
-          })
+        if (chamadaExistente) {
+          setOfertaCents(Math.round((chamadaExistente.oferta || 0) * 100))
+          setAnotacoes(chamadaExistente.anotacoes ?? '')
+          const presencasMap = new Map((chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p]))
+          setAlunos(
+            (alunosData ?? []).map((a: any) => {
+              const p = presencasMap.get(a.id)
+              return {
+                ...mapAluno(a),
+                presente: p ? (p.presente ? 'presente' : 'ausente') : 'pendente',
+                trouxe_biblia: p?.trouxe_biblia ?? false,
+                trouxe_revista: p?.trouxe_revista ?? false,
+                justificativa: p?.justificativa ?? '',
+              }
+            })
+          )
+        } else {
+          setOfertaCents(0)
+          setAnotacoes('')
+          setAlunos((alunosData ?? []).map((a: any) => ({ ...mapAluno(a), presente: 'pendente' as const })))
         }
 
-        setVisitantes(visitantesCarregados)
-      } else {
-        setVisitantes([])
+        // Visitantes
+        if (todoHistorico && todoHistorico.length > 0) {
+          const porVisitante = new Map<string, typeof todoHistorico>()
+          for (const h of todoHistorico) {
+            if (!porVisitante.has(h.visitante_id)) porVisitante.set(h.visitante_id, [])
+            porVisitante.get(h.visitante_id)!.push(h)
+          }
+          const visitantesCarregados: Visitante[] = []
+          for (const [visitanteId, registros] of porVisitante.entries()) {
+            const dadosVisitante = registros[0].visitantes
+            if (!dadosVisitante) continue
+            const registroDia = registros.find((r: any) => r.data === dataSelecionada)
+            const historicoAnterior = registros
+              .filter((r: any) => r.data !== dataSelecionada)
+              .slice(0, 3)
+              .map((r: any) => ({ data: r.data, presente: r.presente }))
+            visitantesCarregados.push({
+              id: visitanteId, isNovo: false,
+              nome: dadosVisitante.nome, telefone: dadosVisitante.telefone ?? '',
+              observacao: dadosVisitante.observacao ?? '',
+              presenteHoje: registroDia ? (registroDia.presente ? 'presente' : 'ausente') : 'pendente',
+              trouxe_biblia: registroDia?.trouxe_biblia ?? false,
+              trouxe_revista: registroDia?.trouxe_revista ?? false,
+              historico: historicoAnterior,
+              totalVisitas: registros.filter((r: any) => r.presente).length,
+            })
+          }
+          setVisitantes(visitantesCarregados)
+        } else {
+          setVisitantes([])
+        }
+      } catch (e: any) {
+        if (!cancelado) toast('Erro ao carregar dados da chamada: ' + (e?.message ?? 'erro inesperado'), 'error')
+      } finally {
+        if (!cancelado) setCarregando(false)
       }
     }
 
     fetchDados()
+    return () => { cancelado = true }
   }, [turmaId, dataSelecionada])
 
   // ── Handlers Alunos ──────────────────────────────────────────────────────────
@@ -571,6 +532,39 @@ export default function ChamadaTurmaPage() {
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
+
+  if (carregando) {
+    return (
+      <div className="space-y-6 pb-20 lg:pb-0">
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="icon" onClick={() => router.push('/chamada')}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="space-y-2">
+            <div className="h-7 w-48 bg-muted animate-pulse rounded" />
+            <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+          </div>
+        </div>
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-xl border bg-card p-4 space-y-2">
+              <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+              <div className="h-8 w-12 bg-muted animate-pulse rounded" />
+            </div>
+          ))}
+        </div>
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 py-2">
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+              <div className="h-4 flex-1 bg-muted animate-pulse rounded" />
+              <div className="h-8 w-24 bg-muted animate-pulse rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 pb-20 lg:pb-0">

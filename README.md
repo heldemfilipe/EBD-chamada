@@ -44,12 +44,12 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 | Módulo | Descrição |
 |---|---|
 | **Dashboard** | KPIs compactos (mobile 2×2 / desktop 4 cards), gráfico de evolução de presença, presença por sala, top 10 alunos com badge de cargo eclesiástico, destaques por turma e histórico recente com tempo relativo (chamadas + visitantes) |
-| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes; resumo geral compacto no mobile |
+| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes; resumo geral compacto no mobile; skeleton de carregamento enquanto dados são buscados em paralelo |
 | **Alunos** | CRUD completo com histórico de frequência; lista mobile em cards com presença, turma, idade e contato |
 | **Professores** | Cadastro e vínculo com turmas; sincronização automática como aluno; lista mobile em cards com cargo, turmas e contato |
 | **Turmas** | Criação e gerenciamento de salas com faixas etárias (Cordeirinhos → Adultos) |
 | **Escala** | Planejamento de professores por domingo |
-| **Relatórios** | Estatísticas por dia, mês, trimestre e ano; gráficos e tabelas com versão mobile em cards para Presença por Sala, Top 10 e Desempenho dos Professores |
+| **Relatórios** | Estatísticas por dia, mês, trimestre e ano; filtro por turma e período; seções: resumo KPIs, gráfico de evolução, presença por sala, alunos da turma, top 10, alunos em atenção (<50%), desempenho dos professores e visitantes com dias e presença; exportação PDF / Excel / CSV com seleção de seções e campos |
 | **Usuários** *(admin)* | Cadastro de colaboradores com controle granular de permissões por módulo e por turma |
 
 ### Faixas Etárias
@@ -365,12 +365,13 @@ Os breakpoints Tailwind utilizados são: `sm` (≥640px), `md` (≥768px) e `lg`
 | Módulo | Mobile (`< sm`) | Desktop (`≥ sm`) |
 |---|---|---|
 | **Dashboard** | Stats 2×2 compacto + histórico com tempo relativo | 4 StatCards lado a lado |
-| **Chamada** | Card compacto por turma + resumo geral compacto | StatCards completos |
+| **Chamada** | Skeleton durante carregamento; card compacto por turma; resumo geral compacto | StatCards completos |
 | **Alunos** | Lista de cards (nome, presença, turma, contato) | Tabela com colunas responsivas |
 | **Professores** | Stats 2×2 + lista de cards (turmas, cargo, contato) | StatCards + tabela |
 | **Relatórios — Presença por Sala** | Cards com barra + grid 4-cols (Pres/Faltas/Visit/Mat) + grid 3-cols (Bíblias/Revistas/Oferta) | Tabela com colunas responsive |
 | **Relatórios — Top 10** | Lista compacta (rank, nome, sala, %) | Tabela |
 | **Relatórios — Desempenho Professores** | Cards com turmas badges + grid 3-cols (Aulas/Presença/Bíblias) + badge avaliação | Tabela |
+| **Relatórios — Visitantes** | Cards com badges de dias (verde/vermelho) + grid de stats | Tabela com dias visitados |
 
 ### Histórico de correções mobile
 
@@ -394,6 +395,11 @@ Os breakpoints Tailwind utilizados são: `sm` (≥640px), `md` (≥768px) e `lg`
 | **Escala** | Cabeçalho de data com professor transbordava em mobile | Adicionado `flex-wrap gap-2` no grupo de data |
 | **Relatórios** | Botões de exportar lado a lado saíam da tela | Adicionado `flex-wrap` no container dos botões |
 | **Delete dialogs** | Código do dialog de confirmação duplicado em 3 páginas | Extraído para `DeleteConfirmDialog` reutilizável |
+| **Chamada** | Tela branca durante carregamento | Adicionado skeleton animado enquanto 5 queries rodam em paralelo |
+| **Chamada** | Múltiplos cliques em Salvar disparavam requisições duplicadas | Botão desabilitado e label "Salvando…" durante operação |
+| **Alunos / Professores / Escala** | Duplo clique no botão salvar causava registros duplicados | Adicionado `isSaving` + `disabled` em todos os formulários |
+| **Dashboard** | N+1: 1 query por turma para calcular presença por sala | Refatorado para 2 queries com agregação client-side |
+| **Turmas** | N+1: 1 query por turma para contar alunos | Refatorado para 2 queries com contagem client-side |
 
 ---
 

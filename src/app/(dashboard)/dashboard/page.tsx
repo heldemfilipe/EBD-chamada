@@ -141,29 +141,39 @@ export default function DashboardPage() {
     load()
   }, [ano])
 
-  // Presença por sala
+  // Presença por sala (1 query em vez de N queries)
   useEffect(() => {
+    let cancelado = false
     async function load() {
-      const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
-      if (!turmas?.length) { setDadosPorSala([]); return }
+      try {
+        const [{ data: turmas }, { data: chamadasRaw }] = await Promise.all([
+          db.from('turmas').select('id, nome, cor').eq('ativa', true),
+          db.from('chamadas').select('id, turma_id, data, presencas(presente)').eq('ano', ano),
+        ])
+        if (cancelado) return
+        if (!turmas?.length) { setDadosPorSala([]); return }
 
-      const resultado = await Promise.all(turmas.map(async (turma: any, idx: number) => {
-        const { data: chamadasRaw } = await db
-          .from('chamadas').select('id, data, presencas(presente)')
-          .eq('turma_id', turma.id).eq('ano', ano)
         const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
-        let total = 0, presentes = 0
+        // Agrupa chamadas por turma_id para calcular presença de cada sala
+        const porTurma: Record<string, { presentes: number; total: number }> = {}
         for (const c of chamadas) {
+          if (!porTurma[c.turma_id]) porTurma[c.turma_id] = { presentes: 0, total: 0 }
           const ps = c.presencas ?? []
-          total += ps.length
-          presentes += ps.filter((p: any) => p.presente).length
+          porTurma[c.turma_id].total += ps.length
+          porTurma[c.turma_id].presentes += ps.filter((p: any) => p.presente).length
         }
-        return { sala: turma.nome, cor: resolverCor(turma.cor, idx), presencaMedia: calcularPct(presentes, total) }
-      }))
 
-      setDadosPorSala(resultado)
+        setDadosPorSala(turmas.map((turma: any, idx: number) => ({
+          sala: turma.nome,
+          cor: resolverCor(turma.cor, idx),
+          presencaMedia: calcularPct(porTurma[turma.id]?.presentes ?? 0, porTurma[turma.id]?.total ?? 0),
+        })))
+      } catch (e: any) {
+        if (!cancelado) console.error('Erro ao carregar presença por sala:', e)
+      }
     }
     load()
+    return () => { cancelado = true }
   }, [ano, periodo, trimestre, mes])
 
   // Top alunos (com cargo e isProfessor)

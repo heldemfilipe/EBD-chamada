@@ -43,22 +43,30 @@ export default function ProfessoresPage() {
   const [editMode, setEditMode] = useState(false)
   const [selected, setSelected] = useState<Professor | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
-      const [{ data: profsData }, { data: turmasData }] = await Promise.all([
-        db.from('professores').select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, cargo, professor_turmas(turma_id)').eq('ativo', true).order('nome'),
-        db.from('turmas').select('id, nome').eq('ativa', true).order('nome'),
-      ])
-      setProfessores((profsData ?? []).map((p: any) => ({
-        id: p.id, nome: p.nome, especialidade: p.especialidade ?? '', telefone: p.telefone ?? '',
-        email: p.email ?? '', dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
-        turmaAluno: p.turma_aluno_id ?? null, turmas: (p.professor_turmas ?? []).map((pt: any) => pt.turma_id),
-        cargo: p.cargo ?? '',
-      })))
-      setTurmas(turmasData ?? [])
+      try {
+        const [{ data: profsData }, { data: turmasData }] = await Promise.all([
+          db.from('professores').select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, cargo, professor_turmas(turma_id)').eq('ativo', true).order('nome'),
+          db.from('turmas').select('id, nome').eq('ativa', true).order('nome'),
+        ])
+        if (cancelado) return
+        setProfessores((profsData ?? []).map((p: any) => ({
+          id: p.id, nome: p.nome, especialidade: p.especialidade ?? '', telefone: p.telefone ?? '',
+          email: p.email ?? '', dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
+          turmaAluno: p.turma_aluno_id ?? null, turmas: (p.professor_turmas ?? []).map((pt: any) => pt.turma_id),
+          cargo: p.cargo ?? '',
+        })))
+        setTurmas(turmasData ?? [])
+      } catch (e: any) {
+        if (!cancelado) toast('Erro ao carregar professores: ' + (e?.message ?? 'erro inesperado'), 'error')
+      }
     }
     load()
+    return () => { cancelado = true }
   }, [])
 
   function handleSort(key: 'nome' | 'turmas') {
@@ -117,29 +125,34 @@ export default function ProfessoresPage() {
 
   async function handleSave() {
     if (!form.nome) { toast('Por favor, preencha o nome do professor.', 'error'); return }
-
-    // Payload sem cargo para não quebrar se a coluna não existir
-    const payloadBase = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno }
-
-    if (editMode && selected) {
-      const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
-      if (error) { toast('Erro ao atualizar professor.', 'error'); return }
-      await salvarCargoProf(selected.id, form.cargo)
-      await db.from('professor_turmas').delete().eq('professor_id', selected.id)
-      if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
-      await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
-      setProfessores(professores.map(p => p.id === selected.id ? { ...p, ...payloadBase, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
-      toast('Professor atualizado com sucesso!')
-    } else {
-      const { data, error } = await db.from('professores').insert({ ...payloadBase, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
-      if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
-      await salvarCargoProf(data.id, form.cargo)
-      if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
-      await sincronizarAluno(data.id, form.nome, form.turmaAluno)
-      setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
-      toast('Professor cadastrado com sucesso!')
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const payloadBase = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno }
+      if (editMode && selected) {
+        const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
+        if (error) { toast('Erro ao atualizar professor.', 'error'); return }
+        await salvarCargoProf(selected.id, form.cargo)
+        await db.from('professor_turmas').delete().eq('professor_id', selected.id)
+        if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
+        await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
+        setProfessores(professores.map(p => p.id === selected.id ? { ...p, ...payloadBase, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
+        toast('Professor atualizado com sucesso!')
+      } else {
+        const { data, error } = await db.from('professores').insert({ ...payloadBase, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
+        if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
+        await salvarCargoProf(data.id, form.cargo)
+        if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
+        await sincronizarAluno(data.id, form.nome, form.turmaAluno)
+        setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
+        toast('Professor cadastrado com sucesso!')
+      }
+      closeDialog()
+    } catch (e: any) {
+      toast('Erro ao salvar professor: ' + (e?.message ?? 'erro inesperado'), 'error')
+    } finally {
+      setIsSaving(false)
     }
-    closeDialog()
   }
 
   async function handleDelete() {
@@ -446,8 +459,10 @@ export default function ProfessoresPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeDialog}>Cancelar</Button>
-            <Button onClick={handleSave}>{editMode ? 'Salvar Alterações' : 'Cadastrar Professor'}</Button>
+            <Button variant="outline" onClick={closeDialog} disabled={isSaving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? 'Salvando...' : editMode ? 'Salvar Alterações' : 'Cadastrar Professor'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

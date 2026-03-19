@@ -121,28 +121,33 @@ export default function TurmasPage() {
 
   // ─── Carga inicial ────────────────────────────────────────────────────────
   useEffect(() => {
+    let cancelado = false
     async function fetchTurmas() {
-      const { data } = await db
-        .from('turmas')
-        .select('id, nome, descricao, faixa_etaria, sala, cor')
-        .eq('ativa', true)
-        .order('nome') as { data: any[] | null }
-      if (!data) return
-      const turmasComContagem = await Promise.all(
-        data.map(async (t) => {
-          const { count } = await db
-            .from('alunos').select('id', { count: 'exact', head: true })
-            .eq('turma_id', t.id).eq('ativo', true)
-          return {
-            id: t.id, nome: t.nome, descricao: t.descricao ?? '',
-            faixaEtaria: t.faixa_etaria ?? '', sala: t.sala ?? '',
-            cor: t.cor ?? 'bg-blue-500', totalAlunos: count ?? 0,
-          }
-        })
-      )
-      setTurmasData(turmasComContagem)
+      try {
+        // 1 query para turmas + 1 query para todos os alunos (em vez de N queries)
+        const [{ data }, { data: alunosData }] = await Promise.all([
+          db.from('turmas').select('id, nome, descricao, faixa_etaria, sala, cor').eq('ativa', true).order('nome'),
+          db.from('alunos').select('turma_id').eq('ativo', true),
+        ])
+        if (cancelado || !data) return
+
+        // Conta alunos por turma client-side
+        const contagemPorTurma: Record<string, number> = {}
+        for (const a of alunosData ?? []) {
+          if (a.turma_id) contagemPorTurma[a.turma_id] = (contagemPorTurma[a.turma_id] ?? 0) + 1
+        }
+
+        setTurmasData(data.map((t: any) => ({
+          id: t.id, nome: t.nome, descricao: t.descricao ?? '',
+          faixaEtaria: t.faixa_etaria ?? '', sala: t.sala ?? '',
+          cor: t.cor ?? 'bg-blue-500', totalAlunos: contagemPorTurma[t.id] ?? 0,
+        })))
+      } catch (e: any) {
+        if (!cancelado) toast('Erro ao carregar turmas: ' + (e?.message ?? 'erro inesperado'), 'error')
+      }
     }
     fetchTurmas()
+    return () => { cancelado = true }
   }, [])
 
   useEffect(() => {

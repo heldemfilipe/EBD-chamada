@@ -77,6 +77,7 @@ export default function AlunosPage() {
   // Ordenação da tabela
   const [sortKey, setSortKey] = useState<'nome' | 'idade' | 'presenca' | 'turma'>('nome')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [isSaving, setIsSaving] = useState(false)
 
   function handleSort(key: 'nome' | 'idade' | 'presenca' | 'turma') {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -97,42 +98,46 @@ export default function AlunosPage() {
   const [rawPresencas, setRawPresencas] = useState<{ aluno_id: string; presente: boolean; data: string }[]>([])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
-      const anoAtual = new Date().getFullYear()
-      const [{ data: turmasData }, { data: alunosData }, { data: chamadasData }] = await Promise.all([
-        db.from('turmas').select('id, nome, faixa_etaria, cor').eq('ativa', true).order('nome'),
-        db.from('alunos').select('*').order('nome'),
-        db.from('chamadas').select('id, data').eq('ano', anoAtual),
-      ])
+      try {
+        const anoAtual = new Date().getFullYear()
+        const [{ data: turmasData }, { data: alunosData }, { data: chamadasData }] = await Promise.all([
+          db.from('turmas').select('id, nome, faixa_etaria, cor').eq('ativa', true).order('nome'),
+          db.from('alunos').select('*').order('nome'),
+          db.from('chamadas').select('id, data').eq('ano', anoAtual),
+        ])
+        if (cancelado) return
 
-      setTurmas((turmasData ?? []).map((t: any) => ({
-        id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', cor: t.cor ?? '',
-      })))
-
-      // Carregar presenças com data da chamada para filtro dinâmico
-      const chamadaIds = (chamadasData ?? []).map((c: any) => c.id)
-      const chamadaDateMap = new Map((chamadasData ?? []).map((c: any) => [c.id as string, c.data as string]))
-      if (chamadaIds.length > 0) {
-        const { data: presencasData } = await db
-          .from('presencas').select('aluno_id, presente, chamada_id').in('chamada_id', chamadaIds)
-        setRawPresencas((presencasData ?? []).map((p: any) => ({
-          aluno_id: p.aluno_id,
-          presente: p.presente,
-          data: chamadaDateMap.get(p.chamada_id) ?? '',
+        setTurmas((turmasData ?? []).map((t: any) => ({
+          id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', cor: t.cor ?? '',
         })))
-      }
 
-      setAlunos((alunosData ?? []).map((a: any) => ({
-        id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
-        telefone: a.telefone ?? '', email: a.email ?? '',
-        dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
-        cargo: a.cargo ?? '',
-        presenca: 0, status: 'ativo',
-        idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
-        isProfessor: (a.responsavel ?? '').startsWith('professor:'),
-      })))
+        const chamadaIds = (chamadasData ?? []).map((c: any) => c.id)
+        const chamadaDateMap = new Map((chamadasData ?? []).map((c: any) => [c.id as string, c.data as string]))
+        if (chamadaIds.length > 0) {
+          const { data: presencasData } = await db
+            .from('presencas').select('aluno_id, presente, chamada_id').in('chamada_id', chamadaIds)
+          if (!cancelado) setRawPresencas((presencasData ?? []).map((p: any) => ({
+            aluno_id: p.aluno_id, presente: p.presente,
+            data: chamadaDateMap.get(p.chamada_id) ?? '',
+          })))
+        }
+
+        if (!cancelado) setAlunos((alunosData ?? []).map((a: any) => ({
+          id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
+          telefone: a.telefone ?? '', email: a.email ?? '',
+          dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
+          cargo: a.cargo ?? '', presenca: 0, status: 'ativo',
+          idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+          isProfessor: (a.responsavel ?? '').startsWith('professor:'),
+        })))
+      } catch (e: any) {
+        if (!cancelado) toast('Erro ao carregar alunos: ' + (e?.message ?? 'erro inesperado'), 'error')
+      }
     }
     load()
+    return () => { cancelado = true }
   }, [])
 
   // Calcula presença filtrada pelo período selecionado
@@ -206,37 +211,43 @@ export default function AlunosPage() {
 
   async function handleSave() {
     if (!form.nome) { toast('Por favor, preencha o nome do aluno.', 'error'); return }
-    const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
-    const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
-    // Payload sem cargo para não quebrar se a coluna não existir
-    const payload   = {
-      nome: form.nome, data_nascimento: form.dataNascimento || null,
-      telefone: form.telefone, email: form.email, responsavel: form.responsavel,
-      turma_id: form.turmaId || null,
+    if (isSaving) return
+    setIsSaving(true)
+    try {
+      const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
+      const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
+      const payload   = {
+        nome: form.nome, data_nascimento: form.dataNascimento || null,
+        telefone: form.telefone, email: form.email, responsavel: form.responsavel,
+        turma_id: form.turmaId || null,
+      }
+      if (editMode && selected) {
+        const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
+        if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
+        await salvarCargo(db, 'alunos', selected.id, form.cargo)
+        setAlunos(alunos.map(a => a.id === selected.id
+          ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, isProfessor: false }
+          : a))
+        toast('Aluno atualizado com sucesso!')
+      } else {
+        const { data, error } = await db.from('alunos').insert(payload).select('id').single()
+        if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
+        await salvarCargo(db, 'alunos', data.id, form.cargo)
+        setAlunos([...alunos, {
+          id: data.id, nome: form.nome, idade, turma: turmaNome,
+          turmaId: form.turmaId || null, telefone: form.telefone,
+          email: form.email, dataNascimento: form.dataNascimento,
+          responsavel: form.responsavel, cargo: form.cargo ?? '',
+          presenca: 0, status: 'ativo', isProfessor: false,
+        }])
+        toast('Aluno cadastrado com sucesso!')
+      }
+      closeDialog()
+    } catch (e: any) {
+      toast('Erro ao salvar aluno: ' + (e?.message ?? 'erro inesperado'), 'error')
+    } finally {
+      setIsSaving(false)
     }
-
-    if (editMode && selected) {
-      const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
-      if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
-      await salvarCargo(db, 'alunos', selected.id, form.cargo)
-      setAlunos(alunos.map(a => a.id === selected.id
-        ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, isProfessor: false }
-        : a))
-      toast('Aluno atualizado com sucesso!')
-    } else {
-      const { data, error } = await db.from('alunos').insert(payload).select('id').single()
-      if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
-      await salvarCargo(db, 'alunos', data.id, form.cargo)
-      setAlunos([...alunos, {
-        id: data.id, nome: form.nome, idade, turma: turmaNome,
-        turmaId: form.turmaId || null, telefone: form.telefone,
-        email: form.email, dataNascimento: form.dataNascimento,
-        responsavel: form.responsavel, cargo: form.cargo ?? '',
-        presenca: 0, status: 'ativo', isProfessor: false,
-      }])
-      toast('Aluno cadastrado com sucesso!')
-    }
-    closeDialog()
   }
 
   async function handleDelete() {
@@ -606,8 +617,10 @@ export default function AlunosPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeDialog}>Cancelar</Button>
-            <Button onClick={handleSave}>{editMode ? 'Salvar Alterações' : 'Cadastrar Aluno'}</Button>
+            <Button variant="outline" onClick={closeDialog} disabled={isSaving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? 'Salvando...' : editMode ? 'Salvar Alterações' : 'Cadastrar Aluno'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
