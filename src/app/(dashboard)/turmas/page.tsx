@@ -96,6 +96,7 @@ export default function TurmasPage() {
   // ── Estado principal ──
   const [turmasData, setTurmasData]         = useState<Turma[]>([])
   const [professoresMock, setProfessoresMock] = useState<Professor[]>([])
+  const [carregando, setCarregando]         = useState(true)
 
   // ── CRUD turma ──
   const [dialogOpen, setDialogOpen]         = useState(false)
@@ -144,6 +145,8 @@ export default function TurmasPage() {
         })))
       } catch (e: any) {
         if (!cancelado) toast('Erro ao carregar turmas: ' + (e?.message ?? 'erro inesperado'), 'error')
+      } finally {
+        if (!cancelado) setCarregando(false)
       }
     }
     fetchTurmas()
@@ -316,6 +319,31 @@ export default function TurmasPage() {
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
+  if (carregando) return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-8 w-28 bg-muted animate-pulse rounded" />
+          <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+        </div>
+        <div className="h-9 w-28 bg-muted animate-pulse rounded" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-xl border bg-card p-4 space-y-2">
+            <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+            <div className="h-8 w-10 bg-muted animate-pulse rounded" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-6 sm:grid-cols-2">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-xl border bg-card p-4 h-40 bg-muted animate-pulse" />
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}

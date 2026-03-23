@@ -44,7 +44,7 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 | Módulo | Descrição |
 |---|---|
 | **Dashboard** | KPIs compactos (mobile 2×2 / desktop 4 cards), gráfico de evolução de presença, presença por sala, top 10 alunos com badge de cargo eclesiástico, destaques por turma e histórico recente com tempo relativo (chamadas + visitantes) |
-| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes; resumo geral compacto no mobile; skeleton de carregamento enquanto dados são buscados em paralelo |
+| **Chamada** | Registro de presença por domingo com controle de bíblias, revistas, ofertas e visitantes; resumo geral compacto no mobile; skeleton de carregamento; botão "Salvar" fixo no rodapé do mobile; salvamento robusto com upsert separado do select e inserts de visitantes em paralelo |
 | **Alunos** | CRUD completo com histórico de frequência; lista mobile em cards com presença, turma, idade e contato |
 | **Professores** | Cadastro e vínculo com turmas; sincronização automática como aluno; lista mobile em cards com cargo, turmas e contato |
 | **Turmas** | Criação e gerenciamento de salas com faixas etárias (Cordeirinhos → Adultos) |
@@ -397,7 +397,11 @@ Os breakpoints Tailwind utilizados são: `sm` (≥640px), `md` (≥768px) e `lg`
 | **Delete dialogs** | Código do dialog de confirmação duplicado em 3 páginas | Extraído para `DeleteConfirmDialog` reutilizável |
 | **Chamada** | Tela branca durante carregamento | Adicionado skeleton animado enquanto 5 queries rodam em paralelo |
 | **Chamada** | Múltiplos cliques em Salvar disparavam requisições duplicadas | Botão desabilitado e label "Salvando…" durante operação |
+| **Chamada** | Salvar falhava silenciosamente (campo `ano` ausente; `.select().single()` após upsert bloqueado por RLS) | Separado upsert de select; adicionado campo `ano` no payload; error handling explícito por etapa |
+| **Chamada** | Inserts de visitantes em loop sequencial — lento e perdia dados se falhava no meio | Convertido para `Promise.all` paralelo com tratamento individual de erros |
+| **Chamada** | Input de oferta travado no mobile (teclado virtual envia `key='Unidentified'` no `onKeyDown`) | Adicionado handler `onChange` como fallback para teclados virtuais |
 | **Alunos / Professores / Escala** | Duplo clique no botão salvar causava registros duplicados | Adicionado `isSaving` + `disabled` em todos os formulários |
+| **Alunos / Professores / Turmas / Escala** | Página abria mostrando conteúdo vazio até os dados carregarem | Adicionado estado `carregando` + skeleton animado em todas as páginas de listagem |
 | **Dashboard** | N+1: 1 query por turma para calcular presença por sala | Refatorado para 2 queries com agregação client-side |
 | **Turmas** | N+1: 1 query por turma para contar alunos | Refatorado para 2 queries com contagem client-side |
 

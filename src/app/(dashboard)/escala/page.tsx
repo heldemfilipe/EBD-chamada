@@ -107,6 +107,7 @@ export default function EscalaPage() {
   const dataComputada = domingosTrimForm.find(d => d.aula === parseInt(formData.aulaIdx))?.data ?? ''
 
   const [isSaving, setIsSaving] = useState(false)
+  const [carregando, setCarregando] = useState(true)
 
   // ── Carga inicial ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -128,6 +129,8 @@ export default function EscalaPage() {
         setTurmasData(turmas ?? [])
       } catch (e: any) {
         if (!cancelado) toast('Erro ao carregar escala: ' + (e?.message ?? 'erro inesperado'), 'error')
+      } finally {
+        if (!cancelado) setCarregando(false)
       }
     }
     load()
@@ -232,6 +235,23 @@ export default function EscalaPage() {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
+  if (carregando) return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-8 w-28 bg-muted animate-pulse rounded" />
+          <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+        </div>
+        <div className="h-9 w-28 bg-muted animate-pulse rounded" />
+      </div>
+      <div className="rounded-xl border bg-card p-4 space-y-3">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="h-12 bg-muted animate-pulse rounded" />
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}

@@ -44,6 +44,7 @@ export default function ProfessoresPage() {
   const [selected, setSelected] = useState<Professor | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
   const [isSaving, setIsSaving] = useState(false)
+  const [carregando, setCarregando] = useState(true)
 
   useEffect(() => {
     let cancelado = false
@@ -63,6 +64,8 @@ export default function ProfessoresPage() {
         setTurmas(turmasData ?? [])
       } catch (e: any) {
         if (!cancelado) toast('Erro ao carregar professores: ' + (e?.message ?? 'erro inesperado'), 'error')
+      } finally {
+        if (!cancelado) setCarregando(false)
       }
     }
     load()
@@ -166,6 +169,31 @@ export default function ProfessoresPage() {
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
+  if (carregando) return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-8 w-36 bg-muted animate-pulse rounded" />
+          <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+        </div>
+        <div className="h-9 w-32 bg-muted animate-pulse rounded" />
+      </div>
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="rounded-xl border bg-card p-4 space-y-2">
+            <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+            <div className="h-8 w-10 bg-muted animate-pulse rounded" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border bg-card p-4 space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-12 bg-muted animate-pulse rounded" />
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}

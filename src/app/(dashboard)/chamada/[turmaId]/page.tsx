@@ -382,26 +382,39 @@ export default function ChamadaTurmaPage() {
     setSalvando(true)
     try {
       const db = supabase as any
+      const ano = parseInt(dataSelecionada.split('-')[0])
 
-      // 1. Upsert da chamada
-      const { data: chamada, error: errChamada } = await db
+      // 1. Upsert da chamada (sem depender do select retornar a linha — RLS pode bloquear)
+      const { error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, ano, oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
-        .select('id')
-        .single()
 
-      if (errChamada || !chamada) {
-        toast('Erro ao salvar chamada: ' + (errChamada?.message ?? 'desconhecido'), 'error')
-        setSalvando(false)
+      if (errChamada) {
+        toast('Erro ao salvar chamada: ' + errChamada.message, 'error')
         return
       }
 
+      // Busca o ID da chamada recém criada/atualizada
+      const { data: chamadaRow, error: errBusca } = await db
+        .from('chamadas')
+        .select('id')
+        .eq('turma_id', turmaId)
+        .eq('data', dataSelecionada)
+        .single()
+
+      if (errBusca || !chamadaRow) {
+        toast('Erro ao obter ID da chamada após salvar.', 'error')
+        return
+      }
+
+      const chamadaId: string = chamadaRow.id
+
       // 2. Upsert de presenças dos alunos (pendente → ausente)
       const presencasPayload = alunos.map(a => ({
-        chamada_id: chamada.id,
+        chamada_id: chamadaId,
         aluno_id: a.aluno_id,
         presente: a.presente === 'presente',
         trouxe_biblia: a.presente === 'presente' ? a.trouxe_biblia : false,
@@ -410,7 +423,13 @@ export default function ChamadaTurmaPage() {
       }))
 
       if (presencasPayload.length > 0) {
-        await db.from('presencas').upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
+        const { error: errPresencas } = await db
+          .from('presencas')
+          .upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
+        if (errPresencas) {
+          toast('Erro ao salvar presenças: ' + errPresencas.message, 'error')
+          return
+        }
       }
 
       // 3. Salvar visitantes
@@ -421,9 +440,9 @@ export default function ChamadaTurmaPage() {
         .eq('turma_id', turmaId)
         .eq('data', dataSelecionada)
 
-      for (const v of visitantes) {
-        if (v.presenteHoje === 'pendente') continue
+      const visitantesParaSalvar = visitantes.filter(v => v.presenteHoje !== 'pendente')
 
+      await Promise.all(visitantesParaSalvar.map(async (v) => {
         let visitanteId: string | null = v.isNovo ? null : v.id
 
         if (v.isNovo) {
@@ -432,7 +451,7 @@ export default function ChamadaTurmaPage() {
             .insert({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
             .select('id')
             .single()
-          if (errV || !visitanteSalvo) { console.error('Erro ao salvar visitante:', errV); continue }
+          if (errV || !visitanteSalvo) { console.error('Erro ao salvar visitante:', errV); return }
           visitanteId = visitanteSalvo.id
         } else {
           await db.from('visitantes')
@@ -440,19 +459,19 @@ export default function ChamadaTurmaPage() {
             .eq('id', v.id)
         }
 
-        if (!visitanteId) continue
+        if (!visitanteId) return
 
         const { error: errHist } = await db.from('historico_visitantes').insert({
           visitante_id: visitanteId,
           turma_id: turmaId,
-          chamada_id: chamada.id,
+          chamada_id: chamadaId,
           data: dataSelecionada,
           presente: v.presenteHoje === 'presente',
           trouxe_biblia: v.trouxe_biblia,
           trouxe_revista: v.trouxe_revista,
         })
         if (errHist) console.error('Erro ao salvar histórico visitante:', errHist)
-      }
+      }))
 
       toast('Chamada salva com sucesso!')
       router.push('/chamada')
@@ -924,7 +943,11 @@ export default function ChamadaTurmaPage() {
                   type="text"
                   inputMode="numeric"
                   value={(ofertaCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  onChange={() => {}}
+                  onChange={(e) => {
+                    // Fallback para mobile (onKeyDown não funciona com teclado virtual)
+                    const digits = e.target.value.replace(/\D/g, '')
+                    setOfertaCents(digits ? Math.min(parseInt(digits, 10), 9999999) : 0)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key >= '0' && e.key <= '9') {
                       e.preventDefault()
@@ -935,9 +958,8 @@ export default function ChamadaTurmaPage() {
                     } else if (e.key === 'Delete') {
                       e.preventDefault()
                       setOfertaCents(0)
-                    } else if (!['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-                      e.preventDefault()
                     }
+                    // Demais teclas: deixa passar (mobile envia key='Unidentified')
                   }}
                   className="text-right font-mono tabular-nums"
                 />
