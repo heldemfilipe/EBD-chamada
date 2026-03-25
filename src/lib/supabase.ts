@@ -1,10 +1,13 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createBrowserClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '@/types/database.types'
 
 // Cliente para uso no browser — usa COOKIES em vez de localStorage
-// Isso garante que o middleware (createMiddlewareClient) consegue ler a sessão
-export const supabase = createClientComponentClient<Database>()
+// Compatível com o novo formato de chaves do Supabase (sb_publishable_*)
+export const supabase = createBrowserClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 // Helper: retorna cliente com service role (apenas server-side)
 export function createServiceClient() {

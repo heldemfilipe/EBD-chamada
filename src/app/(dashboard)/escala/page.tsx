@@ -91,6 +91,7 @@ export default function EscalaPage() {
   const [filtroAno, setFiltroAno]   = useState(String(new Date().getFullYear()))
   const [filtroTrim, setFiltroTrim] = useState(String(Math.floor(new Date().getMonth() / 3) + 1))
   const [filtroProf, setFiltroProf] = useState('')
+  const [viewMode, setViewMode]     = useState<'cards' | 'tabela'>('cards')
 
   // Dialog
   const [dialogOpen, setDialogOpen]           = useState(false)
@@ -147,8 +148,9 @@ export default function EscalaPage() {
     let list = [...escalasData]
     if (filtroTipo === 'trimestre') {
       list = list.filter(e => e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
-    } else if (filtroTipo === 'professor' && filtroProf) {
-      list = list.filter(e => e.professorId === filtroProf)
+    } else if (filtroTipo === 'professor') {
+      list = list.filter(e => e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
+      if (filtroProf && filtroProf !== 'todos') list = list.filter(e => e.professorId === filtroProf)
     }
     return list.sort((a, b) => a.data.localeCompare(b.data))
   }, [escalasData, filtroTipo, filtroAno, filtroTrim, filtroProf])
@@ -161,6 +163,27 @@ export default function EscalaPage() {
     }
     return map
   }, [escalasFiltradas])
+
+  // ── Visão de tabela (matriz L# x Turma) ───────────────────────────────────────
+  const tabelaView = useMemo(() => {
+    const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
+    const turmasNaEscala = turmasData.filter(t =>
+      escalasData.some(e => e.turmaId === t.id && e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
+    )
+    const linhas = domingos.map(dom => ({
+      aula: dom.aula,
+      data: dom.data,
+      celulas: turmasNaEscala.map(t => {
+        const e = escalasFiltradas.find(es => es.data === dom.data && es.turmaId === t.id)
+        return {
+          turmaId: t.id,
+          professor: e ? (professoresData.find(p => p.id === e.professorId)?.nome ?? '—') : '—',
+          destacado: filtroTipo === 'professor' && filtroProf ? e?.professorId === filtroProf : false,
+        }
+      }),
+    }))
+    return { turmas: turmasNaEscala, linhas }
+  }, [filtroTrim, filtroAno, turmasData, escalasData, escalasFiltradas, professoresData, filtroTipo, filtroProf])
 
   // ── Dialog handlers ───────────────────────────────────────────────────────────
   function handleOpenDialog(escala?: Escala) {
@@ -288,42 +311,58 @@ export default function EscalaPage() {
             ))}
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            {filtroTipo === 'trimestre' && (
-              <>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Ano</Label>
-                  <Select value={filtroAno} onValueChange={setFiltroAno}>
-                    <SelectTrigger className="w-[90px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {ANOS_DISPONIVEIS.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Trimestre</Label>
-                  <Select value={filtroTrim} onValueChange={setFiltroTrim}>
-                    <SelectTrigger className="w-full sm:w-[220px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {TRIMESTRES_LABEL.map((t, i) => (
-                        <SelectItem key={i + 1} value={String(i + 1)}>{t}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
+          <div className="flex flex-wrap gap-3 items-end">
+            {/* Ano e Trimestre — aparecem em ambos os modos */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Ano</Label>
+              <Select value={filtroAno} onValueChange={setFiltroAno}>
+                <SelectTrigger className="w-[90px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ANOS_DISPONIVEIS.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Trimestre</Label>
+              <Select value={filtroTrim} onValueChange={setFiltroTrim}>
+                <SelectTrigger className="w-full sm:w-[200px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRIMESTRES_LABEL.map((t, i) => (
+                    <SelectItem key={i + 1} value={String(i + 1)}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Professor — só aparece no modo Por Professor */}
             {filtroTipo === 'professor' && (
               <div className="space-y-1.5">
                 <Label className="text-xs">Professor</Label>
                 <Select value={filtroProf} onValueChange={setFiltroProf}>
-                  <SelectTrigger className="w-full sm:w-[220px]"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                  <SelectTrigger className="w-full sm:w-[200px]"><SelectValue placeholder="Todos" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
                     {professoresData.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             )}
+            {/* Toggle Cards / Tabela */}
+            <div className="space-y-1.5 ml-auto">
+              <Label className="text-xs">Visualização</Label>
+              <div className="flex gap-1 border rounded-md p-0.5">
+                {(['cards', 'tabela'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setViewMode(m)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      viewMode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {m === 'cards' ? 'Cards' : 'Tabela'}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -362,20 +401,63 @@ export default function EscalaPage() {
         </Card>
       </div>
 
-      {/* Lista agrupada por data */}
+      {/* Lista / Tabela */}
       <Card>
         <CardHeader>
           <CardTitle>Escalas Programadas</CardTitle>
           <CardDescription>{escalasFiltradas.length} escala(s) encontrada(s)</CardDescription>
         </CardHeader>
         <CardContent>
-          {escalasFiltradas.length > 0 ? (
+          {/* ── Visão Tabela ─────────────────────────────────────────────── */}
+          {viewMode === 'tabela' ? (
+            tabelaView.turmas.length > 0 ? (
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="sticky left-0 z-10 bg-muted/80 px-3 py-2 text-center font-semibold w-12">L#</th>
+                      <th className="sticky left-12 z-10 bg-muted/80 px-3 py-2 text-left font-semibold whitespace-nowrap w-20">Data</th>
+                      {tabelaView.turmas.map(t => (
+                        <th key={t.id} className="px-3 py-2 text-left font-semibold whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${t.cor}`} />
+                            {t.nome}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tabelaView.linhas.map((linha, idx) => (
+                      <tr key={linha.data} className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/20'}>
+                        <td className="sticky left-0 z-10 bg-inherit px-3 py-2 text-center font-bold text-muted-foreground">{linha.aula}</td>
+                        <td className="sticky left-12 z-10 bg-inherit px-3 py-2 whitespace-nowrap font-medium">
+                          {new Date(linha.data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </td>
+                        {linha.celulas.map(c => (
+                          <td key={c.turmaId} className={`px-3 py-2 whitespace-nowrap ${c.destacado ? 'font-semibold text-primary' : ''}`}>
+                            {c.professor}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <Calendar className="h-12 w-12 mx-auto mb-3" />
+                <p>Nenhuma escala para este período</p>
+              </div>
+            )
+          ) : (
+          /* ── Visão Cards ─────────────────────────────────────────────── */
+          escalasFiltradas.length > 0 ? (
             <div className="space-y-6">
               {Object.keys(escalasAgrupadas).map(data => {
                 const aulaInfo = getAulaInfo(data)
                 return (
                   <div key={data} className="space-y-3">
-                    {/* Cabeçalho do domingo */}
                     <div className="flex flex-wrap items-center gap-2 pb-2 border-b">
                       <Calendar className="h-5 w-5 text-primary" />
                       <h3 className="text-lg font-semibold">
@@ -390,7 +472,6 @@ export default function EscalaPage() {
                       )}
                       <Badge variant="outline">{escalasAgrupadas[data].length} turma(s)</Badge>
                     </div>
-
                     <div className="grid gap-3 sm:grid-cols-2">
                       {escalasAgrupadas[data].map(escala => (
                         <div key={escala.id} className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">
@@ -435,6 +516,7 @@ export default function EscalaPage() {
                 <Plus className="h-4 w-4 mr-2" />Criar Nova Escala
               </Button>
             </div>
+          )
           )}
         </CardContent>
       </Card>

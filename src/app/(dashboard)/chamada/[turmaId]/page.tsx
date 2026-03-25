@@ -382,13 +382,12 @@ export default function ChamadaTurmaPage() {
     setSalvando(true)
     try {
       const db = supabase as any
-      const ano = parseInt(dataSelecionada.split('-')[0])
 
       // 1. Upsert da chamada (sem depender do select retornar a linha — RLS pode bloquear)
       const { error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, ano, oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
 
@@ -440,7 +439,7 @@ export default function ChamadaTurmaPage() {
         .eq('turma_id', turmaId)
         .eq('data', dataSelecionada)
 
-      const visitantesParaSalvar = visitantes.filter(v => v.presenteHoje !== 'pendente')
+      const visitantesParaSalvar = visitantes
 
       await Promise.all(visitantesParaSalvar.map(async (v) => {
         let visitanteId: string | null = v.isNovo ? null : v.id
@@ -466,7 +465,7 @@ export default function ChamadaTurmaPage() {
           turma_id: turmaId,
           chamada_id: chamadaId,
           data: dataSelecionada,
-          presente: v.presenteHoje === 'presente',
+          presente: v.presenteHoje === 'presente', // 'pendente' → false (ausente)
           trouxe_biblia: v.trouxe_biblia,
           trouxe_revista: v.trouxe_revista,
         })

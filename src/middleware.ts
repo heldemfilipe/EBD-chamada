@@ -1,4 +1,4 @@
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { NextRequest, NextResponse } from 'next/server'
 import { logger } from '@/lib/logger'
 
@@ -8,16 +8,35 @@ const PUBLIC_ROUTES = ['/login']
 const STATIC_PREFIXES = ['/_next', '/favicon', '/api']
 
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next()
   const { pathname } = req.nextUrl
 
   // Ignorar arquivos estáticos e APIs (estas têm sua própria auth)
-  if (STATIC_PREFIXES.some(p => pathname.startsWith(p))) return res
+  if (STATIC_PREFIXES.some(p => pathname.startsWith(p))) return NextResponse.next()
 
   const isPublic = PUBLIC_ROUTES.includes(pathname)
 
-  // Criar cliente Supabase com cookies (para verificar sessão no edge)
-  const supabase = createMiddlewareClient({ req, res })
+  // Criar resposta mutável para que o cliente possa atualizar cookies de sessão
+  let response = NextResponse.next({ request: req })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
+          response = NextResponse.next({ request: req })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
   const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
   if (sessionError) {
@@ -70,7 +89,7 @@ export async function middleware(req: NextRequest) {
     })
   }
 
-  return res
+  return response
 }
 
 export const config = {
