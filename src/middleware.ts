@@ -37,20 +37,21 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+  // getUser() valida o JWT junto ao servidor Supabase Auth (mais seguro que getSession)
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-  if (sessionError) {
-    logger.error('Falha ao verificar sessão no middleware', {
+  if (userError && userError.message !== 'Auth session missing!') {
+    logger.error('Falha ao verificar usuário no middleware', {
       module: 'middleware',
       path: pathname,
-      error: sessionError,
+      error: userError,
     })
   }
 
-  const userId = session?.user?.id ?? undefined
+  const userId = user?.id ?? undefined
 
   // ─── Não autenticado tentando acessar rota protegida ─────────────────────────
-  if (!session && !isPublic) {
+  if (!user && !isPublic) {
     const loginUrl = new URL('/login', req.url)
     loginUrl.searchParams.set('redirect', pathname)
     logger.warn('Acesso negado — redirecionando para login', {
@@ -62,7 +63,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ─── Já autenticado tentando acessar /login ───────────────────────────────────
-  if (session && pathname === '/login') {
+  if (user && pathname === '/login') {
     logger.debug('Usuário já autenticado, redirecionando de /login → /dashboard', {
       module: 'middleware',
       userId,
@@ -72,7 +73,7 @@ export async function middleware(req: NextRequest) {
 
   // ─── Raiz '/' ─────────────────────────────────────────────────────────────────
   if (pathname === '/') {
-    const dest = session ? '/dashboard' : '/login'
+    const dest = user ? '/dashboard' : '/login'
     logger.debug(`Raiz "/" → redirecionando para ${dest}`, {
       module: 'middleware',
       userId,
@@ -81,7 +82,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ─── Acesso permitido ─────────────────────────────────────────────────────────
-  if (session) {
+  if (user) {
     logger.debug(`Acesso permitido`, {
       module: 'middleware',
       path: pathname,

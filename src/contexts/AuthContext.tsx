@@ -165,8 +165,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    let mounted = true
+
+    // getUser() autentica o JWT junto ao servidor — evita usar dados não verificados do storage
+    async function init() {
+      const { data: { user: verifiedUser } } = await supabase.auth.getUser()
+      if (!mounted) return
+      setUser(verifiedUser ?? null)
+      if (verifiedUser) {
+        await loadPerfil(verifiedUser.id)
+      }
+      setLoading(false)
+    }
+
+    init()
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted) return
+        // INITIAL_SESSION já foi tratado pelo init() acima com getUser() verificado
+        if (event === 'INITIAL_SESSION') return
+
         logger.debug(`Auth state change: ${event}`, {
           module: 'auth',
           userId: session?.user?.id ?? undefined,
@@ -185,7 +204,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     )
-    return () => subscription.unsubscribe()
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const signOut = async () => {
