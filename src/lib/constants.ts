@@ -71,6 +71,98 @@ export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>
   },
 }
 
+// ─── Temas individuais das aulas (títulos por lição) ──────────────────────────
+// Estrutura: ano → trimestre → categoria → número da aula → título
+// Preencher com os títulos reais das revistas CPAD de cada trimestre.
+export const LICOES_REVISTA: Record<string, Record<number, Record<string, Record<number, string>>>> = {
+  '2026': {
+    2: {
+      adultos: {
+        1:  'Abel e Enoque: Fé que Agrada a Deus',
+        2:  'Noé: Obediência em Meio à Corrupção',
+        3:  'Abraão: O Pai dos Fiéis',
+        4:  'Isaque e Jacó: Herdeiros da Promessa',
+        5:  'José: Da Cova ao Palácio',
+        6:  'Moisés: O Libertador de Israel',
+        7:  'Josué: Fidelidade na Conquista',
+        8:  'Gideão e Sansão: Poder na Fraqueza',
+        9:  'Davi: O Homem Segundo o Coração de Deus',
+        10: 'Elias: Fogo e Fé no Deserto',
+        11: 'Isaías e Jeremias: Vozes do Senhor',
+        12: 'Daniel: Fidelidade sob Pressão',
+        13: 'Os Macabeus: Resistência pela Fé',
+      },
+      jovens: {
+        1:  'A Verdade que Liberta',
+        2:  'Reconhecendo o Engano',
+        3:  'Relativismo: Tudo É Verdade?',
+        4:  'Fake News e a Palavra de Deus',
+        5:  'Identidade em Cristo',
+        6:  'Relacionamentos Saudáveis',
+        7:  'Pressão Social e Fé',
+        8:  'Mídias Sociais e Verdade',
+        9:  'O Engano das Seitas',
+        10: 'Ciência e Fé: Contradição?',
+        11: 'Discernimento Espiritual',
+        12: 'Anunciando a Verdade',
+        13: 'Firmes na Verdade',
+      },
+      adolescentes: {
+        1:  'O Filho Pródigo: Amor do Pai',
+        2:  'O Bom Samaritano: Amor ao Próximo',
+        3:  'A Semente e o Semeador',
+        4:  'O Fermento e o Grão de Mostarda',
+        5:  'O Tesouro Escondido',
+        6:  'A Ovelha Perdida',
+        7:  'Os Dez Talentos',
+        8:  'O Rico Insensato',
+        9:  'O Fariseu e o Publicano',
+        10: 'As Dez Virgens',
+        11: 'Os Trabalhadores da Vinha',
+        12: 'O Servo Infiel',
+        13: 'O Juízo Final',
+      },
+      juniores: {
+        1:  'A Promessa da Terra',
+        2:  'Moisés e o Êxodo',
+        3:  'No Deserto com Deus',
+        4:  'Os Espias e a Fé',
+        5:  'Josué e a Conquista',
+        6:  'Jericó: Vitória pela Fé',
+        7:  'Dividindo a Terra',
+        8:  'Os Juízes de Israel',
+        9:  'Rute: Lealdade e Fé',
+        10: 'Samuel: O Profeta Criança',
+        11: 'Saul: O Primeiro Rei',
+        12: 'Davi: O Rei Escolhido',
+        13: 'Salomão e o Templo',
+      },
+      primarios: {
+        1:  'Deus Me Criou',
+        2:  'Deus Cuida de Mim',
+        3:  'Deus Me Ama',
+        4:  'Jesus, Meu Amigo',
+        5:  'Obedecendo a Deus',
+        6:  'Ajudando o Próximo',
+        7:  'Orando a Deus',
+        8:  'A Bíblia, Palavra de Deus',
+        9:  'Fazendo o Bem',
+        10: 'Família Abençoada',
+        11: 'Na Igreja de Deus',
+        12: 'Partilhando com os Outros',
+        13: 'Vivendo para Jesus',
+      },
+    },
+  },
+}
+
+/** Retorna o título da lição específica de uma turma em um período */
+export function getLicaoTema(turmaNome: string, ano: string | number, trimestre: number, aula: number): string | null {
+  const cat = getTurmaCategoria(turmaNome)
+  if (!cat) return null
+  return LICOES_REVISTA[String(ano)]?.[trimestre]?.[cat]?.[aula] ?? null
+}
+
 /** Mapeia o nome de uma turma para a categoria de revista CPAD */
 export function getTurmaCategoria(nome: string): string | null {
   const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')

@@ -13,10 +13,10 @@ import {
 } from '@/components/ui/select'
 import {
   Calendar, Plus, Edit, Trash2, GraduationCap, BookOpen, LayoutGrid, Table2,
-  ChevronDown, ChevronUp, User,
+  ChevronDown, ChevronUp, User, ListFilter,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { ANOS_DISPONIVEIS, getTemaRevista } from '@/lib/constants'
+import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
@@ -88,10 +88,11 @@ export default function EscalaPage() {
   const [carregando, setCarregando]            = useState(true)
 
   // Filtros
-  const [filtroAno,  setFiltroAno]  = useState(String(new Date().getFullYear()))
-  const [filtroTrim, setFiltroTrim] = useState(String(Math.floor(new Date().getMonth() / 3) + 1))
-  const [filtroProf, setFiltroProf] = useState('todos')
-  const [viewMode,   setViewMode]   = useState<'tabela' | 'cards'>('tabela')
+  const [filtroAno,   setFiltroAno]   = useState(String(new Date().getFullYear()))
+  const [filtroTrim,  setFiltroTrim]  = useState(String(Math.floor(new Date().getMonth() / 3) + 1))
+  const [filtroProf,  setFiltroProf]  = useState('todos')
+  const [filtroTurma, setFiltroTurma] = useState('todas')
+  const [viewMode,    setViewMode]    = useState<'tabela' | 'cards'>('cards')
 
   // Dialog
   const [dialogOpen,       setDialogOpen]       = useState(false)
@@ -101,7 +102,7 @@ export default function EscalaPage() {
   const [formData,         setFormData]         = useState(FORM_VAZIO)
   const [isSaving,         setIsSaving]         = useState(false)
 
-  // Expanded rows no modo cards (mobile)
+  // Accordion cards
   const [expandedDatas, setExpandedDatas] = useState<Set<string>>(new Set())
 
   const domingosTrimForm = useMemo(
@@ -143,25 +144,54 @@ export default function EscalaPage() {
   const getTurmaNome = (id: string) => turmasData.find(t => t.id === id)?.nome ?? '—'
   const getTurmaCor  = (id: string) => turmasData.find(t => t.id === id)?.cor ?? 'bg-gray-500'
 
-  // ── Filtros ───────────────────────────────────────────────────────────────────
+  // ── Filtros base ──────────────────────────────────────────────────────────────
+  const escalasPeriodo = useMemo(() =>
+    escalasData
+      .filter(e => e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
+      .sort((a, b) => a.data.localeCompare(b.data)),
+    [escalasData, filtroAno, filtroTrim]
+  )
+
   const escalasFiltradas = useMemo(() => {
-    let list = escalasData.filter(e =>
-      e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim)
-    )
-    if (filtroProf !== 'todos') list = list.filter(e => e.professorId === filtroProf)
-    return list.sort((a, b) => a.data.localeCompare(b.data))
-  }, [escalasData, filtroAno, filtroTrim, filtroProf])
+    let list = escalasPeriodo
+    if (filtroProf  !== 'todos')  list = list.filter(e => e.professorId === filtroProf)
+    if (filtroTurma !== 'todas')  list = list.filter(e => e.turmaId === filtroTurma)
+    return list
+  }, [escalasPeriodo, filtroProf, filtroTurma])
+
+  // ── View por Turma (L# × Professor com tema da lição) ─────────────────────────
+  const turmaView = useMemo(() => {
+    if (filtroTurma === 'todas') return null
+    const turma = turmasData.find(t => t.id === filtroTurma)
+    if (!turma) return null
+    const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
+    const temaRevista = getTemaRevista(turma.nome, filtroAno, parseInt(filtroTrim))
+    return {
+      turma,
+      temaRevista,
+      linhas: domingos.map(dom => {
+        const escala = escalasPeriodo.find(e => e.data === dom.data && e.turmaId === filtroTurma)
+        const temaLicao = getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula)
+        return {
+          aula: dom.aula,
+          data: dom.data,
+          escala: escala ?? null,
+          professor: escala ? getProfNome(escala.professorId) : null,
+          temaLicao,
+          destacado: filtroProf !== 'todos' && escala?.professorId === filtroProf,
+        }
+      }),
+    }
+  }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData])
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
   const tabelaView = useMemo(() => {
     const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
     const turmasNaEscala = turmasData.filter(t =>
-      escalasData.some(e => e.turmaId === t.id && e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
+      escalasPeriodo.some(e => e.turmaId === t.id)
     )
     const linhas = domingos.map(dom => {
-      const escalasNoDia = escalasData.filter(
-        e => e.data === dom.data && e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim)
-      )
+      const escalasNoDia = escalasPeriodo.filter(e => e.data === dom.data)
       return {
         aula: dom.aula,
         data: dom.data,
@@ -178,7 +208,7 @@ export default function EscalaPage() {
       }
     })
     return { turmas: turmasNaEscala, linhas }
-  }, [filtroTrim, filtroAno, turmasData, escalasData, filtroProf, professoresData])
+  }, [filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData])
 
   // ── Visão Cards (agrupado por data) ───────────────────────────────────────────
   const cardsView = useMemo(() => {
@@ -266,7 +296,7 @@ export default function EscalaPage() {
   if (carregando) return (
     <div className="space-y-4 animate-pulse">
       <div className="h-8 w-48 bg-muted rounded" />
-      <div className="h-12 w-full bg-muted rounded-xl" />
+      <div className="h-20 w-full bg-muted rounded-xl" />
       <div className="h-64 w-full bg-muted rounded-xl" />
     </div>
   )
@@ -281,6 +311,9 @@ export default function EscalaPage() {
           <h1 className="text-2xl font-bold tracking-tight">Escala de Professores</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {escalasFiltradas.length} escala(s) · {TRIMESTRES_SHORT[parseInt(filtroTrim) - 1]} {filtroAno}
+            {filtroTurma !== 'todas' && (
+              <span className="ml-1">· {getTurmaNome(filtroTurma)}</span>
+            )}
           </p>
         </div>
         <Button onClick={() => abrirDialog()} className="w-full sm:w-auto">
@@ -289,70 +322,185 @@ export default function EscalaPage() {
       </div>
 
       {/* ── Barra de Filtros ───────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-2 items-end p-3 rounded-xl border bg-card">
-        {/* Ano */}
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Ano</Label>
-          <Select value={filtroAno} onValueChange={setFiltroAno}>
-            <SelectTrigger className="h-8 w-[80px] text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {ANOS_DISPONIVEIS.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      <div className="rounded-xl border bg-card p-3 space-y-3">
+        {/* Linha 1: Ano + Trimestre */}
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Ano</Label>
+            <Select value={filtroAno} onValueChange={v => { setFiltroAno(v); setFiltroTurma('todas') }}>
+              <SelectTrigger className="h-8 w-[80px] text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {ANOS_DISPONIVEIS.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Trimestre</Label>
+            <Select value={filtroTrim} onValueChange={v => { setFiltroTrim(v); setFiltroTurma('todas') }}>
+              <SelectTrigger className="h-8 w-[170px] text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TRIMESTRES_SHORT.map((t, i) => (
+                  <SelectItem key={i + 1} value={String(i + 1)}>{TRIMESTRES_LABEL[i]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Toggle de visualização — oculto quando turma selecionada */}
+          {filtroTurma === 'todas' && (
+            <div className="ml-auto flex gap-1 border rounded-lg p-0.5 self-end">
+              <button
+                onClick={() => setViewMode('tabela')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  viewMode === 'tabela' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                }`}
+                title="Visualização em tabela"
+              >
+                <Table2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Tabela</span>
+              </button>
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  viewMode === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                }`}
+                title="Visualização em cards"
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Trimestre */}
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Trimestre</Label>
-          <Select value={filtroTrim} onValueChange={setFiltroTrim}>
-            <SelectTrigger className="h-8 w-[170px] text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {TRIMESTRES_SHORT.map((t, i) => (
-                <SelectItem key={i + 1} value={String(i + 1)}>{TRIMESTRES_LABEL[i]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Linha 2: Turma + Professor */}
+        <div className="flex flex-wrap gap-2 items-end border-t pt-3">
+          <ListFilter className="h-4 w-4 text-muted-foreground self-end mb-1.5 flex-shrink-0" />
 
-        {/* Professor */}
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Professor</Label>
-          <Select value={filtroProf} onValueChange={setFiltroProf}>
-            <SelectTrigger className="h-8 w-[160px] text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos os professores</SelectItem>
-              {professoresData.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Ver por turma</Label>
+            <Select value={filtroTurma} onValueChange={setFiltroTurma}>
+              <SelectTrigger className="h-8 w-[180px] text-sm"><SelectValue placeholder="Todas as turmas" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas as turmas</SelectItem>
+                {turmasData.map(t => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <span className="flex items-center gap-2">
+                      <span className={`inline-block w-2 h-2 rounded-full ${t.cor}`} />
+                      {t.nome}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-        {/* Toggle de visualização */}
-        <div className="ml-auto flex gap-1 border rounded-lg p-0.5">
-          <button
-            onClick={() => setViewMode('tabela')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-              viewMode === 'tabela' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-            }`}
-            title="Visualização em tabela"
-          >
-            <Table2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Tabela</span>
-          </button>
-          <button
-            onClick={() => setViewMode('cards')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-              viewMode === 'cards' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-            }`}
-            title="Visualização em cards"
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Cards</span>
-          </button>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Professor</Label>
+            <Select value={filtroProf} onValueChange={setFiltroProf}>
+              <SelectTrigger className="h-8 w-[160px] text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os professores</SelectItem>
+                {professoresData.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
+      {/* ── View por Turma ─────────────────────────────────────────────────── */}
+      {turmaView && (
+        <div className="rounded-xl border overflow-hidden">
+          {/* Cabeçalho da turma */}
+          <div className="flex items-center gap-3 px-4 py-3 bg-muted/40 border-b">
+            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${turmaView.turma.cor}`} />
+            <div>
+              <p className="font-semibold text-sm">{turmaView.turma.nome}</p>
+              {turmaView.temaRevista && (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <BookOpen className="h-3 w-3" />
+                  {turmaView.temaRevista}
+                </p>
+              )}
+            </div>
+            <Badge variant="secondary" className="ml-auto text-xs">
+              {turmaView.linhas.filter(l => l.professor).length} / {turmaView.linhas.length} aulas
+            </Badge>
+          </div>
+
+          {/* Tabela por aula */}
+          <div className="divide-y">
+            {turmaView.linhas.map(linha => {
+              const dataFmt = new Date(linha.data + 'T12:00:00').toLocaleDateString('pt-BR', {
+                day: '2-digit', month: '2-digit',
+              })
+              const dataFmtLong = new Date(linha.data + 'T12:00:00').toLocaleDateString('pt-BR', {
+                weekday: 'short', day: '2-digit', month: 'short',
+              })
+              return (
+                <div
+                  key={linha.data}
+                  className={`flex items-start gap-3 px-4 py-3 transition-colors ${
+                    linha.professor
+                      ? linha.destacado ? 'bg-primary/5' : 'hover:bg-muted/20'
+                      : 'opacity-40'
+                  }`}
+                >
+                  {/* Número da aula */}
+                  <div className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-muted text-xs font-bold text-muted-foreground mt-0.5">
+                    {linha.aula}
+                  </div>
+
+                  {/* Data + Tema */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="text-xs font-medium capitalize">{dataFmtLong}</span>
+                      <span className="text-[10px] text-muted-foreground hidden sm:inline">{dataFmt}</span>
+                    </div>
+                    {linha.temaLicao ? (
+                      <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                        Lição {linha.aula}: {linha.temaLicao}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground/60 mt-0.5">Lição {linha.aula}</p>
+                    )}
+                  </div>
+
+                  {/* Professor */}
+                  <div className={`flex items-center gap-1.5 flex-shrink-0 ${linha.destacado ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
+                    {linha.professor ? (
+                      <>
+                        <GraduationCap className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span className="text-xs">{linha.professor}</span>
+                        <div className="flex gap-0.5 ml-1">
+                          <button
+                            onClick={() => linha.escala && abrirDialog(linha.escala)}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => { if (linha.escala) { setSelectedEscala(linha.escala); setDeleteDialogOpen(true) } }}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-[11px] italic">sem professor</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── Visão Tabela ───────────────────────────────────────────────────── */}
-      {viewMode === 'tabela' && (
+      {!turmaView && viewMode === 'tabela' && (
         tabelaView.turmas.length === 0 ? (
           <EmptyEscala onNova={() => abrirDialog()} />
         ) : (
@@ -443,15 +591,15 @@ export default function EscalaPage() {
       )}
 
       {/* ── Visão Cards ────────────────────────────────────────────────────── */}
-      {viewMode === 'cards' && (
+      {!turmaView && viewMode === 'cards' && (
         cardsView.length === 0 ? (
           <EmptyEscala onNova={() => abrirDialog()} />
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {cardsView.map(([data, { aulaInfo, escalas }]) => {
               const isExpanded = expandedDatas.has(data)
               const dataFormatada = new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', {
-                weekday: 'short', day: '2-digit', month: 'short',
+                weekday: 'long', day: '2-digit', month: 'long',
               })
               return (
                 <div key={data} className="rounded-xl border bg-card overflow-hidden">
@@ -474,22 +622,20 @@ export default function EscalaPage() {
                           {escalas.length} turma{escalas.length !== 1 ? 's' : ''}
                         </Badge>
                       </div>
-                      {/* Temas resumidos */}
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {turmasData
-                          .filter(t => escalas.some(e => e.turmaId === t.id))
-                          .slice(0, 3)
-                          .map(t => {
-                            const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
-                            return tema ? (
-                              <span key={t.id} className="text-[10px] text-muted-foreground truncate max-w-[160px]">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${t.cor} mr-1 align-middle`} />
-                                {tema}
-                              </span>
-                            ) : null
-                          })
-                        }
-                      </div>
+                      {/* Professores resumidos */}
+                      {!isExpanded && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                          {escalas.slice(0, 4).map(e => (
+                            <span key={e.id} className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <span className={`inline-block w-1.5 h-1.5 rounded-full ${getTurmaCor(e.turmaId)}`} />
+                              {getProfNome(e.professorId)}
+                            </span>
+                          ))}
+                          {escalas.length > 4 && (
+                            <span className="text-[11px] text-muted-foreground">+{escalas.length - 4}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex-shrink-0 text-muted-foreground">
                       {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -500,14 +646,22 @@ export default function EscalaPage() {
                   {isExpanded && (
                     <div className="border-t divide-y">
                       {escalas.map(escala => {
-                        const tema = getTemaRevista(getTurmaNome(escala.turmaId), filtroAno, parseInt(filtroTrim))
+                        const aulaNum = aulaInfo?.aula ?? 0
+                        const temaLicao = getLicaoTema(getTurmaNome(escala.turmaId), filtroAno, parseInt(filtroTrim), aulaNum)
+                        const temaRev   = getTemaRevista(getTurmaNome(escala.turmaId), filtroAno, parseInt(filtroTrim))
                         const isProfDestacado = filtroProf !== 'todos' && escala.professorId === filtroProf
                         return (
                           <div key={escala.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
                             <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${getTurmaCor(escala.turmaId)}`} />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium truncate">{getTurmaNome(escala.turmaId)}</p>
-                              {tema && <p className="text-[11px] text-muted-foreground truncate">{tema}</p>}
+                              {temaLicao ? (
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  Lição {aulaNum}: {temaLicao}
+                                </p>
+                              ) : temaRev ? (
+                                <p className="text-[11px] text-muted-foreground truncate">{temaRev}</p>
+                              ) : null}
                               <div className={`flex items-center gap-1 mt-0.5 ${isProfDestacado ? 'text-primary' : 'text-muted-foreground'}`}>
                                 <GraduationCap className="h-3 w-3 flex-shrink-0" />
                                 <span className="text-xs">{getProfNome(escala.professorId)}</span>
@@ -611,14 +765,16 @@ export default function EscalaPage() {
                   })}
                 </SelectContent>
               </Select>
-              {/* Mostrar tema da turma selecionada */}
+              {/* Mostrar tema da turma + lição selecionada */}
               {formData.turmaId && (() => {
                 const nome = getTurmaNome(formData.turmaId)
-                const tema = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre))
-                return tema ? (
+                const aulaNum = parseInt(formData.aulaIdx)
+                const temaLicao = getLicaoTema(nome, formData.ano, parseInt(formData.trimestre), aulaNum)
+                const temaRev   = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre))
+                return (temaLicao || temaRev) ? (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <BookOpen className="h-3.5 w-3.5 flex-shrink-0" />
-                    {tema}
+                    {temaLicao ? `Lição ${aulaNum}: ${temaLicao}` : temaRev}
                   </p>
                 ) : null
               })()}
