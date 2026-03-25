@@ -792,9 +792,6 @@ export default function EscalaPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0">
                     <span className="text-xs font-semibold capitalize">{fmtDataLonga(linha.data)}</span>
-                    {linha.is2nd && (
-                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">★ Turmas unidas</span>
-                    )}
                     {linha.isProxima && (
                       <span className="text-[10px] text-primary font-semibold">Próxima aula</span>
                     )}
@@ -1078,17 +1075,9 @@ export default function EscalaPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold capitalize text-sm">{dataFmt}</span>
-                        {is2nd && (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-400 text-amber-600 dark:text-amber-400 gap-1">
-                            <Users className="h-2.5 w-2.5" />
-                            Turmas unidas
-                          </Badge>
-                        )}
-                        {!is2nd && (
-                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                            {escalas.length} turma{escalas.length !== 1 ? 's' : ''}
-                          </Badge>
-                        )}
+                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
+                          {escalas.length} turma{escalas.length !== 1 ? 's' : ''}
+                        </Badge>
                       </div>
 
                       {/* Professores resumidos (quando recolhido) */}
