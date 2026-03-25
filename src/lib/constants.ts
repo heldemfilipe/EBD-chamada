@@ -58,6 +58,37 @@ export function getCargo(cargo: string) {
   return CARGOS.find(c => c.label === cargo) ?? null
 }
 
+// ─── Temas das revistas CPAD por ano/trimestre ────────────────────────────────
+export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>>> = {
+  '2026': {
+    2: {
+      adultos:      'Homens dos quais o Mundo não Era Digno',
+      jovens:       'Entre a Verdade e o Engano',
+      adolescentes: 'As Parábolas de Jesus são Vivas',
+      juniores:     'Israel e a Terra Prometida',
+      primarios:    'Os Ensinamentos de Deus',
+    },
+  },
+}
+
+/** Mapeia o nome de uma turma para a categoria de revista CPAD */
+export function getTurmaCategoria(nome: string): string | null {
+  const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  if (n.includes('adulto') || n.includes('heroi') || n.includes('herois')) return 'adultos'
+  if (n.includes('filha') || n.includes('shekinah') || n.includes('jovem')) return 'jovens'
+  if (n.includes('adolesc') || n.includes('dynamo')) return 'adolescentes'
+  if (n.includes('junior') || n.includes('guerreiro')) return 'juniores'
+  if (n.includes('primar') || n.includes('cordeirinho')) return 'primarios'
+  return null
+}
+
+/** Retorna o tema da revista para uma turma em um período */
+export function getTemaRevista(turmaNome: string, ano: string | number, trimestre: number): string | null {
+  const cat = getTurmaCategoria(turmaNome)
+  if (!cat) return null
+  return TEMAS_REVISTA[String(ano)]?.[trimestre]?.[cat] ?? null
+}
+
 /** Faixas etárias padrão da EBD */
 export const FAIXAS_ETARIAS = [
   { label: 'Crianças (0–7)',   min: 0,  max: 7  },
