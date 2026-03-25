@@ -1,0 +1,179 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase'
+import { TEMPLATE_PADRAO } from '../config/route'
+import { formatarTelefone, formatarMensagem } from '../preview/route'
+
+// ─── POST /api/notificacoes/disparar ─────────────────────────────────────────
+// Pode ser chamado pelo Vercel Cron ou manualmente (com Authorization header)
+// Body opcional: { data?: 'YYYY-MM-DD' } — se não informado, usa próxima data_aula
+
+export async function POST(req: NextRequest) {
+  // Verificar secret do cron (pula se chamado internamente com flag skip_auth)
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret) {
+    const auth = req.headers.get('authorization') ?? ''
+    const body = await req.json().catch(() => ({}))
+    if (!body.skip_auth && auth !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    }
+  }
+
+  try {
+    const db = createServiceClient() as any
+    const reqBody = await req.json().catch(() => ({}))
+
+    // 1. Carregar configuração
+    const { data: config } = await db
+      .from('notificacoes_config')
+      .select('*')
+      .single()
+
+    if (!config?.zapi_instance_id || !config?.zapi_token) {
+      return NextResponse.json({ error: 'Z-API não configurado', enviados: 0, erros: 0 })
+    }
+
+    // 2. Determinar data da aula
+    const dataAula: string = reqBody.data ?? proximaDataDiaAula(config.dia_aula ?? 0)
+
+    // 3. Buscar escalas do dia
+    const { data: escalas = [] } = await db
+      .from('escalas')
+      .select('turma_id, professor_id, turmas(nome), professores(nome, telefone)')
+      .eq('data', dataAula)
+
+    if (!escalas || escalas.length === 0) {
+      return NextResponse.json({ mensagem: 'Nenhuma escala para esta data', dataAula, enviados: 0, erros: 0 })
+    }
+
+    // 4. Carregar overrides da semana
+    const { data: overrides = [] } = await db
+      .from('notificacoes_semana')
+      .select('*')
+      .eq('data_aula', dataAula)
+
+    // 5. Calcular nº da aula
+    const aulaNum   = calcularNumeroAula(dataAula)
+    const diaAula   = new Date(dataAula + 'T12:00:00').getDay()
+    const template  = config.template ?? TEMPLATE_PADRAO
+
+    const logs: any[]  = []
+    let enviados = 0
+    let erros    = 0
+    let silenciados = 0
+
+    // 6. Enviar para cada professor
+    for (const e of escalas) {
+      const override = (overrides as any[]).find(
+        o => o.professor_id === e.professor_id && o.turma_id === e.turma_id
+      )
+
+      if (override?.silenciado) {
+        silenciados++
+        logs.push({
+          professor_id:    e.professor_id,
+          turma_id:        e.turma_id,
+          data_aula:       dataAula,
+          numero_telefone: null,
+          mensagem:        null,
+          status:          'silenciado',
+          erro:            null,
+        })
+        continue
+      }
+
+      const prof  = e.professores
+      const turma = e.turmas
+      const tel   = prof?.telefone ? formatarTelefone(prof.telefone) : null
+
+      if (!tel) {
+        erros++
+        logs.push({
+          professor_id:    e.professor_id,
+          turma_id:        e.turma_id,
+          data_aula:       dataAula,
+          numero_telefone: null,
+          mensagem:        null,
+          status:          'sem_telefone',
+          erro:            'Professor sem telefone cadastrado',
+        })
+        continue
+      }
+
+      const mensagem = formatarMensagem(
+        override?.mensagem_personalizada ?? template,
+        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula }
+      )
+
+      // 7. Chamar Z-API
+      try {
+        const zapiUrl = `https://api.z-api.io/instances/${config.zapi_instance_id}/token/${config.zapi_token}/send-text`
+        const resp = await fetch(zapiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Client-Token': config.zapi_token },
+          body: JSON.stringify({ phone: tel, message: mensagem }),
+          signal: AbortSignal.timeout(10000),
+        })
+
+        if (resp.ok) {
+          enviados++
+          logs.push({
+            professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+            numero_telefone: tel, mensagem, status: 'enviado', erro: null,
+          })
+        } else {
+          const errBody = await resp.text()
+          erros++
+          logs.push({
+            professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+            numero_telefone: tel, mensagem, status: 'erro', erro: `HTTP ${resp.status}: ${errBody}`,
+          })
+        }
+      } catch (sendErr: any) {
+        erros++
+        logs.push({
+          professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: tel, mensagem, status: 'erro', erro: sendErr.message,
+        })
+      }
+
+      // Pequeno delay entre envios para não sobrecarregar
+      await new Promise(r => setTimeout(r, 500))
+    }
+
+    // 8. Gravar logs
+    if (logs.length > 0) {
+      await db.from('notificacoes_log').insert(logs)
+    }
+
+    return NextResponse.json({ dataAula, aulaNum, enviados, erros, silenciados })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+}
+
+// ─── Helper: próximo dia_aula (dia da semana) a partir de hoje ────────────────
+function proximaDataDiaAula(diaAula: number): string {
+  const hoje = new Date()
+  const hojeDia = hoje.getDay()
+  const diff = (diaAula - hojeDia + 7) % 7 || 7
+  const proxima = new Date(hoje)
+  proxima.setDate(hoje.getDate() + diff)
+  return proxima.toISOString().split('T')[0]
+}
+
+function calcularNumeroAula(dataIso: string): number {
+  const d = new Date(dataIso + 'T12:00:00')
+  const ano  = d.getFullYear()
+  const trim = Math.floor(d.getMonth() / 3) + 1
+  const mesInicio = (trim - 1) * 3
+  const inicio = new Date(ano, mesInicio, 1)
+  while (inicio.getDay() !== 0) inicio.setDate(inicio.getDate() + 1)
+  let aula = 1
+  const cursor = new Date(inicio)
+  while (cursor <= d) {
+    if (cursor.toISOString().split('T')[0] === dataIso) return aula
+    cursor.setDate(cursor.getDate() + 7)
+    aula++
+  }
+  return aula
+}
