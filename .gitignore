@@ -47,6 +47,7 @@ Thumbs.db
 
 # Supabase
 .supabase
+supabase/*
 
 # Claude Code
 .claude/
