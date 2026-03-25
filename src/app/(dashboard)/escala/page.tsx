@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select'
 import {
   Calendar, Plus, Edit, Trash2, GraduationCap, BookOpen, LayoutGrid, Table2,
-  ChevronDown, ChevronUp, ListFilter, Users,
+  ChevronDown, ChevronUp, ListFilter, Users, Sparkles, Link2, Save,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
@@ -95,6 +95,88 @@ const TRIMESTRES_LABEL = [
 ]
 const TRIMESTRES_SHORT = ['1º Trim', '2º Trim', '3º Trim', '4º Trim']
 
+// ─── Gerador de escala sugerida ────────────────────────────────────────────────
+function gerarEscalaSugerida(
+  profTurmasMap: Record<string, string[]>,
+  professoresData: Professor[],
+  turmasData: Turma[],
+  ano: number,
+  trimestre: number,
+): Array<{ data: string; turmaId: string; professorId: string }> {
+  const norm = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const pNome = (id: string) =>
+    norm(professoresData.find(p => p.id === id)?.nome ?? '')
+
+  const isFilhas  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('filha')
+  const isDynamo  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('dynamo')
+
+  const domingos = getDomingosTrimestre(trimestre, ano)
+  const resultado: Array<{ data: string; turmaId: string; professorId: string }> = []
+
+  const aulasPorProf = new Map<string, Set<number>>()          // profId → aulas used
+  const countPorTurma = new Map<string, Map<string, number>>() // turmaId → profId → count
+  let leandroDynamo = 0
+
+  const turmasGen = [...turmasData]
+    .sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
+    .filter(t => !isFilhas(t.id))
+
+  for (const { aula, data } of domingos) {
+    const isEven = aula % 2 === 0
+    const is2nd  = is2ndSunday(data)
+    const aulaProfs = new Map<string, string>() // profId → turmaId neste domingo
+
+    for (const turma of turmasGen) {
+      const pool = profTurmasMap[turma.id] ?? []
+
+      const getEligible = (relaxConseq: boolean) =>
+        pool.filter(pid => {
+          const n = pNome(pid)
+          // Viviana / Livys: somente aulas pares
+          if ((n.includes('viviana') || n.includes('livys')) && !isEven) return false
+          // Eder / Heldem / Leandro: não no 2º domingo do mês
+          if (is2nd && (n.includes('eder') || n.includes('heldem') || n.includes('leandro'))) return false
+          // Leandro: máx 1 aula no Dynamo
+          if (isDynamo(turma.id) && n.includes('leandro') && leandroDynamo >= 1) return false
+          // Não pode ensinar duas turmas no mesmo domingo
+          if (aulaProfs.has(pid)) return false
+          // Sem domingos seguidos
+          if (!relaxConseq && aulasPorProf.get(pid)?.has(aula - 1)) return false
+          // Restrições de par
+          const jáEscalados = Array.from(aulaProfs.keys())
+          if (n.includes('adriana')  && jáEscalados.some(id => pNome(id).includes('eder')))      return false
+          if (n.includes('eder')     && jáEscalados.some(id => pNome(id).includes('adriana')))   return false
+          if (n.includes('fabio')    && jáEscalados.some(id => pNome(id).includes('gabriela')))  return false
+          if (n.includes('gabriela') && jáEscalados.some(id => pNome(id).includes('fabio')))     return false
+          if (n.includes('gabriela') && jáEscalados.some(id => pNome(id).includes('samantha')))  return false
+          if (n.includes('samantha') && jáEscalados.some(id => pNome(id).includes('gabriela')))  return false
+          return true
+        })
+
+      let elig = getEligible(false)
+      if (elig.length === 0) elig = getEligible(true) // relaxa consecutivos se necessário
+      if (elig.length === 0) continue
+
+      // Prioriza quem tem menos aulas nesta turma
+      const tc = countPorTurma.get(turma.id) ?? new Map<string, number>()
+      elig.sort((a, b) => (tc.get(a) ?? 0) - (tc.get(b) ?? 0))
+
+      const picked = elig[0]
+      resultado.push({ data, turmaId: turma.id, professorId: picked })
+
+      if (!aulasPorProf.has(picked)) aulasPorProf.set(picked, new Set())
+      aulasPorProf.get(picked)!.add(aula)
+      aulaProfs.set(picked, turma.id)
+      tc.set(picked, (tc.get(picked) ?? 0) + 1)
+      countPorTurma.set(turma.id, tc)
+      if (isDynamo(turma.id) && pNome(picked).includes('leandro')) leandroDynamo++
+    }
+  }
+
+  return resultado
+}
+
 const FORM_VAZIO = {
   ano:         String(new Date().getFullYear()),
   trimestre:   String(Math.floor(new Date().getMonth() / 3) + 1),
@@ -131,6 +213,12 @@ export default function EscalaPage() {
 
   // Accordion cards
   const [expandedDatas, setExpandedDatas] = useState<Set<string>>(new Set())
+
+  // Sugestão de escala
+  const [profTurmasMap, setProfTurmasMap]         = useState<Record<string, string[]>>({})
+  const [sugestaoOpen, setSugestaoOpen]           = useState(false)
+  const [sugestaoEntradas, setSugestaoEntradas]   = useState<Array<{ data: string; turmaId: string; professorId: string }>>([])
+  const [isSalvandoSugestao, setIsSalvandoSugestao] = useState(false)
 
   const domingosTrimForm = useMemo(
     () => getDomingosTrimestre(parseInt(formData.trimestre), parseInt(formData.ano)),
@@ -169,12 +257,14 @@ export default function EscalaPage() {
           db.from('escalas').select('id, data, turma_id, professor_id, trimestre, observacoes').order('data'),
           db.from('professores').select('id, nome').eq('ativo', true).order('nome'),
           db.from('turmas').select('id, nome, cor').eq('ativa', true).order('nome'),
+          db.from('professor_turmas').select('professor_id, turma_id'),
         ])
         if (cancelado) return
 
-        const escalas = results[0].status === 'fulfilled' ? results[0].value.data : []
-        const profs   = results[1].status === 'fulfilled' ? results[1].value.data : []
-        const turmas  = results[2].status === 'fulfilled' ? results[2].value.data : []
+        const escalas   = results[0].status === 'fulfilled' ? results[0].value.data : []
+        const profs     = results[1].status === 'fulfilled' ? results[1].value.data : []
+        const turmas    = results[2].status === 'fulfilled' ? results[2].value.data : []
+        const profTurms = results[3].status === 'fulfilled' ? results[3].value.data : []
 
         setEscalasData((escalas ?? []).map((e: any) => ({
           id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
@@ -183,6 +273,14 @@ export default function EscalaPage() {
         })))
         setProfessoresData(profs ?? [])
         setTurmasData(turmas ?? [])
+
+        // Monta mapa turmaId → professorId[]
+        const ptMap: Record<string, string[]> = {}
+        for (const pt of (profTurms ?? [])) {
+          if (!ptMap[pt.turma_id]) ptMap[pt.turma_id] = []
+          ptMap[pt.turma_id].push(pt.professor_id)
+        }
+        setProfTurmasMap(ptMap)
       } catch (e: any) {
         if (!cancelado) toast('Erro ao carregar escala: ' + (e?.message ?? 'erro'), 'error')
       } finally {
@@ -248,10 +346,16 @@ export default function EscalaPage() {
   }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData])
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
+  const filhasDoReiId = useMemo(
+    () => turmasData.find(t => ordemTurma(t.nome) === 4)?.id ?? null,
+    [turmasData]
+  )
+
   const tabelaView = useMemo(() => {
     const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
+    // Sempre inclui Filhas do Rei (como coluna "unida") mesmo sem entradas
     const turmasNaEscala = turmasOrdenadas.filter(t =>
-      escalasPeriodo.some(e => e.turmaId === t.id)
+      escalasPeriodo.some(e => e.turmaId === t.id) || t.id === filhasDoReiId
     )
     const linhas = domingos.map(dom => {
       const escalasNoDia = escalasPeriodo.filter(e => e.data === dom.data)
@@ -262,18 +366,22 @@ export default function EscalaPage() {
         is2nd: is2ndSunday(dom.data),
         temEscala: escalasNoDia.length > 0,
         celulas: turmasNaEscala.map(t => {
+          if (t.id === filhasDoReiId) {
+            return { turmaId: t.id, escala: null as Escala | null, professor: null as string | null, destacado: false, isMerged: true }
+          }
           const e = escalasNoDia.find(es => es.turmaId === t.id)
           return {
             turmaId: t.id,
             escala: e ?? null,
             professor: e ? getProfNome(e.professorId) : null,
             destacado: filtroProf !== 'todos' && e?.professorId === filtroProf,
+            isMerged: false,
           }
         }),
       }
     })
     return { turmas: turmasNaEscala, linhas }
-  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData])
+  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData, filhasDoReiId])
 
   // ── Visão Cards (agrupado por data) ───────────────────────────────────────────
   const cardsView = useMemo(() => {
@@ -380,6 +488,43 @@ export default function EscalaPage() {
     }
   }
 
+  // ── Sugestão de escala ────────────────────────────────────────────────────────
+  function abrirSugestao() {
+    const entradas = gerarEscalaSugerida(profTurmasMap, professoresData, turmasData, parseInt(filtroAno), parseInt(filtroTrim))
+    setSugestaoEntradas(entradas)
+    setSugestaoOpen(true)
+  }
+
+  async function salvarSugestao() {
+    if (isSalvandoSugestao || sugestaoEntradas.length === 0) return
+    setIsSalvandoSugestao(true)
+    try {
+      const payload = sugestaoEntradas.map(e => ({
+        data: e.data,
+        turma_id: e.turmaId,
+        professor_id: e.professorId,
+        observacoes: '',
+      }))
+      const { data: inserted, error } = await db
+        .from('escalas')
+        .insert(payload)
+        .select('id, data, turma_id, professor_id, observacoes')
+      if (error) { toast('Erro ao salvar sugestão: ' + error.message, 'error'); return }
+      const novos = (inserted ?? []).map((e: any) => ({
+        id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
+        trimestre: parseInt(filtroTrim), observacao: e.observacoes ?? '',
+      }))
+      setEscalasData(prev => [...prev, ...novos])
+      setSugestaoOpen(false)
+      setSugestaoEntradas([])
+      toast(`${novos.length} escalas salvas com sucesso!`)
+    } catch (e: any) {
+      toast('Erro ao salvar: ' + (e?.message ?? 'erro'), 'error')
+    } finally {
+      setIsSalvandoSugestao(false)
+    }
+  }
+
   // ── Loading ───────────────────────────────────────────────────────────────────
   if (carregando) return (
     <div className="space-y-4 animate-pulse">
@@ -404,9 +549,14 @@ export default function EscalaPage() {
             )}
           </p>
         </div>
-        <Button onClick={() => abrirDialog()} className="w-full sm:w-auto">
-          <Plus className="h-4 w-4 mr-2" />Nova Escala
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={abrirSugestao} className="flex-1 sm:flex-none" disabled={Object.keys(profTurmasMap).length === 0}>
+            <Sparkles className="h-4 w-4 mr-2" />Gerar Sugestão
+          </Button>
+          <Button onClick={() => abrirDialog()} className="flex-1 sm:flex-none">
+            <Plus className="h-4 w-4 mr-2" />Nova Escala
+          </Button>
+        </div>
       </div>
 
       {/* ── Barra de Filtros ───────────────────────────────────────────────── */}
@@ -607,16 +757,27 @@ export default function EscalaPage() {
                     </th>
                     {tabelaView.turmas.map(t => {
                       const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
+                      const isMergedCol = t.id === filhasDoReiId
                       return (
-                        <th key={t.id} className="px-4 py-0 text-left font-semibold min-w-[150px]">
+                        <th key={t.id} className={`px-4 py-0 text-left font-semibold min-w-[150px] ${isMergedCol ? 'opacity-60' : ''}`}>
                           {/* Tira colorida */}
                           <div className={`h-1 -mx-4 mb-2 ${t.cor}`} />
-                          <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                             <span className="text-xs font-bold">{t.nome}</span>
+                            {isMergedCol && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full">
+                                <Link2 className="h-2.5 w-2.5" />Unida c/ Heróis da Fé
+                              </span>
+                            )}
                           </div>
-                          {tema && (
+                          {!isMergedCol && tema && (
                             <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2 truncate max-w-[160px]" title={tema}>
                               {tema}
+                            </p>
+                          )}
+                          {isMergedCol && (
+                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2">
+                              Aulas ministradas juntas
                             </p>
                           )}
                         </th>
@@ -655,7 +816,12 @@ export default function EscalaPage() {
                         </td>
                         {linha.celulas.map(c => (
                           <td key={c.turmaId} className="px-4 py-2.5">
-                            {c.professor ? (
+                            {c.isMerged ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 italic">
+                                <Link2 className="h-3 w-3 flex-shrink-0" />
+                                Heróis da Fé
+                              </span>
+                            ) : c.professor ? (
                               <div className="flex items-center justify-between gap-1 group">
                                 <span className={`text-xs truncate max-w-[120px] ${c.destacado ? 'text-primary font-semibold' : ''}`}>
                                   {c.professor}
@@ -823,6 +989,137 @@ export default function EscalaPage() {
           </div>
         )
       )}
+
+      {/* ── Dialog Sugestão de Escala ──────────────────────────────────────── */}
+      <Dialog open={sugestaoOpen} onOpenChange={setSugestaoOpen}>
+        <DialogContent className="w-[calc(100%-1rem)] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  Sugestão de Escala — {TRIMESTRES_SHORT[parseInt(filtroTrim) - 1]} {filtroAno}
+                </DialogTitle>
+                <DialogDescription className="mt-0.5">
+                  {sugestaoEntradas.length} atribuições geradas respeitando todas as restrições.
+                  Filhas do Rei unida com Heróis da Fé.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Legenda das restrições */}
+          <div className="px-5 py-2 bg-muted/30 border-b flex-shrink-0 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Viviana / Livys: somente aulas pares</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Eder / Heldem / Leandro: sem 2º domingo</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Leandro: 1 aula no Dynamo</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />Sem domingos consecutivos</span>
+          </div>
+
+          {/* Tabela da sugestão */}
+          <div className="overflow-auto flex-1">
+            {(() => {
+              const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
+              const turmasGen = [...turmasData]
+                .sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
+              const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+              const isFilhas = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('filha')
+              const isViviana = (id: string) => norm(professoresData.find(p => p.id === id)?.nome ?? '').includes('viviana')
+              const isLivys   = (id: string) => norm(professoresData.find(p => p.id === id)?.nome ?? '').includes('livys')
+
+              return (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-card border-b">
+                    <tr>
+                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground w-10 border-r">L#</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-14 border-r">Data</th>
+                      {turmasGen.map(t => (
+                        <th key={t.id} className="px-3 py-0 text-left font-semibold min-w-[130px]">
+                          <div className={`h-1 -mx-3 mb-1.5 ${t.cor}`} />
+                          <div className="flex items-center gap-1 pb-1.5 flex-wrap">
+                            <span className="text-[11px] font-bold">{t.nome}</span>
+                            {isFilhas(t.id) && (
+                              <span className="text-[9px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1 rounded-full flex items-center gap-0.5">
+                                <Link2 className="h-2 w-2" />Unida
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {domingos.map(dom => {
+                      const is2nd = is2ndSunday(dom.data)
+                      const isProx = dom.data === proximaData
+                      return (
+                        <tr
+                          key={dom.data}
+                          className={`border-b last:border-0 ${
+                            isProx ? 'bg-primary/5' : is2nd ? 'bg-amber-50/40 dark:bg-amber-950/10' : 'hover:bg-muted/20'
+                          }`}
+                        >
+                          <td className="px-3 py-2 text-center border-r">
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                              isProx ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                            }`}>{dom.aula}</span>
+                            {is2nd && <div className="text-[9px] text-amber-500 font-bold text-center leading-none mt-0.5">★</div>}
+                          </td>
+                          <td className="px-3 py-2 text-xs font-medium border-r whitespace-nowrap">
+                            {fmtDataCurta(dom.data)}
+                          </td>
+                          {turmasGen.map(t => {
+                            if (isFilhas(t.id)) {
+                              return (
+                                <td key={t.id} className="px-3 py-2">
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 italic">
+                                    <Link2 className="h-3 w-3 flex-shrink-0" />Heróis da Fé
+                                  </span>
+                                </td>
+                              )
+                            }
+                            const entrada = sugestaoEntradas.find(e => e.data === dom.data && e.turmaId === t.id)
+                            const profNome = entrada ? getProfNome(entrada.professorId) : null
+                            const isViv = entrada ? isViviana(entrada.professorId) : false
+                            const isLiv = entrada ? isLivys(entrada.professorId) : false
+                            return (
+                              <td key={t.id} className="px-3 py-2">
+                                {profNome ? (
+                                  <span className={`text-xs font-medium ${
+                                    isViv ? 'text-violet-600 dark:text-violet-400' :
+                                    isLiv ? 'text-violet-600 dark:text-violet-400' : ''
+                                  }`}>
+                                    {profNome}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-muted-foreground/40 italic">—</span>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )
+            })()}
+          </div>
+
+          <div className="px-5 py-3 border-t flex-shrink-0 flex justify-between items-center gap-3 bg-card">
+            <p className="text-xs text-muted-foreground">
+              Nomes em <span className="text-violet-600 dark:text-violet-400 font-medium">roxo</span>: restrição de aulas pares (Viviana / Livys) · ★ 2º domingo do mês
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setSugestaoOpen(false)}>Fechar</Button>
+              <Button onClick={salvarSugestao} disabled={isSalvandoSugestao || sugestaoEntradas.length === 0}>
+                <Save className="h-4 w-4 mr-2" />
+                {isSalvandoSugestao ? 'Salvando...' : `Salvar ${sugestaoEntradas.length} escalas`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Dialog Nova / Editar Escala ────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
