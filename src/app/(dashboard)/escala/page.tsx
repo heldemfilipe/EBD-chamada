@@ -924,8 +924,12 @@ export default function EscalaPage() {
                             {fmtDataCurta(linha.data)}
                           </span>
                         </td>
-                        {linha.celulas.map(c => (
-                          <td key={c.turmaId} className="px-4 py-2.5">
+                        {linha.celulas.map(c => {
+                          const temaLicao = c.professor
+                            ? getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
+                            : null
+                          return (
+                          <td key={c.turmaId} className="px-4 py-2">
                             {c.isMerged ? (
                               c.professor ? (
                                 <div className="flex items-center justify-between gap-1 group">
@@ -936,6 +940,11 @@ export default function EscalaPage() {
                                     <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-500 italic">
                                       <Link2 className="h-2.5 w-2.5 flex-shrink-0" />{c.unidaComNome}
                                     </span>
+                                    {temaLicao && (
+                                      <span className="text-[10px] text-muted-foreground/60 truncate max-w-[110px]" title={temaLicao}>
+                                        {temaLicao}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                     <button
@@ -979,9 +988,16 @@ export default function EscalaPage() {
                               )
                             ) : c.professor ? (
                               <div className="flex items-center justify-between gap-1 group">
-                                <span className={`text-xs truncate max-w-[120px] ${c.destacado ? 'text-primary font-semibold' : ''}`}>
-                                  {c.professor}
-                                </span>
+                                <div className="flex flex-col min-w-0">
+                                  <span className={`text-xs truncate max-w-[120px] ${c.destacado ? 'text-primary font-semibold' : ''}`}>
+                                    {c.professor}
+                                  </span>
+                                  {temaLicao && (
+                                    <span className="text-[10px] text-muted-foreground/60 truncate max-w-[130px]" title={temaLicao}>
+                                      {temaLicao}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                   <button
                                     onClick={() => c.escala && abrirDialog(c.escala)}
@@ -1001,7 +1017,8 @@ export default function EscalaPage() {
                               <span className="text-xs text-muted-foreground/30">—</span>
                             )}
                           </td>
-                        ))}
+                          )
+                        })}
                       </tr>
                     )
                   })}
@@ -1077,15 +1094,12 @@ export default function EscalaPage() {
                       {/* Professores resumidos (quando recolhido) */}
                       {!isExpanded && (
                         <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1">
-                          {escalas.slice(0, 5).map(e => (
+                          {escalas.map(e => (
                             <span key={e.id} className="text-[11px] text-muted-foreground flex items-center gap-1">
                               <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${getTurmaCor(e.turmaId)}`} />
                               {getProfNome(e.professorId)}
                             </span>
                           ))}
-                          {escalas.length > 5 && (
-                            <span className="text-[11px] text-muted-foreground">+{escalas.length - 5}</span>
-                          )}
                         </div>
                       )}
                     </div>
