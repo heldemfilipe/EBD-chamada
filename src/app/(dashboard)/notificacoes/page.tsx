@@ -35,7 +35,7 @@ const DIAS_SEMANA = [
 const DIAS_PT = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
 
 const TEMPLATE_PADRAO =
-  `Paz do Senhor, *{professor}*! Tudo bem? 🙏\n\nLembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.\n\nPode contar com você? 😊`
+  `Paz do Senhor, *{professor}*! Tudo bem? 🙏\n\nLembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.\nTema da lição: {tema}\n\nPode contar com você? 😊`
 
 const VARIAVEIS = [
   { var: '{professor}', desc: 'Nome do professor'   },
@@ -43,6 +43,7 @@ const VARIAVEIS = [
   { var: '{sala}',      desc: 'Nome da turma/sala'  },
   { var: '{data}',      desc: 'Data no formato dd/MM' },
   { var: '{dia_semana}', desc: 'Dia da semana por extenso' },
+  { var: '{tema}',      desc: 'Tema/título da lição' },
 ]
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────

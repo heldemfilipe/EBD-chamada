@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
+import { getLicaoTema } from '@/lib/constants'
 
 /** Calcula o número de aula de uma data dentro do trimestre */
 function calcularNumeroAula(dataIso: string): number {
@@ -43,7 +44,10 @@ export async function GET(req: NextRequest) {
     const escalas   = escalasRes.data  ?? []
     const template  = configRes.data?.template ?? TEMPLATE_PADRAO
     const overrides = overridesRes.data ?? []
-    const diaAula   = new Date(dataAula + 'T12:00:00').getDay()
+    const dAula     = new Date(dataAula + 'T12:00:00')
+    const diaAula   = dAula.getDay()
+    const anoAula   = dAula.getFullYear()
+    const trimAula  = Math.floor(dAula.getMonth() / 3) + 1
     const aulaNum   = calcularNumeroAula(dataAula)
 
     const notificacoes = escalas.map((e: any) => {
@@ -52,10 +56,11 @@ export async function GET(req: NextRequest) {
       )
       const prof    = e.professores
       const turma   = e.turmas
+      const tema    = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum) ?? undefined
       const tel     = prof?.telefone ? formatarTelefone(prof.telefone) : null
       const mensagem = formatarMensagem(
         override?.mensagem_personalizada ?? template,
-        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula }
+        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula, tema }
       )
 
       return {

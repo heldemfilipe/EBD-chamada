@@ -3,6 +3,7 @@
 export const TEMPLATE_PADRAO = `Paz do Senhor, *{professor}*! Tudo bem? 🙏
 
 Lembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.
+Tema da lição: {tema}
 
 Pode contar com você? 😊`
 
@@ -23,12 +24,13 @@ function fmtData(iso: string): string {
 /** Substitui variáveis no template */
 export function formatarMensagem(
   template: string,
-  vars: { professor: string; aula: number; sala: string; data: string; diaAula: number }
+  vars: { professor: string; aula: number; sala: string; data: string; diaAula: number; tema?: string }
 ): string {
   return template
-    .replace(/\{professor\}/gi, vars.professor)
-    .replace(/\{aula\}/gi,      String(vars.aula))
-    .replace(/\{sala\}/gi,      vars.sala)
-    .replace(/\{data\}/gi,      fmtData(vars.data))
+    .replace(/\{professor\}/gi,  vars.professor)
+    .replace(/\{aula\}/gi,       String(vars.aula))
+    .replace(/\{sala\}/gi,       vars.sala)
+    .replace(/\{data\}/gi,       fmtData(vars.data))
     .replace(/\{dia_semana\}/gi, DIAS_PT[vars.diaAula] ?? 'domingo')
+    .replace(/\{tema\}/gi,       vars.tema ?? '—')
 }

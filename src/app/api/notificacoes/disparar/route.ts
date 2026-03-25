@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
+import { getLicaoTema } from '@/lib/constants'
 
 // ─── POST /api/notificacoes/disparar ─────────────────────────────────────────
 // Pode ser chamado pelo Vercel Cron ou manualmente (com Authorization header)
@@ -50,10 +51,13 @@ export async function POST(req: NextRequest) {
       .select('*')
       .eq('data_aula', dataAula)
 
-    // 5. Calcular nº da aula
-    const aulaNum   = calcularNumeroAula(dataAula)
-    const diaAula   = new Date(dataAula + 'T12:00:00').getDay()
-    const template  = config.template ?? TEMPLATE_PADRAO
+    // 5. Calcular nº da aula e período
+    const dAula    = new Date(dataAula + 'T12:00:00')
+    const aulaNum  = calcularNumeroAula(dataAula)
+    const diaAula  = dAula.getDay()
+    const anoAula  = dAula.getFullYear()
+    const trimAula = Math.floor(dAula.getMonth() / 3) + 1
+    const template = config.template ?? TEMPLATE_PADRAO
 
     const logs: any[]  = []
     let enviados = 0
@@ -82,6 +86,7 @@ export async function POST(req: NextRequest) {
 
       const prof  = e.professores
       const turma = e.turmas
+      const tema  = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum) ?? undefined
       const tel   = prof?.telefone ? formatarTelefone(prof.telefone) : null
 
       if (!tel) {
@@ -100,7 +105,7 @@ export async function POST(req: NextRequest) {
 
       const mensagem = formatarMensagem(
         override?.mensagem_personalizada ?? template,
-        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula }
+        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula, tema }
       )
 
       // 7. Chamar Z-API
