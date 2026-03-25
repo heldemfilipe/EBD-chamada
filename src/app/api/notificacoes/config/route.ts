@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { TEMPLATE_PADRAO } from '@/lib/notificacoes'
 
 // ─── GET: retorna configuração atual ──────────────────────────────────────────
 export async function GET() {
@@ -69,8 +70,3 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-export const TEMPLATE_PADRAO = `Paz do Senhor, *{professor}*! Tudo bem? 🙏
-
-Lembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.
-
-Pode contar com você? 😊`

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
-import { TEMPLATE_PADRAO } from '../config/route'
-import { formatarTelefone, formatarMensagem } from '../preview/route'
+import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
 
 // ─── POST /api/notificacoes/disparar ─────────────────────────────────────────
 // Pode ser chamado pelo Vercel Cron ou manualmente (com Authorization header)
