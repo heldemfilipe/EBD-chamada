@@ -29,6 +29,9 @@ export async function GET() {
       meta_phone_number_id: '',
       meta_template_name: '',
       meta_template_language: 'pt_BR',
+      baileys_url: '',
+      baileys_instance: '',
+      baileys_token: '',
     }
 
     return NextResponse.json(config)

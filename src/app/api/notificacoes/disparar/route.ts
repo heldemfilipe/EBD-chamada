@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
       if (!config?.meta_access_token || !config?.meta_phone_number_id) {
         return NextResponse.json({ error: 'Meta Cloud API não configurada', enviados: 0, erros: 0 })
       }
+    } else if (provedor === 'baileys') {
+      if (!config?.baileys_url || !config?.baileys_instance) {
+        return NextResponse.json({ error: 'Baileys não configurado', enviados: 0, erros: 0 })
+      }
     } else {
       if (!config?.zapi_instance_id || !config?.zapi_token) {
         return NextResponse.json({ error: 'Z-API não configurada', enviados: 0, erros: 0 })
@@ -110,6 +114,10 @@ export async function POST(req: NextRequest) {
 
         if (provedor === 'meta') {
           const resultado = await enviarMeta(config, tel, mensagem, prof?.nome ?? '', aulaNum, dataAula, turma?.nome ?? '', tema)
+          enviado = resultado.ok
+          erroMsg = resultado.erro
+        } else if (provedor === 'baileys') {
+          const resultado = await enviarBaileys(config, tel, mensagem)
           enviado = resultado.ok
           erroMsg = resultado.erro
         } else {
@@ -210,6 +218,25 @@ async function enviarMeta(
     ok: false,
     erro: json.error?.message ?? `HTTP ${resp.status}`,
   }
+}
+
+// ─── Envio via Baileys (Evolution API) ───────────────────────────────────────
+async function enviarBaileys(config: any, tel: string, mensagem: string): Promise<{ ok: boolean; erro: string }> {
+  const url = `${config.baileys_url}/message/sendText/${config.baileys_instance}`
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (config.baileys_token) headers['apikey'] = config.baileys_token
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ number: tel, text: mensagem }),
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (resp.ok) return { ok: true, erro: '' }
+
+  const errBody = await resp.text()
+  return { ok: false, erro: `HTTP ${resp.status}: ${errBody}` }
 }
 
 // ─── Envio via Z-API ──────────────────────────────────────────────────────────

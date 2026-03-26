@@ -7,7 +7,7 @@ export async function GET() {
     const db = createServiceClient() as any
     const { data: config } = await db
       .from('notificacoes_config')
-      .select('provedor, zapi_instance_id, zapi_token, meta_access_token, meta_phone_number_id')
+      .select('provedor, zapi_instance_id, zapi_token, meta_access_token, meta_phone_number_id, baileys_url, baileys_instance, baileys_token')
       .single()
 
     const provedor = config?.provedor ?? 'zapi'
@@ -35,10 +35,36 @@ export async function GET() {
         conectado: true,
         motivo: 'ok',
         provedor,
-        detalhes: {
-          numero: json.display_phone_number,
-          nome:   json.verified_name,
-        },
+        detalhes: { numero: json.display_phone_number, nome: json.verified_name },
+      })
+    }
+
+    // ── Baileys (Evolution API) ───────────────────────────────────────────────
+    if (provedor === 'baileys') {
+      if (!config?.baileys_url || !config?.baileys_instance) {
+        return NextResponse.json({ conectado: false, motivo: 'credenciais_ausentes', provedor })
+      }
+
+      const url = `${config.baileys_url}/instance/connectionState/${config.baileys_instance}`
+      const headers: Record<string, string> = {}
+      if (config.baileys_token) headers['apikey'] = config.baileys_token
+
+      const resp = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
+
+      if (!resp.ok) {
+        return NextResponse.json({ conectado: false, motivo: 'api_error', status: resp.status, provedor })
+      }
+
+      const json = await resp.json()
+      // Evolution API retorna { instance: { state: 'open' | 'close' | ... } }
+      const state = json?.instance?.state ?? json?.state ?? ''
+      const conectado = state === 'open'
+
+      return NextResponse.json({
+        conectado,
+        motivo: conectado ? 'ok' : (state || 'desconectado'),
+        provedor,
+        detalhes: json,
       })
     }
 

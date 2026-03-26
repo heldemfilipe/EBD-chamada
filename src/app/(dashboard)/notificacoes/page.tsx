@@ -58,11 +58,15 @@ interface NotifConfig {
   zapi_instance_id: string
   zapi_token: string
   // Meta Cloud API
-  provedor: 'zapi' | 'meta'
+  provedor: 'zapi' | 'meta' | 'baileys'
   meta_access_token: string
   meta_phone_number_id: string
   meta_template_name: string
   meta_template_language: string
+  // Baileys (Evolution API)
+  baileys_url: string
+  baileys_instance: string
+  baileys_token: string
 }
 
 interface Notificacao {
@@ -134,6 +138,7 @@ export default function NotificacoesPage() {
     provedor: 'zapi', zapi_instance_id: '', zapi_token: '',
     meta_access_token: '', meta_phone_number_id: '',
     meta_template_name: '', meta_template_language: 'pt_BR',
+    baileys_url: '', baileys_instance: '', baileys_token: '',
   })
   const [configCarregando, setConfigCarregando] = useState(true)
   const [salvandoConfig,   setSalvandoConfig]   = useState(false)
@@ -208,6 +213,8 @@ export default function NotificacoesPage() {
       const data = await resp.json()
       const semConfig = config.provedor === 'meta'
         ? (!config.meta_access_token || !config.meta_phone_number_id)
+        : config.provedor === 'baileys'
+        ? (!config.baileys_url || !config.baileys_instance)
         : (!config.zapi_instance_id || !config.zapi_token)
       if (semConfig) {
         setStatus('sem_config')
@@ -438,7 +445,7 @@ export default function NotificacoesPage() {
                 <div>
                   <p className="font-semibold text-sm">Conexão WhatsApp</p>
                   <p className="text-[11px] text-muted-foreground">
-                    {config.provedor === 'meta' ? 'Meta Cloud API (oficial)' : 'Z-API (WhatsApp pessoal)'}
+                    {config.provedor === 'meta' ? 'Meta Cloud API (oficial)' : config.provedor === 'baileys' ? 'Baileys — Evolution API (self-hosted)' : 'Z-API (WhatsApp pessoal)'}
                   </p>
                 </div>
               </div>
@@ -455,18 +462,22 @@ export default function NotificacoesPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Provedor</Label>
               <div className="flex gap-2">
-                {(['zapi', 'meta'] as const).map(p => (
+                {([
+                  { id: 'zapi',    label: 'Z-API' },
+                  { id: 'baileys', label: 'Baileys' },
+                  { id: 'meta',    label: 'Meta Cloud API' },
+                ] as const).map(p => (
                   <button
-                    key={p}
+                    key={p.id}
                     type="button"
-                    onClick={() => setConfig(c => ({ ...c, provedor: p }))}
+                    onClick={() => setConfig(c => ({ ...c, provedor: p.id }))}
                     className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${
-                      config.provedor === p
+                      config.provedor === p.id
                         ? 'bg-primary text-primary-foreground border-primary'
                         : 'bg-card text-muted-foreground hover:bg-muted'
                     }`}
                   >
-                    {p === 'zapi' ? 'Z-API' : 'Meta Cloud API'}
+                    {p.label}
                   </button>
                 ))}
               </div>
@@ -576,6 +587,62 @@ export default function NotificacoesPage() {
                     <p className="mt-1 font-medium">Template (recomendado para notificações proativas)</p>
                     <p>Crie um template no Meta Business Manager com variáveis <span className="font-mono">{`{{1}}`}</span>–<span className="font-mono">{`{{5}}`}</span> para: professor, nº da aula, data, turma, tema.</p>
                     <p>Se não informar o template, envia texto livre (requer janela de 24h do destinatário).</p>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Baileys (Evolution API) */}
+            {config.provedor === 'baileys' && (
+              <>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">URL do servidor</Label>
+                    <Input
+                      value={config.baileys_url}
+                      onChange={e => setConfig(c => ({ ...c, baileys_url: e.target.value.replace(/\/$/, '') }))}
+                      placeholder="Ex: http://localhost:8080"
+                      className="h-9 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Nome da instância</Label>
+                      <Input
+                        value={config.baileys_instance}
+                        onChange={e => setConfig(c => ({ ...c, baileys_instance: e.target.value }))}
+                        placeholder="Ex: ebd"
+                        className="h-9 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">API Key <span className="text-muted-foreground">(opcional)</span></Label>
+                      <div className="relative">
+                        <Input
+                          type={mostrarToken ? 'text' : 'password'}
+                          value={config.baileys_token}
+                          onChange={e => setConfig(c => ({ ...c, baileys_token: e.target.value }))}
+                          placeholder="Chave de autenticação"
+                          className="h-9 font-mono text-sm pr-10"
+                        />
+                        <button
+                          onClick={() => setMostrarToken(v => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 px-3 py-2.5 text-xs text-violet-700 dark:text-violet-300">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <p className="font-medium">Requer servidor Evolution API rodando localmente ou em VPS</p>
+                    <p>1. Instale o <strong>Evolution API</strong>: <span className="font-mono">npx @evolution-api/server</span> ou via Docker</p>
+                    <p>2. Crie uma instância e escaneie o QR Code via <span className="font-mono">/instance/create</span></p>
+                    <p>3. Cole a URL base, o nome da instância e a API Key acima</p>
+                    <p className="mt-1 opacity-70">Compatível com qualquer servidor que siga o formato Evolution API v2.</p>
                   </div>
                 </div>
               </>
@@ -865,7 +932,7 @@ export default function NotificacoesPage() {
                 }
               </Button>
               <p className="text-[11px] text-center text-muted-foreground mt-1.5">
-                As mensagens serão enviadas via {config.provedor === 'meta' ? 'Meta Cloud API (WhatsApp Business)' : 'Z-API'}
+                As mensagens serão enviadas via {config.provedor === 'meta' ? 'Meta Cloud API (WhatsApp Business)' : config.provedor === 'baileys' ? 'Baileys (Evolution API)' : 'Z-API'}
               </p>
             </div>
           )}
