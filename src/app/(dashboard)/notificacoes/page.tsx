@@ -54,8 +54,15 @@ interface NotifConfig {
   horario_envio: string
   dia_aula: number
   template: string
+  // Z-API
   zapi_instance_id: string
   zapi_token: string
+  // Meta Cloud API
+  provedor: 'zapi' | 'meta'
+  meta_access_token: string
+  meta_phone_number_id: string
+  meta_template_name: string
+  meta_template_language: string
 }
 
 interface Notificacao {
@@ -123,7 +130,10 @@ export default function NotificacoesPage() {
   // ── Config ──────────────────────────────────────────────────────────────────
   const [config, setConfig]               = useState<NotifConfig>({
     ativo: false, dia_envio: 1, horario_envio: '09:00', dia_aula: 0,
-    template: TEMPLATE_PADRAO, zapi_instance_id: '', zapi_token: '',
+    template: TEMPLATE_PADRAO,
+    provedor: 'zapi', zapi_instance_id: '', zapi_token: '',
+    meta_access_token: '', meta_phone_number_id: '',
+    meta_template_name: '', meta_template_language: 'pt_BR',
   })
   const [configCarregando, setConfigCarregando] = useState(true)
   const [salvandoConfig,   setSalvandoConfig]   = useState(false)
@@ -196,7 +206,10 @@ export default function NotificacoesPage() {
     try {
       const resp = await fetch('/api/notificacoes/status')
       const data = await resp.json()
-      if (!config.zapi_instance_id || !config.zapi_token) {
+      const semConfig = config.provedor === 'meta'
+        ? (!config.meta_access_token || !config.meta_phone_number_id)
+        : (!config.zapi_instance_id || !config.zapi_token)
+      if (semConfig) {
         setStatus('sem_config')
       } else {
         setStatus(data.conectado ? 'conectado' : 'desconectado')
@@ -423,8 +436,10 @@ export default function NotificacoesPage() {
                   <Wifi className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="font-semibold text-sm">Conexão Z-API</p>
-                  <p className="text-[11px] text-muted-foreground">Conecte seu WhatsApp pessoal</p>
+                  <p className="font-semibold text-sm">Conexão WhatsApp</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {config.provedor === 'meta' ? 'Meta Cloud API (oficial)' : 'Z-API (WhatsApp pessoal)'}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -436,44 +451,135 @@ export default function NotificacoesPage() {
               </div>
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Instance ID</Label>
-                <Input
-                  value={config.zapi_instance_id}
-                  onChange={e => setConfig(c => ({ ...c, zapi_instance_id: e.target.value }))}
-                  placeholder="Ex: 3DC14A2B95B3..."
-                  className="h-9 font-mono text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Token</Label>
-                <div className="relative">
-                  <Input
-                    type={mostrarToken ? 'text' : 'password'}
-                    value={config.zapi_token}
-                    onChange={e => setConfig(c => ({ ...c, zapi_token: e.target.value }))}
-                    placeholder="Token da instância"
-                    className="h-9 font-mono text-sm pr-10"
-                  />
+            {/* Seletor de provedor */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Provedor</Label>
+              <div className="flex gap-2">
+                {(['zapi', 'meta'] as const).map(p => (
                   <button
-                    onClick={() => setMostrarToken(v => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    key={p}
+                    type="button"
+                    onClick={() => setConfig(c => ({ ...c, provedor: p }))}
+                    className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${
+                      config.provedor === p
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card text-muted-foreground hover:bg-muted'
+                    }`}
                   >
-                    <Eye className="h-4 w-4" />
+                    {p === 'zapi' ? 'Z-API' : 'Meta Cloud API'}
                   </button>
-                </div>
+                ))}
               </div>
             </div>
 
-            <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-              <ExternalLink className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-              <span>
-                Crie sua instância gratuitamente em{' '}
-                <a href="https://z-api.io" target="_blank" rel="noreferrer" className="underline text-primary">z-api.io</a>
-                , escaneie o QR Code com seu celular e cole as credenciais acima.
-              </span>
-            </div>
+            {/* Z-API */}
+            {config.provedor === 'zapi' && (
+              <>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Instance ID</Label>
+                    <Input
+                      value={config.zapi_instance_id}
+                      onChange={e => setConfig(c => ({ ...c, zapi_instance_id: e.target.value }))}
+                      placeholder="Ex: 3DC14A2B95B3..."
+                      className="h-9 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Token</Label>
+                    <div className="relative">
+                      <Input
+                        type={mostrarToken ? 'text' : 'password'}
+                        value={config.zapi_token}
+                        onChange={e => setConfig(c => ({ ...c, zapi_token: e.target.value }))}
+                        placeholder="Token da instância"
+                        className="h-9 font-mono text-sm pr-10"
+                      />
+                      <button
+                        onClick={() => setMostrarToken(v => !v)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                  <ExternalLink className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    Crie sua instância em{' '}
+                    <a href="https://z-api.io" target="_blank" rel="noreferrer" className="underline text-primary">z-api.io</a>
+                    , escaneie o QR Code com seu celular e cole as credenciais acima.
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* Meta Cloud API */}
+            {config.provedor === 'meta' && (
+              <>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Access Token</Label>
+                    <div className="relative">
+                      <Input
+                        type={mostrarToken ? 'text' : 'password'}
+                        value={config.meta_access_token}
+                        onChange={e => setConfig(c => ({ ...c, meta_access_token: e.target.value }))}
+                        placeholder="Token permanente do Meta for Developers"
+                        className="h-9 font-mono text-sm pr-10"
+                      />
+                      <button
+                        onClick={() => setMostrarToken(v => !v)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Phone Number ID</Label>
+                    <Input
+                      value={config.meta_phone_number_id}
+                      onChange={e => setConfig(c => ({ ...c, meta_phone_number_id: e.target.value }))}
+                      placeholder="Ex: 123456789012345"
+                      className="h-9 font-mono text-sm"
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Nome do Template <span className="text-muted-foreground">(opcional)</span></Label>
+                      <Input
+                        value={config.meta_template_name}
+                        onChange={e => setConfig(c => ({ ...c, meta_template_name: e.target.value }))}
+                        placeholder="Ex: ebd_lembrete"
+                        className="h-9 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Idioma do Template</Label>
+                      <Input
+                        value={config.meta_template_language}
+                        onChange={e => setConfig(c => ({ ...c, meta_template_language: e.target.value }))}
+                        placeholder="pt_BR"
+                        className="h-9 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 px-3 py-2.5 text-xs text-blue-700 dark:text-blue-300">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-1">
+                    <p className="font-medium">Como obter as credenciais</p>
+                    <p>1. Acesse <span className="font-mono">developers.facebook.com</span> → seu app → WhatsApp → Configuração de API</p>
+                    <p>2. Copie o <strong>Token de acesso permanente</strong> e o <strong>ID do número de telefone</strong></p>
+                    <p className="mt-1 font-medium">Template (recomendado para notificações proativas)</p>
+                    <p>Crie um template no Meta Business Manager com variáveis <span className="font-mono">{`{{1}}`}</span>–<span className="font-mono">{`{{5}}`}</span> para: professor, nº da aula, data, turma, tema.</p>
+                    <p>Se não informar o template, envia texto livre (requer janela de 24h do destinatário).</p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Card: Agendamento */}
@@ -759,7 +865,7 @@ export default function NotificacoesPage() {
                 }
               </Button>
               <p className="text-[11px] text-center text-muted-foreground mt-1.5">
-                As mensagens serão enviadas do seu WhatsApp via Z-API
+                As mensagens serão enviadas via {config.provedor === 'meta' ? 'Meta Cloud API (WhatsApp Business)' : 'Z-API'}
               </p>
             </div>
           )}

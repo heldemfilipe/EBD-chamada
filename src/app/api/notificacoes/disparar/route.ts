@@ -4,8 +4,8 @@ import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notif
 import { getLicaoTema } from '@/lib/constants'
 
 // ─── POST /api/notificacoes/disparar ─────────────────────────────────────────
-// Pode ser chamado pelo Vercel Cron ou manualmente (com Authorization header)
-// Body opcional: { data?: 'YYYY-MM-DD' } — se não informado, usa próxima data_aula
+// Pode ser chamado pelo Vercel Cron ou manualmente
+// Body opcional: { data?: 'YYYY-MM-DD', skip_auth?: true }
 
 export async function POST(req: NextRequest) {
   // Ler body uma única vez
@@ -29,8 +29,16 @@ export async function POST(req: NextRequest) {
       .select('*')
       .single()
 
-    if (!config?.zapi_instance_id || !config?.zapi_token) {
-      return NextResponse.json({ error: 'Z-API não configurado', enviados: 0, erros: 0 })
+    const provedor = config?.provedor ?? 'zapi'
+
+    if (provedor === 'meta') {
+      if (!config?.meta_access_token || !config?.meta_phone_number_id) {
+        return NextResponse.json({ error: 'Meta Cloud API não configurada', enviados: 0, erros: 0 })
+      }
+    } else {
+      if (!config?.zapi_instance_id || !config?.zapi_token) {
+        return NextResponse.json({ error: 'Z-API não configurada', enviados: 0, erros: 0 })
+      }
     }
 
     // 2. Determinar data da aula
@@ -61,8 +69,8 @@ export async function POST(req: NextRequest) {
     const template = config.template ?? TEMPLATE_PADRAO
 
     const logs: any[]  = []
-    let enviados = 0
-    let erros    = 0
+    let enviados    = 0
+    let erros       = 0
     let silenciados = 0
 
     // 6. Enviar para cada professor
@@ -73,15 +81,8 @@ export async function POST(req: NextRequest) {
 
       if (override?.silenciado) {
         silenciados++
-        logs.push({
-          professor_id:    e.professor_id,
-          turma_id:        e.turma_id,
-          data_aula:       dataAula,
-          numero_telefone: null,
-          mensagem:        null,
-          status:          'silenciado',
-          erro:            null,
-        })
+        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: null, mensagem: null, status: 'silenciado', erro: null })
         continue
       }
 
@@ -92,15 +93,9 @@ export async function POST(req: NextRequest) {
 
       if (!tel) {
         erros++
-        logs.push({
-          professor_id:    e.professor_id,
-          turma_id:        e.turma_id,
-          data_aula:       dataAula,
-          numero_telefone: null,
-          mensagem:        null,
-          status:          'sem_telefone',
-          erro:            'Professor sem telefone cadastrado',
-        })
+        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: null, mensagem: null, status: 'sem_telefone',
+          erro: 'Professor sem telefone cadastrado' })
         continue
       }
 
@@ -109,58 +104,134 @@ export async function POST(req: NextRequest) {
         { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula, tema }
       )
 
-      // 7. Chamar Z-API
       try {
-        const zapiUrl = `https://api.z-api.io/instances/${config.zapi_instance_id}/token/${config.zapi_token}/send-text`
-        const resp = await fetch(zapiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Client-Token': config.zapi_token },
-          body: JSON.stringify({ phone: tel, message: mensagem }),
-          signal: AbortSignal.timeout(10000),
-        })
+        let enviado = false
+        let erroMsg = ''
 
-        if (resp.ok) {
-          enviados++
-          logs.push({
-            professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-            numero_telefone: tel, mensagem, status: 'enviado', erro: null,
-          })
+        if (provedor === 'meta') {
+          const resultado = await enviarMeta(config, tel, mensagem, prof?.nome ?? '', aulaNum, dataAula, turma?.nome ?? '', tema)
+          enviado = resultado.ok
+          erroMsg = resultado.erro
         } else {
-          const errBody = await resp.text()
+          const resultado = await enviarZapi(config, tel, mensagem)
+          enviado = resultado.ok
+          erroMsg = resultado.erro
+        }
+
+        if (enviado) {
+          enviados++
+          logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+            numero_telefone: tel, mensagem, status: 'enviado', erro: null })
+        } else {
           erros++
-          logs.push({
-            professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-            numero_telefone: tel, mensagem, status: 'erro', erro: `HTTP ${resp.status}: ${errBody}`,
-          })
+          logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+            numero_telefone: tel, mensagem, status: 'erro', erro: erroMsg })
         }
       } catch (sendErr: any) {
         erros++
-        logs.push({
-          professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-          numero_telefone: tel, mensagem, status: 'erro', erro: sendErr.message,
-        })
+        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: tel, mensagem, status: 'erro', erro: sendErr.message })
       }
 
-      // Pequeno delay entre envios para não sobrecarregar
       await new Promise(r => setTimeout(r, 500))
     }
 
-    // 8. Gravar logs
+    // 7. Gravar logs
     if (logs.length > 0) {
       await db.from('notificacoes_log').insert(logs)
     }
 
-    return NextResponse.json({ dataAula, aulaNum, enviados, erros, silenciados })
+    return NextResponse.json({ dataAula, aulaNum, enviados, erros, silenciados, provedor })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
 
-// ─── Helper: próximo dia_aula (dia da semana) a partir de hoje ────────────────
+// ─── Envio via Meta Cloud API ─────────────────────────────────────────────────
+async function enviarMeta(
+  config: any, tel: string, mensagemTexto: string,
+  professor: string, aula: number, data: string, sala: string, tema?: string
+): Promise<{ ok: boolean; erro: string }> {
+  const url = `https://graph.facebook.com/v21.0/${config.meta_phone_number_id}/messages`
+
+  let body: any
+
+  if (config.meta_template_name) {
+    // Template aprovado: passa variáveis como parâmetros {{1}}–{{5}}
+    const dataFmt = new Date(data + 'T12:00:00')
+      .toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    body = {
+      messaging_product: 'whatsapp',
+      to: tel,
+      type: 'template',
+      template: {
+        name: config.meta_template_name,
+        language: { code: config.meta_template_language ?? 'pt_BR' },
+        components: [{
+          type: 'body',
+          parameters: [
+            { type: 'text', text: professor },
+            { type: 'text', text: String(aula) },
+            { type: 'text', text: dataFmt },
+            { type: 'text', text: sala },
+            { type: 'text', text: tema ?? '—' },
+          ],
+        }],
+      },
+    }
+  } else {
+    // Mensagem livre (apenas funciona dentro da janela de 24h)
+    body = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: tel,
+      type: 'text',
+      text: { preview_url: false, body: mensagemTexto },
+    }
+  }
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.meta_access_token}`,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  })
+
+  const json = await resp.json()
+
+  if (resp.ok && !json.error) {
+    return { ok: true, erro: '' }
+  }
+
+  return {
+    ok: false,
+    erro: json.error?.message ?? `HTTP ${resp.status}`,
+  }
+}
+
+// ─── Envio via Z-API ──────────────────────────────────────────────────────────
+async function enviarZapi(config: any, tel: string, mensagem: string): Promise<{ ok: boolean; erro: string }> {
+  const zapiUrl = `https://api.z-api.io/instances/${config.zapi_instance_id}/token/${config.zapi_token}/send-text`
+  const resp = await fetch(zapiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Client-Token': config.zapi_token },
+    body: JSON.stringify({ phone: tel, message: mensagem }),
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (resp.ok) return { ok: true, erro: '' }
+
+  const errBody = await resp.text()
+  return { ok: false, erro: `HTTP ${resp.status}: ${errBody}` }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function proximaDataDiaAula(diaAula: number): string {
   const hoje = new Date()
-  const hojeDia = hoje.getDay()
-  const diff = (diaAula - hojeDia + 7) % 7 || 7
+  const diff = (diaAula - hoje.getDay() + 7) % 7 || 7
   const proxima = new Date(hoje)
   proxima.setDate(hoje.getDate() + diff)
   return proxima.toISOString().split('T')[0]
@@ -168,10 +239,8 @@ function proximaDataDiaAula(diaAula: number): string {
 
 function calcularNumeroAula(dataIso: string): number {
   const d = new Date(dataIso + 'T12:00:00')
-  const ano  = d.getFullYear()
-  const trim = Math.floor(d.getMonth() / 3) + 1
-  const mesInicio = (trim - 1) * 3
-  const inicio = new Date(ano, mesInicio, 1)
+  const mesInicio = (Math.floor(d.getMonth() / 3)) * 3
+  const inicio = new Date(d.getFullYear(), mesInicio, 1)
   while (inicio.getDay() !== 0) inicio.setDate(inicio.getDate() + 1)
   let aula = 1
   const cursor = new Date(inicio)

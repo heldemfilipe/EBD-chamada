@@ -22,8 +22,13 @@ export async function GET() {
       horario_envio: '09:00',
       dia_aula: 0,
       template: TEMPLATE_PADRAO,
+      provedor: 'zapi',
       zapi_instance_id: '',
       zapi_token: '',
+      meta_access_token: '',
+      meta_phone_number_id: '',
+      meta_template_name: '',
+      meta_template_language: 'pt_BR',
     }
 
     return NextResponse.json(config)
