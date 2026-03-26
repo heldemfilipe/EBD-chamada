@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatCard } from '@/components/ui/stat-card'
@@ -274,11 +274,11 @@ export default function DashboardPage() {
     load()
   }, [])
 
-  const dadosGrafico: PontoDado[] = (() => {
+  const dadosGrafico: PontoDado[] = useMemo(() => {
     if (periodo === 'anual') return dadosAnual
     if (periodo === 'trimestral') return TRIMESTRES[trimestre].meses.map((m) => dadosAnual[m]).filter(Boolean)
     return dadosDomingos[ano]?.[mes] ?? []
-  })()
+  }, [periodo, trimestre, mes, ano, dadosAnual, dadosDomingos])
 
   const labelPeriodo = labelDoPeriodo({ periodo, ano, mes, trimestre })
   const topAlunos = topPorSala[salaSelecionada] ?? []

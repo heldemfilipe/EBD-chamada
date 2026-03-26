@@ -1,37 +1,33 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { EmptyState } from '@/components/ui/empty-state'
 import { ChartTooltip } from '@/components/ui/chart-tooltip'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
-import {
-  BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import {
   Download, Calendar, CheckCircle2, XCircle,
-  FileText, BookOpen, Book, DollarSign, UserPlus, Trophy,
-  AlertTriangle, ChevronLeft, ChevronRight, BarChart3, Star, Filter,
+  FileText, BookOpen, Book, DollarSign, UserPlus, ChevronLeft, ChevronRight, BarChart3, Filter,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, MESES, MESES_CURTOS, TRIMESTRES } from '@/lib/constants'
-import { calcularPct, resolverCor, corPresenca, badgePresenca, labelPresenca } from '@/lib/presence'
+import { calcularPct, resolverCor } from '@/lib/presence'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { cn } from '@/lib/utils'
 import { exportarCSV, exportarExcel } from '@/lib/export'
+import { filtrarPorPeriodo, type Granularidade } from '@/lib/relatorio-utils'
+import { ExportDialog } from './_ExportDialog'
+import { SecaoSalas } from './_SecaoSalas'
+import { SecaoAlunos } from './_SecaoAlunos'
+import { SecaoProfessores } from './_SecaoProfessores'
+import { SecaoVisitantes } from './_SecaoVisitantes'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
-type Granularidade = 'dia' | 'mes' | 'trimestre' | 'ano'
 type FormatoExport = 'pdf' | 'excel' | 'csv'
 
 interface ExportSecoes {
@@ -99,18 +95,6 @@ function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
   return [...map.values()]
 }
 
-function filtrarPorPeriodo(
-  chamadas: any[], opts: { granularidade: Granularidade; mes: number; trim: number }
-): any[] {
-  return chamadas.filter((c: any) => {
-    if (!c.data) return opts.granularidade === 'ano'
-    const m = parseISO(c.data).getMonth()
-    if (opts.granularidade === 'mes' || opts.granularidade === 'dia') return m === opts.mes
-    if (opts.granularidade === 'trimestre') return TRIMESTRES[opts.trim].meses.includes(m)
-    return true
-  })
-}
-
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function RelatoriosPage() {
   const db = supabase as any
@@ -140,6 +124,23 @@ export default function RelatoriosPage() {
   const [sortAlunosTurma, setSortAlunosTurma] = useState<'pct' | 'nome' | 'faltas'>('pct')
   const [visitantesRel, setVisitantesRel] = useState<VisitanteRelatorio[]>([])
   const [sortVisitantes, setSortVisitantes] = useState<'visitas' | 'nome' | 'pct'>('visitas')
+
+  // ── useMemos para listas ordenadas ────────────────────────────────────────────
+  const visitantesOrdenados = useMemo(() => {
+    const lista = [...visitantesRel]
+    if (sortVisitantes === 'visitas')  return lista.sort((a, b) => b.visitas.length - a.visitas.length)
+    if (sortVisitantes === 'nome')     return lista.sort((a, b) => a.nome.localeCompare(b.nome))
+    if (sortVisitantes === 'pct')      return lista.sort((a, b) => b.pct - a.pct)
+    return lista
+  }, [visitantesRel, sortVisitantes])
+
+  const alunosTurmaOrdenados = useMemo(() => {
+    const lista = [...alunosTurma]
+    if (sortAlunosTurma === 'pct')    return lista.sort((a, b) => b.pct - a.pct)
+    if (sortAlunosTurma === 'nome')   return lista.sort((a, b) => a.nome.localeCompare(b.nome))
+    if (sortAlunosTurma === 'faltas') return lista.sort((a, b) => b.faltas - a.faltas)
+    return lista
+  }, [alunosTurma, sortAlunosTurma])
 
   useEffect(() => {
     db.from('turmas').select('id, nome').eq('ativa', true).order('nome')
@@ -193,13 +194,26 @@ export default function RelatoriosPage() {
       const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
       if (!turmas?.length) { setDadosSala([]); return }
       const turmasFiltradas = turmaFiltro !== 'all' ? turmas.filter((t: any) => t.id === turmaFiltro) : turmas
-      const resultado: DadosSala[] = await Promise.all(turmasFiltradas.map(async (turma: any, idx: number) => {
-        const [{ count: matriculados }, { data: chamadasRaw }] = await Promise.all([
-          db.from('alunos').select('id', { count: 'exact', head: true }).eq('turma_id', turma.id).eq('ativo', true),
-          db.from('chamadas').select('id, data, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
-            .eq('turma_id', turma.id).eq('ano', ano),
-        ])
-        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
+      const ids = turmasFiltradas.map((t: any) => t.id)
+
+      // 2 queries no total em vez de 2*N
+      const [{ data: alunosCount }, { data: chamadasRaw }] = await Promise.all([
+        db.from('alunos').select('turma_id').in('turma_id', ids).eq('ativo', true),
+        db.from('chamadas')
+          .select('id, data, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
+          .in('turma_id', ids).eq('ano', ano),
+      ])
+
+      const matriculadosPorTurma: Record<string, number> = {}
+      for (const a of alunosCount ?? []) {
+        matriculadosPorTurma[a.turma_id] = (matriculadosPorTurma[a.turma_id] ?? 0) + 1
+      }
+
+      const resultado: DadosSala[] = turmasFiltradas.map((turma: any, idx: number) => {
+        const chamadas = filtrarPorPeriodo(
+          (chamadasRaw ?? []).filter((c: any) => c.turma_id === turma.id),
+          { granularidade, mes, trim }
+        )
         let presentes = 0, faltas = 0, biblias = 0, revistas = 0, visitantes = 0, oferta = 0, total = 0
         for (const c of chamadas) {
           const ps = c.presencas ?? []
@@ -213,10 +227,11 @@ export default function RelatoriosPage() {
         }
         return {
           sala: turma.nome, cor: resolverCor(turma.cor, idx),
-          matriculados: matriculados ?? 0, presencaMedia: calcularPct(presentes, total),
+          matriculados: matriculadosPorTurma[turma.id] ?? 0,
+          presencaMedia: calcularPct(presentes, total),
           presentes, faltas, visitantes, biblias, revistas, oferta,
         }
-      }))
+      })
       setDadosSala(resultado)
     }
     load()
@@ -439,23 +454,16 @@ export default function RelatoriosPage() {
   const anoIdx = ANOS_DISPONIVEIS.indexOf(ano)
 
   // ── Computed: Alunos da Turma ──
-  const alunosTurmaOrdenados = [...alunosTurma].sort((a, b) => {
-    if (sortAlunosTurma === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR')
-    if (sortAlunosTurma === 'faltas') return b.faltas - a.faltas
-    return b.pct - a.pct
-  })
-  const top3Turma = [...alunosTurma].filter(a => a.total > 0).sort((a, b) => b.pct - a.pct).slice(0, 3)
-  const mediaPresencaTurma = alunosTurma.length > 0
-    ? Math.round(alunosTurma.reduce((s, a) => s + a.pct, 0) / alunosTurma.length)
-    : 0
-
-  // ── Computed: Visitantes ──
-  const visitantesOrdenados = [...visitantesRel].sort((a, b) => {
-    if (sortVisitantes === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR')
-    if (sortVisitantes === 'pct') return b.pct - a.pct
-    return b.visitas.length - a.visitas.length
-  })
-  const visitantesConvertidos = visitantesRel.filter(v => v.convertido).length
+  const top3Turma = useMemo(
+    () => [...alunosTurma].filter(a => a.total > 0).sort((a, b) => b.pct - a.pct).slice(0, 3),
+    [alunosTurma]
+  )
+  const mediaPresencaTurma = useMemo(
+    () => alunosTurma.length > 0
+      ? Math.round(alunosTurma.reduce((s, a) => s + a.pct, 0) / alunosTurma.length)
+      : 0,
+    [alunosTurma]
+  )
 
   // ── Funções de montagem de dados para exportação ──
   function buildResumoRows(campos: ExportCampos) {
@@ -535,7 +543,6 @@ export default function RelatoriosPage() {
     const cam = exportCampos
 
     if (exportFormato === 'pdf') {
-      // Esconder seções não selecionadas durante a impressão
       const sectionIds: [keyof ExportSecoes, string][] = [
         ['resumo', 'section-resumo'],
         ['grafico', 'section-grafico'],
@@ -574,7 +581,6 @@ export default function RelatoriosPage() {
     }
 
     if (exportFormato === 'csv') {
-      // CSV: seções selecionadas separadas por linha de título
       const blocos: Record<string, any>[] = []
       if (sec.resumo) {
         blocos.push({ '': '=== RESUMO ===' })
@@ -635,126 +641,19 @@ export default function RelatoriosPage() {
         </div>
 
         {/* Dialog de Exportação */}
-        <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-          <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Exportar Relatório</DialogTitle>
-              <DialogDescription>{labelRelatorio}</DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-5 py-2">
-              {/* Formato */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Formato</p>
-                <div className="flex gap-2">
-                  {([
-                    ['pdf',   'PDF',        <FileText key="pdf" className="h-4 w-4" />],
-                    ['excel', 'Excel .xlsx', <BarChart3 key="excel" className="h-4 w-4" />],
-                    ['csv',   'CSV',         <Download key="csv" className="h-4 w-4" />],
-                  ] as const).map(([val, label, icon]) => (
-                    <button
-                      key={val}
-                      onClick={() => setExportFormato(val)}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all flex-1 justify-center',
-                        exportFormato === val
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'text-muted-foreground hover:bg-muted border-border'
-                      )}
-                    >
-                      {icon}{label}
-                    </button>
-                  ))}
-                </div>
-                {exportFormato === 'pdf' && (
-                  <p className="text-xs text-muted-foreground mt-2 flex items-start gap-1.5">
-                    <span className="mt-0.5 text-blue-500">ℹ</span>
-                    O PDF imprime as seções selecionadas abaixo. Abre o diálogo de impressão do sistema.
-                  </p>
-                )}
-              </div>
-
-              {/* Seções */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Seções incluídas</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    ['resumo',     'Resumo / KPIs'],
-                    ['grafico',    'Gráfico de evolução'],
-                    ['porSala',    'Presença por sala'],
-                    ...(turmaFiltro !== 'all' ? [['alunosTurma', 'Lista de alunos da turma'] as const] : []),
-                    ['topAlunos',  'Top 10 alunos'],
-                    ['atencao',    'Alunos em atenção'],
-                    ['professores','Desempenho professores'],
-                    ['visitantesRelatorio', 'Visitantes'],
-                  ] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => setExportSecoes(s => ({ ...s, [key]: !s[key] }))}
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all text-left',
-                        exportSecoes[key]
-                          ? 'bg-primary/10 text-primary border-primary/40 font-medium'
-                          : 'text-muted-foreground hover:bg-muted border-border'
-                      )}
-                    >
-                      <span className={cn('w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
-                        exportSecoes[key] ? 'bg-primary border-primary' : 'border-muted-foreground/40')}>
-                        {exportSecoes[key] && <span className="text-primary-foreground text-[10px] font-bold">✓</span>}
-                      </span>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Campos (Excel/CSV apenas) */}
-              {exportFormato !== 'pdf' && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                    Campos incluídos
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      ['presenca',   'Presença %'],
-                      ['faltas',     'Faltas'],
-                      ['visitantes', 'Visitantes'],
-                      ['biblias',    'Bíblias'],
-                      ['revistas',   'Revistas'],
-                      ['oferta',     'Oferta R$'],
-                    ] as const).map(([key, label]) => (
-                      <button
-                        key={key}
-                        onClick={() => setExportCampos(s => ({ ...s, [key]: !s[key] }))}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
-                          exportCampos[key]
-                            ? 'bg-primary/10 text-primary border-primary/40'
-                            : 'text-muted-foreground hover:bg-muted border-border line-through opacity-60'
-                        )}
-                      >
-                        {exportCampos[key] && <span className="text-primary text-[10px]">✓</span>}
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setExportOpen(false)}>Cancelar</Button>
-              <Button
-                onClick={gerarExport}
-                disabled={!Object.values(exportSecoes).some(Boolean)}
-              >
-                {exportFormato === 'pdf'   && <><FileText className="h-4 w-4 mr-2" />Imprimir PDF</>}
-                {exportFormato === 'excel' && <><BarChart3 className="h-4 w-4 mr-2" />Gerar Excel</>}
-                {exportFormato === 'csv'   && <><Download className="h-4 w-4 mr-2" />Baixar CSV</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <ExportDialog
+          open={exportOpen}
+          onClose={setExportOpen}
+          formato={exportFormato}
+          setFormato={setExportFormato}
+          secoes={exportSecoes}
+          setSecoes={setExportSecoes}
+          campos={exportCampos}
+          setCampos={setExportCampos}
+          onExportar={gerarExport}
+          labelRelatorio={labelRelatorio}
+          turmaFiltro={turmaFiltro}
+        />
 
         {/* Filtros de Período */}
         <div className="rounded-xl border bg-card overflow-hidden">
@@ -866,7 +765,7 @@ export default function RelatoriosPage() {
             </CardHeader>
             <CardContent>
               {grafico.length === 0 ? (
-                <EmptyState message="Sem dados para o período selecionado" minHeight="h-[230px]" />
+                <div className="flex items-center justify-center h-[230px] text-muted-foreground text-sm">Sem dados para o período selecionado</div>
               ) : (
                 <ResponsiveContainer width="100%" height={230}>
                   <AreaChart data={grafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
@@ -896,112 +795,7 @@ export default function RelatoriosPage() {
         </div>
 
         {/* Presença por Sala */}
-        <div id="section-porSala">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Presença por Sala</CardTitle>
-              <CardDescription>Detalhamento por turma no período</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {dadosSala.length === 0 ? (
-                <EmptyState message="Sem dados para o período selecionado" />
-              ) : (
-                <>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={dadosSala} margin={{ top: 5, right: 20, left: 0, bottom: 0 }} barSize={28}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
-                      <XAxis dataKey="sala" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => v.replace('Crianças - ', '').replace('Adultos - ', '')} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
-                      <Tooltip formatter={(v: any) => [`${v}%`, 'Presença']} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
-                      <Bar dataKey="presencaMedia" radius={[6, 6, 0, 0]}>
-                        {dadosSala.map((e, i) => <Cell key={i} fill={e.cor} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-
-                  <div className="sm:hidden space-y-3">
-                    {dadosSala.map((s, i) => (
-                      <div key={i} className="rounded-xl border bg-card overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: s.cor }} />
-                            <span className="font-semibold text-sm truncate">{s.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span>
-                          </div>
-                          <Badge className={cn('text-xs border flex-shrink-0 ml-2', badgePresenca(s.presencaMedia))}>{s.presencaMedia}%</Badge>
-                        </div>
-                        <div className="px-4 pb-2">
-                          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${s.presencaMedia}%`, backgroundColor: s.cor }} />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-4 divide-x border-t">
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold text-green-600">{s.presentes}</span><span className="text-[10px] text-muted-foreground">Pres.</span></div>
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold text-red-600">{s.faltas}</span><span className="text-[10px] text-muted-foreground">Faltas</span></div>
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold text-blue-600">{s.visitantes}</span><span className="text-[10px] text-muted-foreground">Visit.</span></div>
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold">{s.matriculados}</span><span className="text-[10px] text-muted-foreground">Mat.</span></div>
-                        </div>
-                        <div className="grid grid-cols-3 divide-x border-t bg-muted/30">
-                          <div className="flex flex-col items-center py-2"><span className="text-xs font-semibold text-purple-600">{s.biblias}</span><span className="text-[10px] text-muted-foreground">Bíblias</span></div>
-                          <div className="flex flex-col items-center py-2"><span className="text-xs font-semibold text-orange-600">{s.revistas}</span><span className="text-[10px] text-muted-foreground">Revistas</span></div>
-                          <div className="flex flex-col items-center py-2"><span className="text-xs font-semibold text-emerald-600">{s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span><span className="text-[10px] text-muted-foreground">Oferta R$</span></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                    <Table className="min-w-[480px]">
-                      <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead>Sala</TableHead>
-                          <TableHead className="text-center hidden sm:table-cell">Mat.</TableHead>
-                          <TableHead className="text-center">Pres.</TableHead>
-                          <TableHead className="text-center">Faltas</TableHead>
-                          <TableHead className="text-center hidden md:table-cell">Visit.</TableHead>
-                          <TableHead className="text-center hidden md:table-cell">Bíblias</TableHead>
-                          <TableHead className="text-center hidden lg:table-cell">Revistas</TableHead>
-                          <TableHead className="text-center hidden lg:table-cell">Oferta</TableHead>
-                          <TableHead className="text-center">%</TableHead>
-                          <TableHead className="hidden sm:table-cell">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {dadosSala.map((s, i) => (
-                          <TableRow key={i}>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: s.cor }} />
-                                <span className="font-medium text-sm">{s.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center hidden sm:table-cell">{s.matriculados}</TableCell>
-                            <TableCell className="text-center text-green-600 font-semibold">{s.presentes}</TableCell>
-                            <TableCell className="text-center text-red-600 font-semibold">{s.faltas}</TableCell>
-                            <TableCell className="text-center text-blue-600 hidden md:table-cell">{s.visitantes}</TableCell>
-                            <TableCell className="text-center text-purple-600 hidden md:table-cell">{s.biblias}</TableCell>
-                            <TableCell className="text-center text-orange-600 hidden lg:table-cell">{s.revistas}</TableCell>
-                            <TableCell className="text-center text-emerald-600 hidden lg:table-cell">R$ {s.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell className="text-center">
-                              <div className="flex items-center gap-1.5 justify-center">
-                                <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
-                                  <div className="h-full rounded-full" style={{ width: `${s.presencaMedia}%`, backgroundColor: corPresenca(s.presencaMedia) }} />
-                                </div>
-                                <span className="text-xs font-bold" style={{ color: corPresenca(s.presencaMedia) }}>{s.presencaMedia}%</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="hidden sm:table-cell">
-                              <Badge className={cn('text-xs border', badgePresenca(s.presencaMedia))}>{labelPresenca(s.presencaMedia)}</Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <SecaoSalas dados={dadosSala} />
 
         {/* Alunos da Turma */}
         {turmaFiltro !== 'all' && alunosTurma.length > 0 && (
@@ -1019,7 +813,7 @@ export default function RelatoriosPage() {
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Matriculados</p>
                   </div>
                   <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                    <p className="text-xl font-bold" style={{ color: corPresenca(mediaPresencaTurma) }}>{mediaPresencaTurma}%</p>
+                    <p className="text-xl font-bold">{mediaPresencaTurma}%</p>
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Média presença</p>
                   </div>
                   <div className="rounded-lg border bg-muted/30 p-3 text-center">
@@ -1074,9 +868,9 @@ export default function RelatoriosPage() {
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                           <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${a.pct}%`, backgroundColor: corPresenca(a.pct) }} />
+                            <div className="h-full rounded-full" style={{ width: `${a.pct}%` }} />
                           </div>
-                          <span className="text-xs font-bold" style={{ color: corPresenca(a.pct) }}>{a.pct}%</span>
+                          <span className="text-xs font-bold">{a.pct}%</span>
                         </div>
                       </div>
                       <div className="grid grid-cols-4 divide-x border-t bg-muted/20">
@@ -1091,49 +885,49 @@ export default function RelatoriosPage() {
 
                 {/* Desktop: tabela */}
                 <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                  <Table className="min-w-[480px]">
-                    <TableHeader>
-                      <TableRow className="bg-muted/40">
-                        <TableHead className="w-8">#</TableHead>
-                        <TableHead>Aluno</TableHead>
-                        <TableHead className="text-center">Presença</TableHead>
-                        <TableHead className="text-center">Faltas</TableHead>
-                        <TableHead className="text-center hidden md:table-cell">Bíblias</TableHead>
-                        <TableHead className="text-center hidden md:table-cell">Revistas</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                  <table className="min-w-[480px] w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/40 border-b">
+                        <th className="text-left px-4 py-3 w-8 font-medium text-muted-foreground">#</th>
+                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">Aluno</th>
+                        <th className="text-center px-4 py-3 font-medium text-muted-foreground">Presença</th>
+                        <th className="text-center px-4 py-3 font-medium text-muted-foreground">Faltas</th>
+                        <th className="text-center px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Bíblias</th>
+                        <th className="text-center px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Revistas</th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {alunosTurmaOrdenados.map((a, i) => (
-                        <TableRow key={a.id}>
-                          <TableCell className="text-center text-muted-foreground text-xs font-medium">{i + 1}</TableCell>
-                          <TableCell>
+                        <tr key={a.id} className="border-b last:border-0">
+                          <td className="px-4 py-3 text-center text-muted-foreground text-xs font-medium">{i + 1}</td>
+                          <td className="px-4 py-3">
                             <p className="font-medium text-sm">{a.nome}</p>
                             {a.cargo && <p className="text-[11px] text-muted-foreground">{a.cargo}</p>}
-                          </TableCell>
-                          <TableCell className="text-center">
+                          </td>
+                          <td className="px-4 py-3 text-center">
                             <div className="flex items-center gap-1.5 justify-center">
                               <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
-                                <div className="h-full rounded-full" style={{ width: `${a.pct}%`, backgroundColor: corPresenca(a.pct) }} />
+                                <div className="h-full rounded-full" style={{ width: `${a.pct}%` }} />
                               </div>
-                              <span className="text-xs font-bold" style={{ color: corPresenca(a.pct) }}>{a.pct}%</span>
+                              <span className="text-xs font-bold">{a.pct}%</span>
                             </div>
                             <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
-                          </TableCell>
-                          <TableCell className="text-center">
+                          </td>
+                          <td className="px-4 py-3 text-center">
                             <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
-                          </TableCell>
-                          <TableCell className="text-center text-purple-600 hidden md:table-cell">{a.biblias}</TableCell>
-                          <TableCell className="text-center text-orange-600 hidden md:table-cell">{a.revistas}</TableCell>
-                          <TableCell>
-                            <Badge className={cn('text-xs border', a.total > 0 ? badgePresenca(a.pct) : 'bg-muted text-muted-foreground border-muted')}>
-                              {a.total > 0 ? labelPresenca(a.pct) : 'Sem dados'}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
+                          </td>
+                          <td className="px-4 py-3 text-center text-purple-600 hidden md:table-cell">{a.biblias}</td>
+                          <td className="px-4 py-3 text-center text-orange-600 hidden md:table-cell">{a.revistas}</td>
+                          <td className="px-4 py-3">
+                            <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', a.total > 0 ? (a.pct >= 75 ? 'bg-green-500/10 text-green-700 border-green-500/30' : a.pct >= 50 ? 'bg-yellow-500/10 text-yellow-700 border-yellow-500/30' : 'bg-red-500/10 text-red-600 border-red-500/30') : 'bg-muted text-muted-foreground border-muted')}>
+                              {a.total > 0 ? (a.pct >= 75 ? 'Regular' : a.pct >= 50 ? 'Atenção' : 'Crítico') : 'Sem dados'}
+                            </span>
+                          </td>
+                        </tr>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </tbody>
+                  </table>
                 </div>
               </CardContent>
             </Card>
@@ -1141,364 +935,20 @@ export default function RelatoriosPage() {
         )}
 
         {/* Alunos: Destaques + Atenção */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div id="section-topAlunos">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Trophy className="h-4 w-4 text-yellow-500" />Top 10 Mais Frequentes
-                </CardTitle>
-                <CardDescription>Alunos com maior presença no período</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {topAlunos.length === 0 ? (
-                  <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
-                ) : (
-                  <>
-                    <div className="sm:hidden space-y-2">
-                      {topAlunos.map((a, i) => (
-                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                          <span className={`w-7 text-center font-bold flex-shrink-0 text-sm ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                            {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{a.nome}</p>
-                            <p className="text-[11px] text-muted-foreground truncate">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">{a.presentes}/{a.total}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                      <Table className="min-w-[340px]">
-                        <TableHeader>
-                          <TableRow className="bg-muted/40">
-                            <TableHead className="w-8">#</TableHead>
-                            <TableHead>Aluno</TableHead>
-                            <TableHead className="hidden sm:table-cell">Sala</TableHead>
-                            <TableHead className="text-center">Presença</TableHead>
-                            <TableHead className="text-center hidden sm:table-cell">Faltas</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {topAlunos.map((a, i) => (
-                            <TableRow key={i}>
-                              <TableCell className={`font-bold text-center ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-orange-600' : 'text-muted-foreground'}`}>
-                                {i < 3 ? ['🥇', '🥈', '🥉'][i] : `${i + 1}º`}
-                              </TableCell>
-                              <TableCell className="font-medium text-sm">
-                                {a.nome}
-                                <p className="text-[11px] text-muted-foreground sm:hidden">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</p>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell"><span className="text-xs text-muted-foreground">{a.sala.replace('Crianças - ', '').replace('Adultos - ', '')}</span></TableCell>
-                              <TableCell className="text-center">
-                                <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full', a.pct === 100 ? 'bg-green-500/15 text-green-600' : 'bg-primary/15 text-primary')}>{a.pct}%</span>
-                                <p className="text-[10px] text-muted-foreground">{a.presentes}/{a.total}</p>
-                              </TableCell>
-                              <TableCell className="text-center hidden sm:table-cell">
-                                <span className={cn('text-sm font-semibold', a.faltas === 0 ? 'text-green-600' : 'text-red-500')}>{a.faltas}</span>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div id="section-atencao">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-red-500" />Alunos que Precisam de Atenção
-                </CardTitle>
-                <CardDescription>Presença abaixo de 50% no período</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {alunosAtencao.length === 0 ? (
-                  <div className="text-center py-8">
-                    <CheckCircle2 className="h-10 w-10 mx-auto text-green-500 mb-2" />
-                    <p className="text-muted-foreground text-sm">Nenhum aluno com presença crítica no período.</p>
-                  </div>
-                ) : (
-                  alunosAtencao.map((a, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 rounded-lg border bg-red-500/5 border-red-500/20">
-                      <div className="p-2 rounded-lg bg-red-500/10">
-                        <AlertTriangle className="h-4 w-4 text-red-500" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-sm">{a.nome}</span>
-                          <span className="text-xs font-bold text-red-600 ml-2">{a.pct}%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-1">
-                          <div className="h-full rounded-full bg-red-500" style={{ width: `${a.pct}%` }} />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-muted-foreground">{a.sala}</span>
-                          <span className="text-[11px] text-red-500">{a.faltas} falta{a.faltas !== 1 ? 's' : ''}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+        <SecaoAlunos topAlunos={topAlunos} alunosAtencao={alunosAtencao} />
 
         {/* Desempenho dos Professores */}
-        <div id="section-professores">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Star className="h-4 w-4 text-orange-500" />Desempenho dos Professores
-              </CardTitle>
-              <CardDescription>Aulas ministradas e presença pessoal de cada professor no período</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {professores.length === 0 ? (
-                <EmptyState message="Sem dados para o período selecionado" minHeight="h-[100px]" />
-              ) : (
-                <>
-                  <div className="sm:hidden space-y-3">
-                    {professores.map((p, i) => (
-                      <div key={i} className="rounded-xl border bg-card overflow-hidden">
-                        <div className="px-4 py-3">
-                          <p className="font-semibold text-sm">{p.nome}</p>
-                          {p.turmas.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {p.turmas.map((t, j) => <Badge key={j} variant="secondary" className="text-xs">{t}</Badge>)}
-                            </div>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-3 divide-x border-t bg-muted/30">
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold">{p.aulas}</span><span className="text-[10px] text-muted-foreground">Aulas</span></div>
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold" style={{ color: corPresenca(p.presMedia) }}>{p.presMedia}%</span><span className="text-[10px] text-muted-foreground">Presença</span></div>
-                          <div className="flex flex-col items-center py-2.5"><span className="text-sm font-bold text-purple-600">{p.biblias}%</span><span className="text-[10px] text-muted-foreground">Bíblias</span></div>
-                        </div>
-                        <div className="px-4 py-2 border-t flex items-center justify-end">
-                          <Badge className={cn('text-xs border', p.aulas > 0 ? badgePresenca(p.presMedia) : 'bg-muted text-muted-foreground border-muted')}>
-                            {p.aulas > 0 ? labelPresenca(p.presMedia) : 'Sem aulas'}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                    <Table className="min-w-[480px]">
-                      <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead>Professor</TableHead>
-                          <TableHead className="hidden sm:table-cell">Turmas</TableHead>
-                          <TableHead className="text-center">Aulas</TableHead>
-                          <TableHead className="text-center">Presença</TableHead>
-                          <TableHead className="text-center hidden sm:table-cell">Bíblias %</TableHead>
-                          <TableHead>Avaliação</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {professores.map((p, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="font-medium">
-                              {p.nome}
-                              <div className="sm:hidden flex flex-wrap gap-0.5 mt-0.5">
-                                {p.turmas.map((t, j) => <span key={j} className="text-[11px] text-muted-foreground">{t}</span>)}
-                              </div>
-                            </TableCell>
-                            <TableCell className="hidden sm:table-cell">
-                              <div className="flex flex-col gap-0.5">
-                                {p.turmas.length > 0
-                                  ? p.turmas.map((t, j) => <span key={j} className="text-xs text-muted-foreground">{t}</span>)
-                                  : <span className="text-xs text-muted-foreground">Sem turma</span>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center font-semibold">{p.aulas}</TableCell>
-                            <TableCell className="text-center">
-                              <div className="flex items-center justify-center gap-2">
-                                <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
-                                  <div className="h-full rounded-full" style={{ width: `${p.presMedia}%`, backgroundColor: corPresenca(p.presMedia) }} />
-                                </div>
-                                <span className="text-xs font-bold" style={{ color: corPresenca(p.presMedia) }}>{p.presMedia}%</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center hidden sm:table-cell">
-                              <span className="text-xs font-semibold text-purple-600">{p.biblias}%</span>
-                            </TableCell>
-                            <TableCell>
-                              <Badge className={cn('text-xs border', p.aulas > 0 ? badgePresenca(p.presMedia) : 'bg-muted text-muted-foreground border-muted')}>
-                                {p.aulas > 0 ? labelPresenca(p.presMedia) : 'Sem aulas'}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <SecaoProfessores professores={professores} />
 
         {/* Visitantes */}
-        <div id="section-visitantesRel">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <UserPlus className="h-4 w-4 text-blue-500" />Visitantes no Período
-              </CardTitle>
-              <CardDescription>{labelRelatorio}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {visitantesRel.length === 0 ? (
-                <EmptyState message="Nenhum visitante registrado no período" minHeight="h-[100px]" />
-              ) : (
-                <>
-                  {/* Resumo rápido */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                      <p className="text-xl font-bold text-blue-600">{visitantesRel.length}</p>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Visitantes únicos</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                      <p className="text-xl font-bold">{visitantesRel.reduce((s, v) => s + v.visitas.length, 0)}</p>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Total de visitas</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                      <p className="text-xl font-bold text-green-600">{visitantesRel.reduce((s, v) => s + v.presentes, 0)}</p>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Presenças</p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                      <p className="text-xl font-bold text-emerald-600">{visitantesConvertidos}</p>
-                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Convertidos</p>
-                    </div>
-                  </div>
-
-                  {/* Sort chips */}
-                  <div className="flex items-center gap-2 flex-wrap" data-no-print>
-                    <span className="text-xs text-muted-foreground">Ordenar:</span>
-                    {([['visitas', 'Visitas'], ['pct', 'Presença'], ['nome', 'Nome']] as const).map(([val, label]) => (
-                      <button key={val} onClick={() => setSortVisitantes(val)}
-                        className={cn('px-2.5 py-1 rounded-md text-xs font-medium border transition-all',
-                          sortVisitantes === val ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:bg-muted border-border')}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Mobile: cards */}
-                  <div className="sm:hidden space-y-2">
-                    {visitantesOrdenados.map((v) => (
-                      <div key={v.id} className="rounded-xl border bg-card overflow-hidden">
-                        <div className="flex items-start justify-between px-4 py-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-sm truncate">{v.nome}</p>
-                              {v.convertido && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border">Convertido</Badge>}
-                            </div>
-                            {v.telefone && <p className="text-[11px] text-muted-foreground">{v.telefone}</p>}
-                          </div>
-                          <div className="flex-shrink-0 ml-2 text-right">
-                            <span className="text-xs font-bold" style={{ color: corPresenca(v.pct) }}>{v.pct}%</span>
-                            <p className="text-[10px] text-muted-foreground">{v.presentes}/{v.visitas.length} pres.</p>
-                          </div>
-                        </div>
-                        <div className="px-4 pb-3">
-                          <div className="flex flex-wrap gap-1">
-                            {v.visitas.map((vis, j) => (
-                              <span key={j} className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium',
-                                vis.presente ? 'bg-green-500/10 text-green-700 border-green-500/30' : 'bg-red-500/10 text-red-600 border-red-500/30')}>
-                                {vis.data}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        {(v.biblias > 0 || v.revistas > 0) && (
-                          <div className="grid grid-cols-2 divide-x border-t bg-muted/20">
-                            <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-purple-600">{v.biblias}</span><span className="text-[10px] text-muted-foreground">Bíblias</span></div>
-                            <div className="flex flex-col items-center py-2"><span className="text-xs font-bold text-orange-600">{v.revistas}</span><span className="text-[10px] text-muted-foreground">Revistas</span></div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Desktop: tabela */}
-                  <div className="hidden sm:block rounded-lg border overflow-x-auto">
-                    <Table className="min-w-[560px]">
-                      <TableHeader>
-                        <TableRow className="bg-muted/40">
-                          <TableHead className="w-8">#</TableHead>
-                          <TableHead>Visitante</TableHead>
-                          <TableHead className="hidden md:table-cell">Telefone</TableHead>
-                          <TableHead>Dias visitados</TableHead>
-                          <TableHead className="text-center">Pres.</TableHead>
-                          <TableHead className="text-center hidden md:table-cell">Bíblias</TableHead>
-                          <TableHead className="text-center hidden md:table-cell">Revistas</TableHead>
-                          <TableHead>Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {visitantesOrdenados.map((v, i) => (
-                          <TableRow key={v.id}>
-                            <TableCell className="text-center text-muted-foreground text-xs font-medium">{i + 1}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <div>
-                                  <p className="font-medium text-sm">{v.nome}</p>
-                                  {v.telefone && <p className="text-[11px] text-muted-foreground md:hidden">{v.telefone}</p>}
-                                </div>
-                                {v.convertido && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border flex-shrink-0">Convertido</Badge>}
-                              </div>
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{v.telefone || '—'}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1">
-                                {v.visitas.map((vis, j) => (
-                                  <span key={j} className={cn('text-[10px] px-1.5 py-0.5 rounded border font-medium',
-                                    vis.presente ? 'bg-green-500/10 text-green-700 border-green-500/30' : 'bg-red-500/10 text-red-600 border-red-500/30')}>
-                                    {vis.data}
-                                  </span>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <div className="flex items-center gap-1.5 justify-center">
-                                <div className="w-10 h-1.5 bg-muted rounded-full overflow-hidden hidden sm:block">
-                                  <div className="h-full rounded-full" style={{ width: `${v.pct}%`, backgroundColor: corPresenca(v.pct) }} />
-                                </div>
-                                <span className="text-xs font-bold" style={{ color: corPresenca(v.pct) }}>{v.pct}%</span>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground">{v.presentes}/{v.visitas.length}</p>
-                            </TableCell>
-                            <TableCell className="text-center text-purple-600 hidden md:table-cell">{v.biblias}</TableCell>
-                            <TableCell className="text-center text-orange-600 hidden md:table-cell">{v.revistas}</TableCell>
-                            <TableCell>
-                              {v.convertido
-                                ? <Badge className="text-xs bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border">Convertido</Badge>
-                                : <Badge className={cn('text-xs border', badgePresenca(v.pct))}>{labelPresenca(v.pct)}</Badge>
-                              }
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <SecaoVisitantes
+          visitantes={visitantesRel}
+          visitantesOrdenados={visitantesOrdenados}
+          sort={sortVisitantes}
+          onSort={setSortVisitantes}
+          labelRelatorio={labelRelatorio}
+        />
       </div>
     </>
   )
 }
-

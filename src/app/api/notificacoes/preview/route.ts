@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
 import { getLicaoTema } from '@/lib/constants'
+import { getNotifConfig } from '@/lib/api-helpers'
 
 /** Calcula o número de aula de uma data dentro do trimestre */
 function calcularNumeroAula(dataIso: string): number {
@@ -33,16 +34,16 @@ export async function GET(req: NextRequest) {
   try {
     const db = createServiceClient() as any
 
-    const [escalasRes, configRes, overridesRes] = await Promise.all([
+    const [escalasRes, configData, overridesRes] = await Promise.all([
       db.from('escalas')
         .select('id, turma_id, professor_id, turmas(nome, cor), professores(nome, telefone)')
         .eq('data', dataAula),
-      db.from('notificacoes_config').select('template').single(),
+      getNotifConfig(db),
       db.from('notificacoes_semana').select('*').eq('data_aula', dataAula),
     ])
 
     const escalas   = escalasRes.data  ?? []
-    const template  = configRes.data?.template ?? TEMPLATE_PADRAO
+    const template  = configData?.template ?? TEMPLATE_PADRAO
     const overrides = overridesRes.data ?? []
     const dAula     = new Date(dataAula + 'T12:00:00')
     const diaAula   = dAula.getDay()

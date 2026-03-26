@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,9 +32,9 @@ import {
 import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
-import { calcularPct } from '@/lib/presence'
 import { toast } from '@/lib/toast'
-import { getCargo } from '@/lib/constants'
+import { AlunoRow } from './_AlunoRow'
+import { AdicionarVisitanteDialog } from './_AdicionarVisitanteDialog'
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -251,72 +251,79 @@ export default function ChamadaTurmaPage() {
 
   // ── Handlers Alunos ──────────────────────────────────────────────────────────
 
-  const handleMarcarPresenca = (alunoId: string, status: 'presente' | 'ausente') => {
-    setAlunos(alunos.map(a =>
+  const handleMarcarPresenca = useCallback((alunoId: string, status: 'presente' | 'ausente') => {
+    setAlunos(prev => prev.map(a =>
       a.aluno_id === alunoId
         ? { ...a, presente: status, trouxe_biblia: status === 'ausente' ? false : a.trouxe_biblia, trouxe_revista: status === 'ausente' ? false : a.trouxe_revista }
         : a
     ))
-  }
+  }, [])
 
-  const handleToggleBiblia = (alunoId: string) =>
-    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, trouxe_biblia: !a.trouxe_biblia } : a))
+  const handleToggleBiblia = useCallback((alunoId: string) =>
+    setAlunos(prev => prev.map(a => a.aluno_id === alunoId ? { ...a, trouxe_biblia: !a.trouxe_biblia } : a)),
+  [])
 
-  const handleToggleRevista = (alunoId: string) =>
-    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, trouxe_revista: !a.trouxe_revista } : a))
+  const handleToggleRevista = useCallback((alunoId: string) =>
+    setAlunos(prev => prev.map(a => a.aluno_id === alunoId ? { ...a, trouxe_revista: !a.trouxe_revista } : a)),
+  [])
 
-  const handleJustificativaChange = (alunoId: string, justificativa: string) =>
-    setAlunos(alunos.map(a => a.aluno_id === alunoId ? { ...a, justificativa } : a))
+  const handleJustificativaChange = useCallback((alunoId: string, justificativa: string) =>
+    setAlunos(prev => prev.map(a => a.aluno_id === alunoId ? { ...a, justificativa } : a)),
+  [])
 
-  const handleMarcarTodosBiblia = () => {
-    setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_biblia: true } : a))
-    setVisitantes(visitantes.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_biblia: true } : v))
-  }
+  const handleMarcarTodosBiblia = useCallback(() => {
+    setAlunos(prev => prev.map(a => a.presente === 'presente' ? { ...a, trouxe_biblia: true } : a))
+    setVisitantes(prev => prev.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_biblia: true } : v))
+  }, [])
 
-  const handleMarcarTodosRevista = () => {
-    setAlunos(alunos.map(a => a.presente === 'presente' ? { ...a, trouxe_revista: true } : a))
-    setVisitantes(visitantes.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_revista: true } : v))
-  }
+  const handleMarcarTodosRevista = useCallback(() => {
+    setAlunos(prev => prev.map(a => a.presente === 'presente' ? { ...a, trouxe_revista: true } : a))
+    setVisitantes(prev => prev.map(v => v.presenteHoje === 'presente' ? { ...v, trouxe_revista: true } : v))
+  }, [])
 
-  const handleAplicarQuantidades = () => {
+  const handleAplicarQuantidades = useCallback(() => {
     const nBiblia = qtdBiblias !== '' ? Math.max(0, parseInt(qtdBiblias) || 0) : null
     const nRevista = qtdRevistas !== '' ? Math.max(0, parseInt(qtdRevistas) || 0) : null
     if (nBiblia === null && nRevista === null) return
-    const presentes = alunos.filter(a => a.presente === 'presente')
-    setAlunos(alunos.map(a => {
-      if (a.presente !== 'presente') return a
-      const idx = presentes.findIndex(p => p.aluno_id === a.aluno_id)
-      return {
-        ...a,
-        trouxe_biblia: nBiblia !== null ? idx < nBiblia : a.trouxe_biblia,
-        trouxe_revista: nRevista !== null ? idx < nRevista : a.trouxe_revista,
-      }
-    }))
+    setAlunos(prev => {
+      const presentes = prev.filter(a => a.presente === 'presente')
+      return prev.map(a => {
+        if (a.presente !== 'presente') return a
+        const idx = presentes.findIndex(p => p.aluno_id === a.aluno_id)
+        return {
+          ...a,
+          trouxe_biblia: nBiblia !== null ? idx < nBiblia : a.trouxe_biblia,
+          trouxe_revista: nRevista !== null ? idx < nRevista : a.trouxe_revista,
+        }
+      })
+    })
     setQtdBiblias('')
     setQtdRevistas('')
-  }
+  }, [qtdBiblias, qtdRevistas])
 
   // ── Handlers Visitantes ──────────────────────────────────────────────────────
 
-  const handleMarcarPresencaVisitante = (visitanteId: string, status: 'presente' | 'ausente') => {
-    setVisitantes(visitantes.map(v =>
+  const handleMarcarPresencaVisitante = useCallback((visitanteId: string, status: 'presente' | 'ausente') => {
+    setVisitantes(prev => prev.map(v =>
       v.id === visitanteId
         ? { ...v, presenteHoje: status, trouxe_biblia: status === 'ausente' ? false : v.trouxe_biblia, trouxe_revista: status === 'ausente' ? false : v.trouxe_revista }
         : v
     ))
-  }
+  }, [])
 
-  const handleToggleVisitanteBiblia = (visitanteId: string) =>
-    setVisitantes(visitantes.map(v => v.id === visitanteId ? { ...v, trouxe_biblia: !v.trouxe_biblia } : v))
+  const handleToggleVisitanteBiblia = useCallback((visitanteId: string) =>
+    setVisitantes(prev => prev.map(v => v.id === visitanteId ? { ...v, trouxe_biblia: !v.trouxe_biblia } : v)),
+  [])
 
-  const handleToggleVisitanteRevista = (visitanteId: string) =>
-    setVisitantes(visitantes.map(v => v.id === visitanteId ? { ...v, trouxe_revista: !v.trouxe_revista } : v))
+  const handleToggleVisitanteRevista = useCallback((visitanteId: string) =>
+    setVisitantes(prev => prev.map(v => v.id === visitanteId ? { ...v, trouxe_revista: !v.trouxe_revista } : v)),
+  [])
 
-  const handleRemoverVisitante = (visitanteId: string) => {
-    setVisitantes(visitantes.filter(v => v.id !== visitanteId))
-  }
+  const handleRemoverVisitante = useCallback((visitanteId: string) => {
+    setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
+  }, [])
 
-  const handleAdicionarVisitante = () => {
+  const handleAdicionarVisitante = useCallback(() => {
     if (!novoVisitante.nome.trim()) {
       toast('Por favor, preencha o nome do visitante.', 'error')
       return
@@ -333,10 +340,10 @@ export default function ChamadaTurmaPage() {
       historico: [],
       totalVisitas: 0,
     }
-    setVisitantes([...visitantes, visitante])
+    setVisitantes(prev => [...prev, visitante])
     setNovoVisitante({ nome: '', telefone: '', observacao: '' })
     setDialogVisitanteOpen(false)
-  }
+  }, [novoVisitante])
 
   const handleConverterEmAluno = async (visitanteId: string) => {
     const visitante = visitantes.find(v => v.id === visitanteId)
@@ -358,9 +365,9 @@ export default function ChamadaTurmaPage() {
 
     toast(`${visitante.nome} convertido em aluno com sucesso!`)
     // Remover da lista de visitantes (vai aparecer como aluno)
-    setVisitantes(visitantes.filter(v => v.id !== visitanteId))
+    setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
     // Adicionar na lista de alunos imediatamente
-    setAlunos([...alunos, {
+    setAlunos(prev => [...prev, {
       aluno_id: novoAluno.id,
       nome: visitante.nome,
       presente: 'presente',
@@ -483,19 +490,22 @@ export default function ChamadaTurmaPage() {
 
   // ── Resumo ───────────────────────────────────────────────────────────────────
 
-  const visitantesPresentes = visitantes.filter(v => v.presenteHoje === 'presente')
+  const totalPresentes = useMemo(() => alunos.filter(a => a.presente === 'presente').length, [alunos])
+  const totalAusentes  = useMemo(() => alunos.filter(a => a.presente === 'ausente').length, [alunos])
 
-  const resumo = {
+  const visitantesPresentes = useMemo(() => visitantes.filter(v => v.presenteHoje === 'presente'), [visitantes])
+
+  const resumo = useMemo(() => ({
     matriculados: alunos.length,
-    presentes: alunos.filter(a => a.presente === 'presente').length,
-    faltas: alunos.filter(a => a.presente === 'ausente').length,
+    presentes: totalPresentes,
+    faltas: totalAusentes,
     visitantes: visitantesPresentes.length,
     biblias: alunos.filter(a => a.trouxe_biblia).length + visitantesPresentes.filter(v => v.trouxe_biblia).length,
     revistas: alunos.filter(a => a.trouxe_revista).length + visitantesPresentes.filter(v => v.trouxe_revista).length,
     percentual_presenca: alunos.length > 0
-      ? Math.round((alunos.filter(a => a.presente === 'presente').length / alunos.length) * 100)
+      ? Math.round((totalPresentes / alunos.length) * 100)
       : 0,
-  }
+  }), [alunos, totalPresentes, totalAusentes, visitantesPresentes])
 
   // ── Renderizar indicador de histórico de presença ────────────────────────────
 
@@ -660,104 +670,18 @@ export default function ChamadaTurmaPage() {
               {alunos.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">Nenhum aluno cadastrado nesta turma</p>
               ) : (
-                alunos.map((aluno, index) => {
-                  const cargoInfo = getCargo(aluno.cargo)
-                  return (
-                  <div
+                alunos.map((aluno, index) => (
+                  <AlunoRow
                     key={aluno.aluno_id}
-                    className={`p-4 border rounded-lg space-y-3 ${aluno.dadoAula ? 'border-red-500/60 bg-red-500/5' : ''}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium flex-shrink-0">
-                          {index + 1}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium">{aluno.nome}</span>
-                            {aluno.isProfessor && (
-                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 px-1.5 py-0">
-                                Professor
-                              </Badge>
-                            )}
-                            {cargoInfo && (
-                              <span
-                                className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
-                                style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
-                              >
-                                {cargoInfo.label}
-                              </span>
-                            )}
-                          </div>
-                          {aluno.dadoAula && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <GraduationCap className="h-3 w-3 text-red-400" />
-                              <span className="text-[11px] font-semibold text-red-400">
-                                {aluno.turmaDaAulaId === turmaId
-                                  ? 'Lecionando hoje nesta turma'
-                                  : `Lecionando hoje em: ${aluno.turmaDaAulaNome}`}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant={aluno.presente === 'presente' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => handleMarcarPresenca(aluno.aluno_id, 'presente')}
-                          className={aluno.presente === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}
-                        >
-                          Presente
-                        </Button>
-                        <Button
-                          variant={aluno.presente === 'ausente' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => handleMarcarPresenca(aluno.aluno_id, 'ausente')}
-                          className={aluno.presente === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}
-                        >
-                          Ausente
-                        </Button>
-                        {aluno.presente === 'pendente' && (
-                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                            Pendente
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    {aluno.presente === 'presente' && (
-                      <div className="flex flex-wrap gap-4 sm:gap-6 ml-8 sm:ml-11">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id={`biblia-${aluno.aluno_id}`} checked={aluno.trouxe_biblia} onCheckedChange={() => handleToggleBiblia(aluno.aluno_id)} />
-                          <label htmlFor={`biblia-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-                            <Book className="h-4 w-4" /> Trouxe Bíblia
-                          </label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Checkbox id={`revista-${aluno.aluno_id}`} checked={aluno.trouxe_revista} onCheckedChange={() => handleToggleRevista(aluno.aluno_id)} />
-                          <label htmlFor={`revista-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-                            <BookOpen className="h-4 w-4" /> Trouxe Revista
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                    {aluno.presente === 'ausente' && (
-                      <div className="ml-8 sm:ml-11 space-y-2">
-                        <Label htmlFor={`justificativa-${aluno.aluno_id}`} className="text-xs text-muted-foreground">
-                          Justificativa (opcional)
-                        </Label>
-                        <Input
-                          id={`justificativa-${aluno.aluno_id}`}
-                          placeholder="Ex: Viagem, doente..."
-                          value={aluno.justificativa}
-                          onChange={(e) => handleJustificativaChange(aluno.aluno_id, e.target.value)}
-                          className="text-sm"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  )
-                })
+                    aluno={aluno}
+                    index={index}
+                    turmaId={turmaId}
+                    onPresenca={handleMarcarPresenca}
+                    onBiblia={handleToggleBiblia}
+                    onRevista={handleToggleRevista}
+                    onJustificativa={handleJustificativaChange}
+                  />
+                ))
               )}
             </CardContent>
           </Card>
@@ -985,48 +909,13 @@ export default function ChamadaTurmaPage() {
       </div>
 
       {/* Dialog Adicionar Visitante */}
-      <Dialog open={dialogVisitanteOpen} onOpenChange={setDialogVisitanteOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Novo Visitante</DialogTitle>
-            <DialogDescription>Preencha os dados do visitante</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="nome-visitante">Nome *</Label>
-              <Input
-                id="nome-visitante"
-                placeholder="Nome completo"
-                value={novoVisitante.nome}
-                onChange={(e) => setNovoVisitante({ ...novoVisitante, nome: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="telefone-visitante">Telefone</Label>
-              <Input
-                id="telefone-visitante"
-                placeholder="(00) 00000-0000"
-                value={novoVisitante.telefone}
-                onChange={(e) => setNovoVisitante({ ...novoVisitante, telefone: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="observacao-visitante">Observação</Label>
-              <Textarea
-                id="observacao-visitante"
-                placeholder="Ex: Convidado por..."
-                rows={3}
-                value={novoVisitante.observacao}
-                onChange={(e) => setNovoVisitante({ ...novoVisitante, observacao: e.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogVisitanteOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAdicionarVisitante}>Adicionar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AdicionarVisitanteDialog
+        open={dialogVisitanteOpen}
+        onClose={() => setDialogVisitanteOpen(false)}
+        novoVisitante={novoVisitante}
+        onChange={setNovoVisitante}
+        onAdicionar={handleAdicionarVisitante}
+      />
 
       {/* Botão salvar sticky — visível apenas no mobile */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t p-4 z-20">

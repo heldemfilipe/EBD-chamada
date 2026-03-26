@@ -31,7 +31,7 @@ import { PresenceBar } from '@/components/ui/presence-bar'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { salvarCargo } from '@/lib/utils'
+import { salvarCargo, calcularIdade } from '@/lib/utils'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 interface Turma {
@@ -58,14 +58,6 @@ interface AlunoDetalhe {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function calcularIdade(dataNascimento: string): number {
-  const hoje = new Date()
-  const nasc = new Date(dataNascimento)
-  let idade = hoje.getFullYear() - nasc.getFullYear()
-  const m = hoje.getMonth() - nasc.getMonth()
-  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--
-  return idade
-}
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const coresDisponiveis = [
@@ -256,7 +248,7 @@ export default function TurmasPage() {
       return {
         id: a.id,
         nome: a.nome,
-        idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+        idade: a.data_nascimento ? (calcularIdade(a.data_nascimento) ?? 0) : 0,
         presenca: pm ? Math.round((pm.presentes / pm.total) * 100) : 0,
       }
     }))
@@ -291,7 +283,7 @@ export default function TurmasPage() {
 
     const novoAluno: AlunoDetalhe = {
       id: data.id, nome: enrollForm.nome,
-      idade: enrollForm.dataNascimento ? calcularIdade(enrollForm.dataNascimento) : 0,
+      idade: enrollForm.dataNascimento ? (calcularIdade(enrollForm.dataNascimento) ?? 0) : 0,
       presenca: 0,
     }
     setDetailAlunos(prev => [...prev, novoAluno].sort((a, b) => a.nome.localeCompare(b.nome)))

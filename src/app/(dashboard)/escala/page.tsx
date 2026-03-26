@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -19,6 +19,8 @@ import {
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { NovaEscalaDialog } from './_NovaEscalaDialog'
+import { SugestaoDialog } from './_SugestaoDialog'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 interface Escala {
@@ -428,6 +430,10 @@ export default function EscalaPage() {
   }, [escalasFiltradas, turmasData, professoresData])
 
   // ── Dialog handlers ───────────────────────────────────────────────────────────
+  const fecharDialog = useCallback(() => {
+    setDialogOpen(false); setEditMode(false); setSelectedEscala(null); setFormData(FORM_VAZIO)
+  }, [])
+
   function abrirDialog(escala?: Escala) {
     if (escala) {
       const info = getAulaInfo(escala.data)
@@ -446,11 +452,7 @@ export default function EscalaPage() {
     setDialogOpen(true)
   }
 
-  function fecharDialog() {
-    setDialogOpen(false); setEditMode(false); setSelectedEscala(null); setFormData(FORM_VAZIO)
-  }
-
-  async function salvarEscala() {
+  const salvarEscala = useCallback(async () => {
     if (!dataComputada || !formData.turmaId || !formData.professorId) {
       toast('Preencha todos os campos obrigatórios.', 'error'); return
     }
@@ -494,9 +496,9 @@ export default function EscalaPage() {
     } finally {
       setIsSaving(false)
     }
-  }
+  }, [dataComputada, formData, isSaving, editMode, selectedEscala, db, fecharDialog])
 
-  async function excluirEscala() {
+  const excluirEscala = useCallback(async () => {
     if (!selectedEscala || isDeleting) return
     setIsDeleting(true)
     try {
@@ -516,10 +518,10 @@ export default function EscalaPage() {
     } finally {
       setIsDeleting(false)
     }
-  }
+  }, [selectedEscala, isDeleting, db])
 
   // ── Sugestão de escala ────────────────────────────────────────────────────────
-  function abrirSugestao() {
+  const abrirSugestao = useCallback(() => {
     const entradas = gerarEscalaSugerida(profTurmasMap, professoresData, turmasData, parseInt(filtroAno), parseInt(filtroTrim))
     // Adicionar entradas vazias para aulas marcadas como unidas per-aula
     const entradasComUnidas = [...entradas]
@@ -534,16 +536,20 @@ export default function EscalaPage() {
     }
     setSugestaoEntradas(entradasComUnidas)
     setSugestaoOpen(true)
-  }
+  }, [profTurmasMap, professoresData, turmasData, filtroAno, filtroTrim, salasUnidasConfig])
 
-  function updateSugestaoCell(data: string, turmaId: string, professorId: string) {
+  const fecharSugestao = useCallback(() => {
+    setSugestaoOpen(false)
+  }, [])
+
+  const updateSugestaoCell = useCallback((data: string, turmaId: string, professorId: string) => {
     setSugestaoEntradas(prev => {
       const filtered = prev.filter(e => !(e.data === data && e.turmaId === turmaId))
       return [...filtered, { data, turmaId, professorId }]
     })
-  }
+  }, [])
 
-  async function salvarSugestao() {
+  const salvarSugestao = useCallback(async () => {
     // Salva apenas entradas com professor definido (ignora '' = unidas sem professor)
     const paraInserir = sugestaoEntradas.filter(e => e.professorId !== '')
     if (isSalvandoSugestao || paraInserir.length === 0) return
@@ -573,7 +579,7 @@ export default function EscalaPage() {
     } finally {
       setIsSalvandoSugestao(false)
     }
-  }
+  }, [sugestaoEntradas, isSalvandoSugestao, db, filtroTrim])
 
   // ── Remover toda a escala de uma turma no período ────────────────────────────
   async function excluirEscalasTurma() {
@@ -1121,312 +1127,38 @@ export default function EscalaPage() {
       )}
 
       {/* ── Dialog Sugestão de Escala ──────────────────────────────────────── */}
-      <Dialog open={sugestaoOpen} onOpenChange={setSugestaoOpen}>
-        <DialogContent className="w-[calc(100%-1rem)] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-0">
-          <DialogHeader className="px-5 pt-5 pb-3 border-b flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  Sugestão de Escala — {TRIMESTRES_SHORT[parseInt(filtroTrim) - 1]} {filtroAno}
-                </DialogTitle>
-                <DialogDescription className="mt-0.5">
-                  {sugestaoEntradas.filter(e => e.professorId !== '').length} atribuições geradas · clique em qualquer célula para ajustar o professor.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          {/* Legenda das restrições */}
-          <div className="px-5 py-2 bg-muted/30 border-b flex-shrink-0 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Viviana / Livys: somente aulas pares</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Eder / Heldem / Leandro: sem 2º domingo</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Leandro: 1 aula no Dynamo</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />Sem domingos consecutivos</span>
-          </div>
-
-          {/* Tabela da sugestão */}
-          <div className="overflow-auto flex-1">
-            {(() => {
-              const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
-              const turmasGen = [...turmasData]
-                .sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
-
-              return (
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-card border-b">
-                    <tr>
-                      <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground w-10 border-r">L#</th>
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-14 border-r">Data</th>
-                      {turmasGen.map(t => (
-                        <th key={t.id} className="px-3 py-0 text-left font-semibold min-w-[140px]">
-                          <div className={`h-1 -mx-3 mb-1.5 ${t.cor}`} />
-                          <div className="flex items-center gap-1 pb-1.5 flex-wrap">
-                            <span className="text-[11px] font-bold">{t.nome}</span>
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {domingos.map(dom => {
-                      const is2nd = is2ndSunday(dom.data)
-                      const isProx = dom.data === proximaData
-                      return (
-                        <tr
-                          key={dom.data}
-                          className={`border-b last:border-0 ${
-                            isProx ? 'bg-primary/5' : is2nd ? 'bg-amber-50/40 dark:bg-amber-950/10' : 'hover:bg-muted/20'
-                          }`}
-                        >
-                          <td className="px-3 py-2 text-center border-r">
-                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                              isProx ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                            }`}>{dom.aula}</span>
-                            {is2nd && <div className="text-[9px] text-amber-500 font-bold text-center leading-none mt-0.5">★</div>}
-                          </td>
-                          <td className="px-3 py-2 text-xs font-medium border-r whitespace-nowrap">
-                            {fmtDataCurta(dom.data)}
-                          </td>
-                          {turmasGen.map(t => {
-                            const unidaNomeSug = unidaComNomeEmData(t.id, dom.data)
-                            if (unidaNomeSug) {
-                              return (
-                                <td key={t.id} className="px-3 py-2">
-                                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 italic">
-                                    <Link2 className="h-3 w-3 flex-shrink-0" />{unidaNomeSug}
-                                  </span>
-                                </td>
-                              )
-                            }
-                            const entrada = sugestaoEntradas.find(e => e.data === dom.data && e.turmaId === t.id)
-                            const pool = profTurmasMap[t.id] ?? []
-                            return (
-                              <td key={t.id} className="px-2 py-1.5">
-                                <select
-                                  value={entrada?.professorId ?? ''}
-                                  onChange={e => updateSugestaoCell(dom.data, t.id, e.target.value)}
-                                  className="text-xs w-full min-w-[110px] rounded border border-input bg-background px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
-                                >
-                                  <option value="">— sem professor</option>
-                                  {pool.map(pid => (
-                                    <option key={pid} value={pid}>{getProfNome(pid)}</option>
-                                  ))}
-                                </select>
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              )
-            })()}
-          </div>
-
-          <div className="px-5 py-3 border-t flex-shrink-0 flex justify-between items-center gap-3 bg-card">
-            <p className="text-xs text-muted-foreground">
-              ★ 2º domingo do mês · use os selects para ajustar professores antes de salvar
-            </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setSugestaoOpen(false)}>Fechar</Button>
-              <Button onClick={salvarSugestao} disabled={isSalvandoSugestao || sugestaoEntradas.filter(e => e.professorId !== '').length === 0}>
-                <Save className="h-4 w-4 mr-2" />
-                {isSalvandoSugestao ? 'Salvando...' : `Salvar ${sugestaoEntradas.filter(e => e.professorId !== '').length} escalas`}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SugestaoDialog
+        open={sugestaoOpen}
+        onClose={fecharSugestao}
+        sugestaoEntradas={sugestaoEntradas}
+        onUpdateCell={updateSugestaoCell}
+        isSalvando={isSalvandoSugestao}
+        onSalvar={salvarSugestao}
+        professores={professoresData}
+        turmas={turmasData}
+        filtroTrim={filtroTrim}
+        filtroAno={filtroAno}
+        proximaData={proximaData}
+        salasUnidasConfig={salasUnidasConfig}
+        profTurmasMap={profTurmasMap}
+      />
 
       {/* ── Dialog Nova / Editar Escala ────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editMode ? 'Editar Escala' : 'Nova Escala'}</DialogTitle>
-            <DialogDescription>
-              {editMode ? 'Atualize a escala selecionada.' : 'Defina o domingo, turma e professor.'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            {/* Seletor de Aula */}
-            <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                <Calendar className="h-3.5 w-3.5" />Domingo / Aula
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Ano</Label>
-                  <Select value={formData.ano} onValueChange={v => setFormData({ ...formData, ano: v, aulaIdx: '1' })}>
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {ANOS_DISPONIVEIS.map(a => <SelectItem key={a} value={String(a)}>{a}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Trimestre</Label>
-                  <Select value={formData.trimestre} onValueChange={v => setFormData({ ...formData, trimestre: v, aulaIdx: '1' })}>
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {TRIMESTRES_LABEL.map((t, i) => (
-                        <SelectItem key={i + 1} value={String(i + 1)}>{TRIMESTRES_SHORT[i]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Aula</Label>
-                <Select value={formData.aulaIdx} onValueChange={v => setFormData({ ...formData, aulaIdx: v })}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {domingosTrimForm.map(d => (
-                      <SelectItem key={d.aula} value={String(d.aula)}>{d.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {dataComputada && (
-                <p className="text-xs text-muted-foreground capitalize">
-                  {fmtDataLonga(dataComputada)} de {new Date(dataComputada + 'T12:00:00').getFullYear()}
-                </p>
-              )}
-            </div>
-
-            {/* Turma */}
-            <div className="space-y-1.5">
-              <Label className="text-sm">Turma *</Label>
-              <Select value={formData.turmaId} onValueChange={v => setFormData({ ...formData, turmaId: v })}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione a turma" /></SelectTrigger>
-                <SelectContent>
-                  {turmasOrdenadas.map(t => {
-                    const tema = getTemaRevista(t.nome, formData.ano, parseInt(formData.trimestre))
-                    return (
-                      <SelectItem key={t.id} value={t.id}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${t.cor}`} />
-                          <span>{t.nome}</span>
-                          {tema && <span className="text-muted-foreground text-xs truncate max-w-[120px]">— {tema}</span>}
-                        </div>
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
-              {formData.turmaId && (() => {
-                const nome      = getTurmaNome(formData.turmaId)
-                const aulaNum   = parseInt(formData.aulaIdx)
-                const temaLicao = getLicaoTema(nome, formData.ano, parseInt(formData.trimestre), aulaNum)
-                const temaRev   = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre))
-                return (temaLicao || temaRev) ? (
-                  <div className="rounded-md bg-muted/40 border px-3 py-2 mt-1.5 flex items-start gap-2">
-                    <BookOpen className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-muted-foreground" />
-                    <div className="min-w-0">
-                      {temaLicao && (
-                        <p className="text-xs font-medium leading-snug">{temaLicao}</p>
-                      )}
-                      {temaRev && (
-                        <p className="text-[11px] text-muted-foreground leading-snug">{temaRev}</p>
-                      )}
-                    </div>
-                  </div>
-                ) : null
-              })()}
-            </div>
-
-            {/* Sala Unida — configurado por aula específica */}
-            {formData.turmaId && dataComputada && (() => {
-              const chave        = unidaChave(formData.turmaId, dataComputada)
-              const isUnidaAtual = chave in salasUnidasConfig
-              const unidaComId   = salasUnidasConfig[chave] ?? ''
-              const outrasTurmas = turmasOrdenadas.filter(t => t.id !== formData.turmaId)
-              return (
-                <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                      <Link2 className="h-3.5 w-3.5" />Sala unida nesta aula
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = { ...salasUnidasConfig }
-                        if (isUnidaAtual) {
-                          delete next[chave]
-                        } else {
-                          next[chave] = outrasTurmas[0]?.id ?? ''
-                        }
-                        salvarSalasUnidas(next)
-                      }}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                        isUnidaAtual ? 'bg-amber-500' : 'bg-muted-foreground/30'
-                      }`}
-                    >
-                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow ${
-                        isUnidaAtual ? 'translate-x-4' : 'translate-x-1'
-                      }`} />
-                    </button>
-                  </div>
-                  {isUnidaAtual && (
-                    <div className="space-y-1">
-                      <p className="text-[11px] text-muted-foreground">Unida com:</p>
-                      <Select
-                        value={unidaComId}
-                        onValueChange={v => salvarSalasUnidas({ ...salasUnidasConfig, [chave]: v })}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Selecione a turma" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {outrasTurmas.map(t => (
-                            <SelectItem key={t.id} value={t.id}>
-                              <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${t.cor}`} />
-                                {t.nome}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* Professor */}
-            <div className="space-y-1.5">
-              <Label className="text-sm">Professor *</Label>
-              <Select value={formData.professorId} onValueChange={v => setFormData({ ...formData, professorId: v })}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o professor" /></SelectTrigger>
-                <SelectContent>
-                  {professoresData.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Observações */}
-            <div className="space-y-1.5">
-              <Label className="text-sm">Observações</Label>
-              <Input
-                value={formData.observacao}
-                onChange={e => setFormData({ ...formData, observacao: e.target.value })}
-                placeholder="Alguma observação sobre esta aula..."
-                className="h-9"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={fecharDialog} disabled={isSaving}>Cancelar</Button>
-            <Button onClick={salvarEscala} disabled={isSaving}>
-              {isSaving ? 'Salvando...' : editMode ? 'Salvar Alterações' : 'Cadastrar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <NovaEscalaDialog
+        open={dialogOpen}
+        onClose={fecharDialog}
+        formData={formData}
+        onChange={setFormData}
+        onSave={salvarEscala}
+        professores={professoresData}
+        turmas={turmasData}
+        isSaving={isSaving}
+        editMode={editMode}
+        domingosTrimForm={domingosTrimForm}
+        dataComputada={dataComputada}
+        salasUnidasConfig={salasUnidasConfig}
+        onSalvarSalasUnidas={salvarSalasUnidas}
+      />
 
       {/* ── Dialog Confirmar Exclusão ──────────────────────────────────────── */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

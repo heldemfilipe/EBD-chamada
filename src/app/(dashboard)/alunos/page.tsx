@@ -17,7 +17,7 @@ import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, A
 import { supabase } from '@/lib/supabase'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { salvarCargo, cn } from '@/lib/utils'
+import { salvarCargo, cn, calcularIdade } from '@/lib/utils'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -40,14 +40,6 @@ interface Aluno {
 interface Turma { id: string; nome: string; faixaEtaria: string; cor: string }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function calcularIdade(dataNascimento: string): number {
-  const hoje = new Date()
-  const nasc = new Date(dataNascimento)
-  let idade = hoje.getFullYear() - nasc.getFullYear()
-  const m = hoje.getMonth() - nasc.getMonth()
-  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--
-  return idade
-}
 
 const FAIXAS = [
   { label: 'Cordeirinhos', desc: 'Até 5 anos',          faixa: 'Até 5 anos',           color: 'text-purple-500' },
@@ -130,7 +122,7 @@ export default function AlunosPage() {
           telefone: a.telefone ?? '', email: a.email ?? '',
           dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
           cargo: a.cargo ?? '', presenca: 0, status: 'ativo',
-          idade: a.data_nascimento ? calcularIdade(a.data_nascimento) : 0,
+          idade: a.data_nascimento ? (calcularIdade(a.data_nascimento) ?? 0) : 0,
           isProfessor: (a.responsavel ?? '').startsWith('professor:'),
         })))
       } catch (e: any) {
@@ -217,7 +209,7 @@ export default function AlunosPage() {
     if (isSaving) return
     setIsSaving(true)
     try {
-      const idade     = form.dataNascimento ? calcularIdade(form.dataNascimento) : 0
+      const idade     = form.dataNascimento ? (calcularIdade(form.dataNascimento) ?? 0) : 0
       const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
       const payload   = {
         nome: form.nome, data_nascimento: form.dataNascimento || null,

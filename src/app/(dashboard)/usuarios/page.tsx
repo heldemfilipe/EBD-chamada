@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  Plus, Shield, Users, UserCheck, UserX, Edit, Power,
+  Plus, Shield, Users, UserCheck, Edit, Power,
   LayoutDashboard, GraduationCap, BookOpen, ClipboardCheck,
   CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key,
 } from 'lucide-react'

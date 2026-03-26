@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO } from '@/lib/notificacoes'
+import { getNotifConfig } from '@/lib/api-helpers'
 
 // ─── GET: retorna configuração atual ──────────────────────────────────────────
 export async function GET() {
   try {
     const db = createServiceClient() as any
-    const { data, error } = await db
-      .from('notificacoes_config')
-      .select('*')
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const data = await getNotifConfig(db)
 
     // Configuração padrão caso a linha não exista ainda
     const config = data ?? {
