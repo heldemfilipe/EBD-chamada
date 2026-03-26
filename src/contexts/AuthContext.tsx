@@ -26,7 +26,7 @@ interface AuthContextType {
 
 // ─── Todos os módulos disponíveis ─────────────────────────────────────────────
 export const TODOS_MODULOS = [
-  'dashboard', 'alunos', 'professores', 'turmas', 'chamada', 'escala', 'relatorios', 'usuarios', 'notificacoes',
+  'dashboard', 'alunos', 'professores', 'turmas', 'chamada', 'escala', 'relatorios', 'usuarios',
 ]
 
 // ─── Context ──────────────────────────────────────────────────────────────────

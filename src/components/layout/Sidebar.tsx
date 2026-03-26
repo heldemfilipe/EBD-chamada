@@ -11,7 +11,6 @@ import {
   ClipboardCheck,
   CalendarDays,
   BarChart3,
-  Bell,
   Menu,
   X,
   BookMarked,
@@ -32,7 +31,6 @@ const allMenuItems = [
   { title: 'Chamada',     icon: ClipboardCheck,   href: '/chamada',     modulo: 'chamada'     },
   { title: 'Escala',        icon: CalendarDays, href: '/escala',       modulo: 'escala'       },
   { title: 'Relatórios',   icon: BarChart3,    href: '/relatorios',   modulo: 'relatorios'   },
-  { title: 'Notificações', icon: Bell,         href: '/notificacoes', modulo: 'notificacoes' },
 ]
 
 export function Sidebar() {
