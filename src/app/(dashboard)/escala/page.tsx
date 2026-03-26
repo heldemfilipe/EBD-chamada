@@ -216,8 +216,8 @@ export default function EscalaPage() {
   const [expandedDatas, setExpandedDatas] = useState<Set<string>>(new Set())
 
   // Salas unidas: turmaId → unidaComTurmaId (persiste em localStorage)
-  const [salasUnidasConfig, setSalasUnidasConfig]       = useState<Record<string, string>>({})
-  const [salasUnidasDialogOpen, setSalasUnidasDialogOpen] = useState(false)
+  // Salas unidas per-aula: chave = "${turmaId}::${data}", valor = turmaId com quem está unida
+  const [salasUnidasConfig, setSalasUnidasConfig] = useState<Record<string, string>>({})
 
   // Sugestão de escala
   const [profTurmasMap, setProfTurmasMap]         = useState<Record<string, string[]>>({})
@@ -266,9 +266,13 @@ export default function EscalaPage() {
     try { localStorage.setItem('ebd_salas_unidas', JSON.stringify(config)) } catch { /* ignore */ }
   }
 
-  // Helper: verifica se uma turma é "unida"
-  const isUnida = (turmaId: string) => turmaId in salasUnidasConfig
-  const unidaComNome = (turmaId: string) => getTurmaNome(salasUnidasConfig[turmaId] ?? '') || '—'
+  // Helpers per-aula para salas unidas
+  const unidaChave = (turmaId: string, data: string) => `${turmaId}::${data}`
+  const unidaComIdEmData = (turmaId: string, data: string) => salasUnidasConfig[unidaChave(turmaId, data)] ?? ''
+  const unidaComNomeEmData = (turmaId: string, data: string) => {
+    const uid = unidaComIdEmData(turmaId, data)
+    return uid ? getTurmaNome(uid) : ''
+  }
 
   // ── Carga inicial ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -374,22 +378,15 @@ export default function EscalaPage() {
   }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData])
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
-  // IDs de todas as turmas configuradas como "unidas" (inclui Filhas do Rei por nome como fallback)
   const filhasDoReiId = useMemo(
     () => turmasData.find(t => ordemTurma(t.nome) === 4)?.id ?? null,
     [turmasData]
   )
-  // turmasUnidasIds = todas turmas que estão no config de salas unidas
-  const turmasUnidasIds = useMemo(
-    () => new Set(Object.keys(salasUnidasConfig)),
-    [salasUnidasConfig]
-  )
 
   const tabelaView = useMemo(() => {
     const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
-    // Sempre inclui turmas unidas (mesmo sem entradas)
     const turmasNaEscala = turmasOrdenadas.filter(t =>
-      escalasPeriodo.some(e => e.turmaId === t.id) || turmasUnidasIds.has(t.id)
+      escalasPeriodo.some(e => e.turmaId === t.id)
     )
     const linhas = domingos.map(dom => {
       const escalasNoDia = escalasPeriodo.filter(e => e.data === dom.data)
@@ -400,32 +397,21 @@ export default function EscalaPage() {
         is2nd: is2ndSunday(dom.data),
         temEscala: escalasNoDia.length > 0,
         celulas: turmasNaEscala.map(t => {
-          if (turmasUnidasIds.has(t.id)) {
-            // Turma unida: mostra indicador mas ainda permite ter entrada
-            const e = escalasNoDia.find(es => es.turmaId === t.id)
-            return {
-              turmaId: t.id,
-              escala: e ?? null,
-              professor: e ? getProfNome(e.professorId) : null,
-              destacado: filtroProf !== 'todos' && e?.professorId === filtroProf,
-              isMerged: true,
-              unidaComNome: getTurmaNome(salasUnidasConfig[t.id] ?? ''),
-            }
-          }
           const e = escalasNoDia.find(es => es.turmaId === t.id)
+          const unidaId = unidaComIdEmData(t.id, dom.data)
           return {
             turmaId: t.id,
             escala: e ?? null,
             professor: e ? getProfNome(e.professorId) : null,
             destacado: filtroProf !== 'todos' && e?.professorId === filtroProf,
-            isMerged: false,
-            unidaComNome: '',
+            isMerged: !!unidaId,
+            unidaComNome: unidaId ? getTurmaNome(unidaId) : '',
           }
         }),
       }
     })
     return { turmas: turmasNaEscala, linhas }
-  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData, turmasUnidasIds, salasUnidasConfig])
+  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData, salasUnidasConfig])
 
   // ── Visão Cards (agrupado por data) ───────────────────────────────────────────
   const cardsView = useMemo(() => {
@@ -535,14 +521,15 @@ export default function EscalaPage() {
   // ── Sugestão de escala ────────────────────────────────────────────────────────
   function abrirSugestao() {
     const entradas = gerarEscalaSugerida(profTurmasMap, professoresData, turmasData, parseInt(filtroAno), parseInt(filtroTrim))
-    // Adicionar entradas vazias para turmas unidas (professorId = '' significa "unida")
-    const domingosTrim = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
+    // Adicionar entradas vazias para aulas marcadas como unidas per-aula
     const entradasComUnidas = [...entradas]
-    for (const tid of Object.keys(salasUnidasConfig)) {
-      for (const dom of domingosTrim) {
-        if (!entradasComUnidas.some(e => e.data === dom.data && e.turmaId === tid)) {
-          entradasComUnidas.push({ data: dom.data, turmaId: tid, professorId: '' })
-        }
+    for (const chave of Object.keys(salasUnidasConfig)) {
+      const sep = chave.indexOf('::')
+      if (sep < 0) continue
+      const tid  = chave.slice(0, sep)
+      const data = chave.slice(sep + 2)
+      if (!entradasComUnidas.some(e => e.data === data && e.turmaId === tid)) {
+        entradasComUnidas.push({ data, turmaId: tid, professorId: '' })
       }
     }
     setSugestaoEntradas(entradasComUnidas)
@@ -672,19 +659,6 @@ export default function EscalaPage() {
 
           {filtroTurma === 'todas' && (
             <div className="ml-auto flex items-center gap-2 self-end">
-              <button
-                onClick={() => setSalasUnidasDialogOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                title="Configurar salas unidas"
-              >
-                <Link2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Salas Unidas</span>
-                {Object.keys(salasUnidasConfig).length > 0 && (
-                  <span className="ml-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-bold">
-                    {Object.keys(salasUnidasConfig).length}
-                  </span>
-                )}
-              </button>
               <div className="flex gap-1 border rounded-lg p-0.5">
                 <button
                   onClick={() => setViewMode('tabela')}
@@ -854,21 +828,11 @@ export default function EscalaPage() {
                     </th>
                     {tabelaView.turmas.map(t => {
                       const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
-                      const isMergedCol = turmasUnidasIds.has(t.id)
-                      const unidaNome   = isMergedCol ? getTurmaNome(salasUnidasConfig[t.id] ?? '') : ''
                       return (
-                        <th key={t.id} className={`px-4 py-0 text-left font-semibold min-w-[150px] ${isMergedCol ? 'opacity-60' : ''}`}>
-                          {/* Tira colorida */}
+                        <th key={t.id} className="px-4 py-0 text-left font-semibold min-w-[150px]">
                           <div className={`h-1 -mx-4 mb-2 ${t.cor}`} />
                           <div className="flex items-center gap-1 mb-0.5 group/col">
-                            <div className="flex items-center gap-1.5 flex-1 flex-wrap min-w-0">
-                              <span className="text-xs font-bold">{t.nome}</span>
-                              {isMergedCol && (
-                                <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full">
-                                  <Link2 className="h-2.5 w-2.5" />Unida c/ {unidaNome}
-                                </span>
-                              )}
-                            </div>
+                            <span className="text-xs font-bold flex-1">{t.nome}</span>
                             <button
                               onClick={() => { setExcluirTurmaId(t.id); setExcluirTurmaDialogOpen(true) }}
                               className="opacity-0 group-hover/col:opacity-100 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all flex-shrink-0"
@@ -877,14 +841,9 @@ export default function EscalaPage() {
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                          {!isMergedCol && tema && (
+                          {tema && (
                             <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2 truncate max-w-[160px]" title={tema}>
                               {tema}
-                            </p>
-                          )}
-                          {isMergedCol && (
-                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2">
-                              Aulas ministradas juntas
                             </p>
                           )}
                         </th>
@@ -910,7 +869,10 @@ export default function EscalaPage() {
                         key={linha.data}
                         className={`border-b last:border-0 transition-colors ${rowBase} ${!linha.temEscala ? 'opacity-40' : ''}`}
                       >
-                        <td className={`sticky left-0 z-10 w-12 px-3 py-2.5 text-center border-r ${stickyBg}`}>
+                        <td
+                          className="sticky left-0 z-10 w-12 px-3 py-2.5 text-center border-r"
+                          style={{ background: 'hsl(var(--card))' }}
+                        >
                           <div className="flex flex-col items-center gap-0.5">
                             <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                               linha.isProxima ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
@@ -922,7 +884,10 @@ export default function EscalaPage() {
                             )}
                           </div>
                         </td>
-                        <td className={`sticky left-12 z-10 px-3 py-2.5 whitespace-nowrap border-r ${stickyBg}`}>
+                        <td
+                          className="sticky left-12 z-10 px-3 py-2.5 whitespace-nowrap border-r"
+                          style={{ background: 'hsl(var(--card))' }}
+                        >
                           <span className={`text-xs font-medium ${linha.isProxima ? 'text-primary' : ''}`}>
                             {fmtDataCurta(linha.data)}
                           </span>
@@ -1167,7 +1132,6 @@ export default function EscalaPage() {
                 </DialogTitle>
                 <DialogDescription className="mt-0.5">
                   {sugestaoEntradas.filter(e => e.professorId !== '').length} atribuições geradas · clique em qualquer célula para ajustar o professor.
-                  {Object.keys(salasUnidasConfig).length > 0 && ` · ${Object.keys(salasUnidasConfig).length} sala(s) unida(s).`}
                 </DialogDescription>
               </div>
             </div>
@@ -1195,15 +1159,10 @@ export default function EscalaPage() {
                       <th className="px-3 py-2.5 text-center text-xs font-semibold text-muted-foreground w-10 border-r">L#</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground w-14 border-r">Data</th>
                       {turmasGen.map(t => (
-                        <th key={t.id} className={`px-3 py-0 text-left font-semibold min-w-[140px] ${turmasUnidasIds.has(t.id) ? 'opacity-60' : ''}`}>
+                        <th key={t.id} className="px-3 py-0 text-left font-semibold min-w-[140px]">
                           <div className={`h-1 -mx-3 mb-1.5 ${t.cor}`} />
                           <div className="flex items-center gap-1 pb-1.5 flex-wrap">
                             <span className="text-[11px] font-bold">{t.nome}</span>
-                            {turmasUnidasIds.has(t.id) && (
-                              <span className="text-[9px] text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 px-1 rounded-full flex items-center gap-0.5">
-                                <Link2 className="h-2 w-2" />Unida c/ {getTurmaNome(salasUnidasConfig[t.id] ?? '')}
-                              </span>
-                            )}
                           </div>
                         </th>
                       ))}
@@ -1230,12 +1189,12 @@ export default function EscalaPage() {
                             {fmtDataCurta(dom.data)}
                           </td>
                           {turmasGen.map(t => {
-                            if (turmasUnidasIds.has(t.id)) {
-                              const unidaNome = getTurmaNome(salasUnidasConfig[t.id] ?? '')
+                            const unidaNomeSug = unidaComNomeEmData(t.id, dom.data)
+                            if (unidaNomeSug) {
                               return (
                                 <td key={t.id} className="px-3 py-2">
                                   <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 italic">
-                                    <Link2 className="h-3 w-3 flex-shrink-0" />{unidaNome || 'Unida'}
+                                    <Link2 className="h-3 w-3 flex-shrink-0" />{unidaNomeSug}
                                   </span>
                                 </td>
                               )
@@ -1378,28 +1337,28 @@ export default function EscalaPage() {
               })()}
             </div>
 
-            {/* Sala Unida */}
-            {formData.turmaId && (() => {
-              const config = salasUnidasConfig
-              const isUnidaAtual = formData.turmaId in config
-              const unidaComId   = config[formData.turmaId] ?? ''
+            {/* Sala Unida — configurado por aula específica */}
+            {formData.turmaId && dataComputada && (() => {
+              const chave        = unidaChave(formData.turmaId, dataComputada)
+              const isUnidaAtual = chave in salasUnidasConfig
+              const unidaComId   = salasUnidasConfig[chave] ?? ''
               const outrasTurmas = turmasOrdenadas.filter(t => t.id !== formData.turmaId)
               return (
                 <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                      <Link2 className="h-3.5 w-3.5" />Sala Unida
+                      <Link2 className="h-3.5 w-3.5" />Sala unida nesta aula
                     </p>
                     <button
                       type="button"
                       onClick={() => {
+                        const next = { ...salasUnidasConfig }
                         if (isUnidaAtual) {
-                          const next = { ...config }
-                          delete next[formData.turmaId]
-                          salvarSalasUnidas(next)
+                          delete next[chave]
                         } else {
-                          salvarSalasUnidas({ ...config, [formData.turmaId]: outrasTurmas[0]?.id ?? '' })
+                          next[chave] = outrasTurmas[0]?.id ?? ''
                         }
+                        salvarSalasUnidas(next)
                       }}
                       className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
                         isUnidaAtual ? 'bg-amber-500' : 'bg-muted-foreground/30'
@@ -1415,7 +1374,7 @@ export default function EscalaPage() {
                       <p className="text-[11px] text-muted-foreground">Unida com:</p>
                       <Select
                         value={unidaComId}
-                        onValueChange={v => salvarSalasUnidas({ ...config, [formData.turmaId]: v })}
+                        onValueChange={v => salvarSalasUnidas({ ...salasUnidasConfig, [chave]: v })}
                       >
                         <SelectTrigger className="h-8 text-xs">
                           <SelectValue placeholder="Selecione a turma" />
@@ -1507,57 +1466,6 @@ export default function EscalaPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog Configurar Salas Unidas ─────────────────────────────────── */}
-      <Dialog open={salasUnidasDialogOpen} onOpenChange={setSalasUnidasDialogOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link2 className="h-4 w-4" />
-              Configurar Salas Unidas
-            </DialogTitle>
-            <DialogDescription>
-              Turmas marcadas como unidas aparecem na tabela mas não recebem professor próprio — são ministradas junto com outra sala.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1 py-2 max-h-[400px] overflow-y-auto">
-            {turmasOrdenadas.map(t => {
-              const valorAtual = salasUnidasConfig[t.id] ?? ''
-              return (
-                <div key={t.id} className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted/30">
-                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${t.cor}`} />
-                  <span className="text-sm flex-1 font-medium">{t.nome}</span>
-                  <Select
-                    value={valorAtual}
-                    onValueChange={v => {
-                      const nova = { ...salasUnidasConfig }
-                      if (v === '') { delete nova[t.id] } else { nova[t.id] = v }
-                      salvarSalasUnidas(nova)
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-[170px] text-xs">
-                      <SelectValue placeholder="Não unida" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Não unida</SelectItem>
-                      {turmasOrdenadas.filter(ot => ot.id !== t.id).map(ot => (
-                        <SelectItem key={ot.id} value={ot.id}>
-                          <span className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full inline-block ${ot.cor}`} />
-                            {ot.nome}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )
-            })}
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setSalasUnidasDialogOpen(false)}>Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -8,19 +8,20 @@ import { getLicaoTema } from '@/lib/constants'
 // Body opcional: { data?: 'YYYY-MM-DD' } — se não informado, usa próxima data_aula
 
 export async function POST(req: NextRequest) {
-  // Verificar secret do cron (pula se chamado internamente com flag skip_auth)
+  // Ler body uma única vez
+  const reqBody = await req.json().catch(() => ({}))
+
+  // Verificar secret do cron (pula se chamado com flag skip_auth)
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
+  if (cronSecret && !reqBody.skip_auth) {
     const auth = req.headers.get('authorization') ?? ''
-    const body = await req.json().catch(() => ({}))
-    if (!body.skip_auth && auth !== `Bearer ${cronSecret}`) {
+    if (auth !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
   }
 
   try {
     const db = createServiceClient() as any
-    const reqBody = await req.json().catch(() => ({}))
 
     // 1. Carregar configuração
     const { data: config } = await db
