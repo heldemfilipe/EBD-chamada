@@ -167,15 +167,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    // getUser() autentica o JWT junto ao servidor — evita usar dados não verificados do storage
     async function init() {
-      const { data: { user: verifiedUser } } = await supabase.auth.getUser()
+      // 1. Leitura rápida do cache local (sem round-trip ao servidor)
+      const { data: { session } } = await supabase.auth.getSession()
       if (!mounted) return
-      setUser(verifiedUser ?? null)
-      if (verifiedUser) {
-        await loadPerfil(verifiedUser.id)
+
+      if (!session?.user) {
+        setLoading(false)
+        return
       }
-      setLoading(false)
+
+      // 2. Mostra conteúdo imediatamente usando dados do cache
+      setUser(session.user)
+      await loadPerfil(session.user.id)
+      if (mounted) setLoading(false)
+
+      // 3. Verificação real do JWT em background (segurança)
+      supabase.auth.getUser().then(({ data: { user: verified } }) => {
+        if (!mounted) return
+        if (!verified) {
+          logger.warn('Token inválido na verificação em background — fazendo logout', { module: 'auth' })
+          supabase.auth.signOut()
+          setUser(null)
+          resetState()
+        }
+      })
     }
 
     init()
@@ -183,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return
-        // INITIAL_SESSION já foi tratado pelo init() acima com getUser() verificado
+        // INITIAL_SESSION já foi tratado pelo init() acima
         if (event === 'INITIAL_SESSION') return
 
         logger.debug(`Auth state change: ${event}`, {
@@ -201,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           resetState()
         }
-        setLoading(false)
+        if (mounted) setLoading(false)
       }
     )
 

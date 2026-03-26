@@ -899,12 +899,18 @@ export default function EscalaPage() {
                       : linha.is2nd
                       ? 'bg-amber-50/40 dark:bg-amber-950/10'
                       : 'hover:bg-muted/20'
+                    // Sticky cells precisam de background sólido para não "vazar" conteúdo
+                    const stickyBg = linha.isProxima
+                      ? 'bg-primary/5'
+                      : linha.is2nd
+                      ? 'bg-amber-50/40 dark:bg-amber-950/10'
+                      : 'bg-card'
                     return (
                       <tr
                         key={linha.data}
                         className={`border-b last:border-0 transition-colors ${rowBase} ${!linha.temEscala ? 'opacity-40' : ''}`}
                       >
-                        <td className="sticky left-0 z-10 bg-inherit px-3 py-2.5 text-center border-r">
+                        <td className={`sticky left-0 z-10 w-12 px-3 py-2.5 text-center border-r ${stickyBg}`}>
                           <div className="flex flex-col items-center gap-0.5">
                             <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
                               linha.isProxima ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
@@ -916,7 +922,7 @@ export default function EscalaPage() {
                             )}
                           </div>
                         </td>
-                        <td className="sticky left-12 z-10 bg-inherit px-3 py-2.5 whitespace-nowrap border-r">
+                        <td className={`sticky left-12 z-10 px-3 py-2.5 whitespace-nowrap border-r ${stickyBg}`}>
                           <span className={`text-xs font-medium ${linha.isProxima ? 'text-primary' : ''}`}>
                             {fmtDataCurta(linha.data)}
                           </span>
@@ -1352,18 +1358,84 @@ export default function EscalaPage() {
                 </SelectContent>
               </Select>
               {formData.turmaId && (() => {
-                const nome = getTurmaNome(formData.turmaId)
+                const nome      = getTurmaNome(formData.turmaId)
                 const aulaNum   = parseInt(formData.aulaIdx)
                 const temaLicao = getLicaoTema(nome, formData.ano, parseInt(formData.trimestre), aulaNum)
                 const temaRev   = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre))
                 return (temaLicao || temaRev) ? (
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
-                    <BookOpen className="h-3.5 w-3.5 flex-shrink-0" />
-                    {temaLicao ? `Lição ${aulaNum}: ${temaLicao}` : temaRev}
-                  </p>
+                  <div className="rounded-md bg-muted/40 border px-3 py-2 mt-1.5 flex items-start gap-2">
+                    <BookOpen className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-muted-foreground" />
+                    <div className="min-w-0">
+                      {temaLicao && (
+                        <p className="text-xs font-medium leading-snug">{temaLicao}</p>
+                      )}
+                      {temaRev && (
+                        <p className="text-[11px] text-muted-foreground leading-snug">{temaRev}</p>
+                      )}
+                    </div>
+                  </div>
                 ) : null
               })()}
             </div>
+
+            {/* Sala Unida */}
+            {formData.turmaId && (() => {
+              const config = salasUnidasConfig
+              const isUnidaAtual = formData.turmaId in config
+              const unidaComId   = config[formData.turmaId] ?? ''
+              const outrasTurmas = turmasOrdenadas.filter(t => t.id !== formData.turmaId)
+              return (
+                <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                      <Link2 className="h-3.5 w-3.5" />Sala Unida
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isUnidaAtual) {
+                          const next = { ...config }
+                          delete next[formData.turmaId]
+                          salvarSalasUnidas(next)
+                        } else {
+                          salvarSalasUnidas({ ...config, [formData.turmaId]: outrasTurmas[0]?.id ?? '' })
+                        }
+                      }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                        isUnidaAtual ? 'bg-amber-500' : 'bg-muted-foreground/30'
+                      }`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow ${
+                        isUnidaAtual ? 'translate-x-4' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </div>
+                  {isUnidaAtual && (
+                    <div className="space-y-1">
+                      <p className="text-[11px] text-muted-foreground">Unida com:</p>
+                      <Select
+                        value={unidaComId}
+                        onValueChange={v => salvarSalasUnidas({ ...config, [formData.turmaId]: v })}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Selecione a turma" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {outrasTurmas.map(t => (
+                            <SelectItem key={t.id} value={t.id}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${t.cor}`} />
+                                {t.nome}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Professor */}
             <div className="space-y-1.5">
