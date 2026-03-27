@@ -167,31 +167,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    async function init() {
-      // 1. Leitura rápida do cache local (sem round-trip ao servidor)
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!mounted) return
-
-      if (!session?.user) {
+    // Safety timeout: se em 8s o loading ainda não terminou, libera de qualquer forma
+    const safetyTimer = setTimeout(() => {
+      if (mounted) {
+        logger.warn('Timeout no carregamento do perfil — liberando tela', { module: 'auth' })
         setLoading(false)
-        return
       }
+    }, 8000)
 
-      // 2. Mostra conteúdo imediatamente usando dados do cache
-      setUser(session.user)
-      await loadPerfil(session.user.id)
-      if (mounted) setLoading(false)
-
-      // 3. Verificação real do JWT em background (segurança)
-      supabase.auth.getUser().then(({ data: { user: verified } }) => {
+    async function init() {
+      try {
+        // 1. Leitura rápida do cache local (sem round-trip ao servidor)
+        const { data: { session } } = await supabase.auth.getSession()
         if (!mounted) return
-        if (!verified) {
-          logger.warn('Token inválido na verificação em background — fazendo logout', { module: 'auth' })
-          supabase.auth.signOut()
-          setUser(null)
-          resetState()
+
+        if (!session?.user) {
+          return
         }
-      })
+
+        // 2. Mostra conteúdo imediatamente usando dados do cache
+        setUser(session.user)
+        try {
+          await loadPerfil(session.user.id)
+        } catch (e: any) {
+          logger.error('Erro ao carregar perfil — liberando tela mesmo assim', { module: 'auth', error: e?.message })
+        }
+
+        // 3. Verificação real do JWT em background (segurança)
+        supabase.auth.getUser().then(({ data: { user: verified } }) => {
+          if (!mounted) return
+          if (!verified) {
+            logger.warn('Token inválido na verificação em background — fazendo logout', { module: 'auth' })
+            supabase.auth.signOut()
+            setUser(null)
+            resetState()
+          }
+        })
+      } finally {
+        clearTimeout(safetyTimer)
+        if (mounted) setLoading(false)
+      }
     }
 
     init()
@@ -209,20 +224,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(session?.user ?? null)
 
-        if (session?.user) {
-          await loadPerfil(session.user.id)
-        } else {
-          if (event === 'SIGNED_OUT') {
-            logger.info('Sessão encerrada', { module: 'auth' })
+        try {
+          if (session?.user) {
+            await loadPerfil(session.user.id)
+          } else {
+            if (event === 'SIGNED_OUT') {
+              logger.info('Sessão encerrada', { module: 'auth' })
+            }
+            resetState()
           }
-          resetState()
+        } catch (e: any) {
+          logger.error('Erro no onAuthStateChange ao carregar perfil', { module: 'auth', error: e?.message })
+        } finally {
+          if (mounted) setLoading(false)
         }
-        if (mounted) setLoading(false)
       }
     )
 
     return () => {
       mounted = false
+      clearTimeout(safetyTimer)
       subscription.unsubscribe()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
