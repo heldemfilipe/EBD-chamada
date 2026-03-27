@@ -27,7 +27,7 @@ interface Escala {
   id: string
   data: string
   turmaId: string
-  professorId: string
+  professorId: string | null
   trimestre: number
   observacao: string
 }
@@ -327,7 +327,7 @@ export default function EscalaPage() {
   }, [])
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
-  const getProfNome  = (id: string) => professoresData.find(p => p.id === id)?.nome ?? '—'
+  const getProfNome  = (id: string | null) => id ? (professoresData.find(p => p.id === id)?.nome ?? '—') : null
   const getTurmaNome = (id: string) => turmasData.find(t => t.id === id)?.nome ?? '—'
   const getTurmaCor  = (id: string) => turmasData.find(t => t.id === id)?.cor ?? 'bg-gray-500'
 
@@ -443,7 +443,7 @@ export default function EscalaPage() {
         trimestre:   info ? String(info.trimestre) : String(escala.trimestre),
         aulaIdx:     info ? String(info.aula)      : '1',
         turmaId:     escala.turmaId,
-        professorId: escala.professorId,
+        professorId: escala.professorId ?? '',
         observacao:  escala.observacao,
       })
     } else {
@@ -453,8 +453,8 @@ export default function EscalaPage() {
   }
 
   const salvarEscala = useCallback(async () => {
-    if (!dataComputada || !formData.turmaId || !formData.professorId) {
-      toast('Preencha todos os campos obrigatórios.', 'error'); return
+    if (!dataComputada || !formData.turmaId) {
+      toast('Selecione a turma e a aula.', 'error'); return
     }
     if (isSaving) return
     setIsSaving(true)
@@ -465,7 +465,7 @@ export default function EscalaPage() {
         const { error } = await db.from('escalas').update({
           data: dataComputada,
           turma_id: formData.turmaId,
-          professor_id: formData.professorId,
+          professor_id: formData.professorId || null,
           observacoes: formData.observacao,
         }).eq('id', selectedEscala.id)
         if (error) { toast('Erro ao atualizar escala.', 'error'); return }
@@ -480,7 +480,7 @@ export default function EscalaPage() {
         const { data, error } = await db.from('escalas').insert({
           data: dataComputada,
           turma_id: formData.turmaId,
-          professor_id: formData.professorId,
+          professor_id: formData.professorId || null,
           observacoes: formData.observacao,
         }).select('id').single()
         if (error || !data) { toast('Erro ao cadastrar escala.', 'error'); return }
@@ -757,7 +757,7 @@ export default function EscalaPage() {
                     : linha.destacado
                     ? 'bg-primary/5'
                     : 'hover:bg-muted/20'
-                } ${!linha.professor ? 'opacity-50' : ''}`}
+                }`}
               >
                 {/* Número da aula */}
                 <div className={`flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
@@ -807,7 +807,23 @@ export default function EscalaPage() {
                       </div>
                     </>
                   ) : (
-                    <span className="text-[11px] italic">sem professor</span>
+                    <button
+                      onClick={() => {
+                        const info = getAulaInfo(linha.data)
+                        setEditMode(false); setSelectedEscala(null)
+                        setFormData({
+                          ano: info ? String(info.ano) : filtroAno,
+                          trimestre: info ? String(info.trimestre) : filtroTrim,
+                          aulaIdx: info ? String(info.aula) : '1',
+                          turmaId: turmaView?.turma.id ?? '', professorId: '', observacao: '',
+                        })
+                        setDialogOpen(true)
+                      }}
+                      className="flex items-center gap-1 text-[11px] italic text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      <Plus className="h-3 w-3" />
+                      adicionar professor
+                    </button>
                   )}
                 </div>
               </div>
@@ -873,7 +889,7 @@ export default function EscalaPage() {
                     return (
                       <tr
                         key={linha.data}
-                        className={`border-b last:border-0 transition-colors ${rowBase} ${!linha.temEscala ? 'opacity-40' : ''}`}
+                        className={`border-b last:border-0 transition-colors ${rowBase}`}
                       >
                         <td
                           className="sticky left-0 z-10 w-12 px-3 py-2.5 text-center border-r"
@@ -899,9 +915,7 @@ export default function EscalaPage() {
                           </span>
                         </td>
                         {linha.celulas.map(c => {
-                          const temaLicao = c.professor
-                            ? getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
-                            : null
+                          const temaLicao = getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
                           return (
                           <td key={c.turmaId} className="px-4 py-2">
                             {c.isMerged ? (
@@ -988,7 +1002,24 @@ export default function EscalaPage() {
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground/30">—</span>
+                              <button
+                                onClick={() => {
+                                  const info = getAulaInfo(linha.data)
+                                  setEditMode(false); setSelectedEscala(null)
+                                  setFormData({
+                                    ano: info ? String(info.ano) : filtroAno,
+                                    trimestre: info ? String(info.trimestre) : filtroTrim,
+                                    aulaIdx: info ? String(info.aula) : '1',
+                                    turmaId: c.turmaId, professorId: '', observacao: '',
+                                  })
+                                  setDialogOpen(true)
+                                }}
+                                className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/30 hover:text-primary hover:bg-primary/5 rounded px-2 py-1 transition-colors group/empty"
+                                title="Adicionar escala"
+                              >
+                                <span className="group-hover/empty:hidden">—</span>
+                                <Plus className="h-3.5 w-3.5 hidden group-hover/empty:block" />
+                              </button>
                             )}
                           </td>
                           )
