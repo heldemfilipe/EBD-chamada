@@ -150,7 +150,7 @@ export default function ChamadaTurmaPage() {
             .eq('turma_id', turmaId).eq('data', dataSelecionada).maybeSingle(),
           db.from('historico_visitantes')
             .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
-            .eq('turma_id', turmaId).order('data', { ascending: false }),
+            .eq('turma_id', turmaId).order('data', { ascending: false }).limit(200),
         ])
 
         if (cancelado) return
@@ -390,35 +390,24 @@ export default function ChamadaTurmaPage() {
     try {
       const db = supabase as any
 
-      // 1. Upsert da chamada (sem depender do select retornar a linha — RLS pode bloquear)
-      const { error: errChamada } = await db
+      // 1. Upsert da chamada + obter ID em um único roundtrip
+      const { data: chamadaRow, error: errChamada } = await db
         .from('chamadas')
         .upsert(
-          { turma_id: turmaId, data: dataSelecionada, oferta: ofertaCents / 100, anotacoes },
+          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
           { onConflict: 'turma_id,data' }
         )
-
-      if (errChamada) {
-        toast('Erro ao salvar chamada: ' + errChamada.message, 'error')
-        return
-      }
-
-      // Busca o ID da chamada recém criada/atualizada
-      const { data: chamadaRow, error: errBusca } = await db
-        .from('chamadas')
         .select('id')
-        .eq('turma_id', turmaId)
-        .eq('data', dataSelecionada)
         .single()
 
-      if (errBusca || !chamadaRow) {
-        toast('Erro ao obter ID da chamada após salvar.', 'error')
+      if (errChamada || !chamadaRow) {
+        toast('Erro ao salvar chamada: ' + (errChamada?.message ?? 'sem retorno'), 'error')
         return
       }
 
       const chamadaId: string = chamadaRow.id
 
-      // 2. Upsert de presenças dos alunos (pendente → ausente)
+      // 2. Upsert de presenças (batch único) + limpar histórico visitantes em paralelo
       const presencasPayload = alunos.map(a => ({
         chamada_id: chamadaId,
         aluno_id: a.aluno_id,
@@ -428,56 +417,76 @@ export default function ChamadaTurmaPage() {
         justificativa: a.justificativa || null,
       }))
 
+      const promises: Promise<any>[] = []
+
       if (presencasPayload.length > 0) {
-        const { error: errPresencas } = await db
-          .from('presencas')
-          .upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
-        if (errPresencas) {
-          toast('Erro ao salvar presenças: ' + errPresencas.message, 'error')
-          return
-        }
+        promises.push(
+          db.from('presencas')
+            .upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
+            .then(({ error }: any) => { if (error) throw new Error('Erro ao salvar presenças: ' + error.message) })
+        )
       }
 
-      // 3. Salvar visitantes
-      // Apaga todos os registros do dia para esta turma antes de reinserir,
-      // garantindo que visitantes removidos da lista sejam de fato excluídos.
-      await db.from('historico_visitantes')
-        .delete()
-        .eq('turma_id', turmaId)
-        .eq('data', dataSelecionada)
+      // Limpar registros do dia (paralelo com presenças)
+      promises.push(
+        db.from('historico_visitantes')
+          .delete()
+          .eq('turma_id', turmaId)
+          .eq('data', dataSelecionada)
+      )
 
-      const visitantesParaSalvar = visitantes
+      await Promise.all(promises)
 
-      await Promise.all(visitantesParaSalvar.map(async (v) => {
-        let visitanteId: string | null = v.isNovo ? null : v.id
+      // 3. Salvar visitantes em batch
+      if (visitantes.length > 0) {
+        const novos = visitantes.filter(v => v.isNovo)
+        const existentes = visitantes.filter(v => !v.isNovo)
 
-        if (v.isNovo) {
-          const { data: visitanteSalvo, error: errV } = await db
+        // Inserir novos visitantes em batch único
+        const novosIds = new Map<string, string>()
+        if (novos.length > 0) {
+          const { data: inseridos, error: errNovos } = await db
             .from('visitantes')
-            .insert({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
+            .insert(novos.map(v => ({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })))
             .select('id')
-            .single()
-          if (errV || !visitanteSalvo) { console.error('Erro ao salvar visitante:', errV); return }
-          visitanteId = visitanteSalvo.id
-        } else {
-          await db.from('visitantes')
-            .update({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
-            .eq('id', v.id)
+          if (errNovos) {
+            toast('Erro ao salvar visitantes novos: ' + errNovos.message, 'error')
+          } else if (inseridos) {
+            novos.forEach((v, i) => { if (inseridos[i]) novosIds.set(v.id, inseridos[i].id) })
+          }
         }
 
-        if (!visitanteId) return
+        // Atualizar existentes em paralelo
+        if (existentes.length > 0) {
+          await Promise.all(existentes.map(v =>
+            db.from('visitantes')
+              .update({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
+              .eq('id', v.id)
+          ))
+        }
 
-        const { error: errHist } = await db.from('historico_visitantes').insert({
-          visitante_id: visitanteId,
-          turma_id: turmaId,
-          chamada_id: chamadaId,
-          data: dataSelecionada,
-          presente: v.presenteHoje === 'presente', // 'pendente' → false (ausente)
-          trouxe_biblia: v.trouxe_biblia,
-          trouxe_revista: v.trouxe_revista,
-        })
-        if (errHist) console.error('Erro ao salvar histórico visitante:', errHist)
-      }))
+        // Inserir todos os históricos em batch único
+        const historicoPayload = visitantes
+          .map(v => {
+            const realId = v.isNovo ? novosIds.get(v.id) : v.id
+            if (!realId) return null
+            return {
+              visitante_id: realId,
+              turma_id: turmaId,
+              chamada_id: chamadaId,
+              data: dataSelecionada,
+              presente: v.presenteHoje === 'presente',
+              trouxe_biblia: v.trouxe_biblia,
+              trouxe_revista: v.trouxe_revista,
+            }
+          })
+          .filter(Boolean)
+
+        if (historicoPayload.length > 0) {
+          const { error: errHist } = await db.from('historico_visitantes').insert(historicoPayload)
+          if (errHist) console.error('Erro ao salvar histórico visitantes:', errHist)
+        }
+      }
 
       toast('Chamada salva com sucesso!')
       router.push('/chamada')

@@ -95,15 +95,24 @@ export default function ChamadaPage() {
     setTempo(novo)
   }
 
-  // Carregar turmas
+  // Carregar turmas (1 query turmas + 1 query contagem — sem N+1)
   useEffect(() => {
     async function load() {
-      const { data } = await db.from('turmas').select('id, nome, faixa_etaria, sala, cor').eq('ativa', true).order('nome')
-      if (!data) return
+      const [{ data: turmasRaw }, { data: alunosRaw }] = await Promise.all([
+        db.from('turmas').select('id, nome, faixa_etaria, sala, cor').eq('ativa', true).order('nome'),
+        db.from('alunos').select('turma_id').eq('ativo', true),
+      ])
+      if (!turmasRaw) return
 
-      const comContagem: Turma[] = await Promise.all(data.map(async (t: any) => {
-        const { count } = await db.from('alunos').select('id', { count: 'exact', head: true }).eq('turma_id', t.id).eq('ativo', true)
-        return { id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', totalAlunos: count ?? 0, sala: t.sala ?? '', cor: t.cor ?? 'bg-blue-500' }
+      // Contagem de alunos por turma em JS (evita N queries individuais)
+      const contagemPorTurma: Record<string, number> = {}
+      for (const a of alunosRaw ?? []) {
+        contagemPorTurma[a.turma_id] = (contagemPorTurma[a.turma_id] ?? 0) + 1
+      }
+
+      const comContagem: Turma[] = turmasRaw.map((t: any) => ({
+        id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '',
+        totalAlunos: contagemPorTurma[t.id] ?? 0, sala: t.sala ?? '', cor: t.cor ?? 'bg-blue-500',
       }))
 
       const sorted = [...comContagem].sort((a, b) => getSalaNum(a.sala) - getSalaNum(b.sala))
@@ -115,12 +124,16 @@ export default function ChamadaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, turmasPermitidas])
 
-  // Carregar resumo do dia
+  // Carregar resumo do dia (chamadas + visitantes em paralelo)
   useEffect(() => {
     async function load() {
       const dataISO = converterParaISO(dataSelecionada)
       const totalMatriculados = turmasData.reduce((a, t) => a + t.totalAlunos, 0)
-      const { data: chamadas } = await db.from('chamadas').select('id, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista)').eq('data', dataISO)
+
+      const [{ data: chamadas }, { data: visitantesData }] = await Promise.all([
+        db.from('chamadas').select('id, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista)').eq('data', dataISO),
+        db.from('historico_visitantes').select('turma_id, trouxe_biblia, trouxe_revista').eq('data', dataISO).eq('presente', true),
+      ])
 
       const resumos: Record<string, ResumoTurma> = {}
       turmasData.forEach(t => { resumos[t.id] = { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 } })
@@ -134,15 +147,14 @@ export default function ChamadaPage() {
             oferta: Number(c.oferta) || 0, visitantes: 0,
           }
         }
-        const { data: visitantes } = await db.from('historico_visitantes').select('turma_id, trouxe_biblia, trouxe_revista').eq('data', dataISO).eq('presente', true)
-        visitantes?.forEach((v: any) => {
-          if (resumos[v.turma_id]) {
-            resumos[v.turma_id].visitantes++
-            if (v.trouxe_biblia)  resumos[v.turma_id].biblias++
-            if (v.trouxe_revista) resumos[v.turma_id].revistas++
-          }
-        })
       }
+      visitantesData?.forEach((v: any) => {
+        if (resumos[v.turma_id]) {
+          resumos[v.turma_id].visitantes++
+          if (v.trouxe_biblia)  resumos[v.turma_id].biblias++
+          if (v.trouxe_revista) resumos[v.turma_id].revistas++
+        }
+      })
 
       setResumosPorTurma(resumos)
       const vals = Object.values(resumos)
