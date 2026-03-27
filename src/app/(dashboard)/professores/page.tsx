@@ -122,8 +122,10 @@ export default function ProfessoresPage() {
 
   // Salva cargo no professor e sincroniza com o aluno correspondente (se existir)
   async function salvarCargoProf(profId: string, cargo: string) {
-    await db.from('professores').update({ cargo: cargo || null }).eq('id', profId)
-    await db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`)
+    await Promise.all([
+      db.from('professores').update({ cargo: cargo || null }).eq('id', profId),
+      db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`),
+    ])
   }
 
   async function handleSave() {
@@ -135,10 +137,14 @@ export default function ProfessoresPage() {
       if (editMode && selected) {
         const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
         if (error) { toast('Erro ao atualizar professor.', 'error'); return }
-        await salvarCargoProf(selected.id, form.cargo)
-        await db.from('professor_turmas').delete().eq('professor_id', selected.id)
-        if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
-        await sincronizarAluno(selected.id, form.nome, form.turmaAluno)
+        await Promise.all([
+          salvarCargoProf(selected.id, form.cargo),
+          (async () => {
+            await db.from('professor_turmas').delete().eq('professor_id', selected.id)
+            if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
+          })(),
+          sincronizarAluno(selected.id, form.nome, form.turmaAluno),
+        ])
         setProfessores(professores.map(p => p.id === selected.id ? { ...p, ...payloadBase, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
         toast('Professor atualizado com sucesso!')
       } else {

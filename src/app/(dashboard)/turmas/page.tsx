@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -155,13 +155,14 @@ export default function TurmasPage() {
   }, [])
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
-  const getProfessoresDaTurma = (turmaId: string): string[] =>
+  const getProfessoresDaTurma = useCallback((turmaId: string): string[] =>
     professoresMock
       .filter(p => p.professor_turmas.some(pt => pt.turma_id === turmaId))
-      .map(p => p.nome)
+      .map(p => p.nome),
+  [professoresMock])
 
-  const totalAlunos = turmasData.reduce((acc, t) => acc + t.totalAlunos, 0)
-  const mediaAlunos = turmasData.length > 0 ? Math.round(totalAlunos / turmasData.length) : 0
+  const totalAlunos = useMemo(() => turmasData.reduce((acc, t) => acc + t.totalAlunos, 0), [turmasData])
+  const mediaAlunos = useMemo(() => turmasData.length > 0 ? Math.round(totalAlunos / turmasData.length) : 0, [turmasData, totalAlunos])
 
   // ─── Handlers: CRUD turma ─────────────────────────────────────────────────
   function handleOpenDialog(turma?: Turma) {

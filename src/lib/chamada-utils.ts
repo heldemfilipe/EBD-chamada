@@ -177,6 +177,25 @@ export function calcularPresencasSeguidas(historico: { data: string; presente: b
 }
 
 /**
+ * Retorna as datas início e fim (ISO) do trimestre que contém a data informada.
+ * Ex: '2026-03-29' → { inicio: '2026-01-01', fim: '2026-03-31' }
+ */
+export function getTrimestreRange(dataISO: string): { inicio: string; fim: string } {
+  const d = parseISO(dataISO)
+  const ano = d.getFullYear()
+  const mes = d.getMonth() // 0-11
+  const trimIdx = Math.floor(mes / 3) // 0,1,2,3
+  const mesInicio = trimIdx * 3       // 0,3,6,9
+  const mesFim = mesInicio + 2        // 2,5,8,11
+  const ultimoDia = new Date(ano, mesFim + 1, 0).getDate() // último dia do mês
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    inicio: `${ano}-${pad(mesInicio + 1)}-01`,
+    fim:    `${ano}-${pad(mesFim + 1)}-${pad(ultimoDia)}`,
+  }
+}
+
+/**
  * Retorna o ícone/emoji apropriado para o status de presença
  */
 export function getIconePresenca(presente: boolean | null): string {

@@ -159,28 +159,30 @@ export default function AlunosPage() {
     return m
   }, [turmas])
 
-  const filtered = alunos
-    .filter(a => {
-      const matchSearch = a.nome.toLowerCase().includes(search.toLowerCase()) || a.email.toLowerCase().includes(search.toLowerCase())
-      const matchTurma  = turmaFilter === 'all' || a.turmaId === turmaFilter
-      return matchSearch && matchTurma
-    })
-    .map(a => {
-      const pm = presencaFiltrada[a.id]
-      return { ...a, presenca: pm && pm.total > 0 ? Math.round((pm.presentes / pm.total) * 100) : 0 }
-    })
-    .sort((a, b) => {
-      let cmp = 0
-      if (sortKey === 'nome')     cmp = a.nome.localeCompare(b.nome, 'pt-BR')
-      if (sortKey === 'idade')    cmp = a.idade - b.idade
-      if (sortKey === 'presenca') cmp = a.presenca - b.presenca
-      if (sortKey === 'turma') {
-        const ta = turmaMap[a.turmaId ?? '']?.nome ?? ''
-        const tb = turmaMap[b.turmaId ?? '']?.nome ?? ''
-        cmp = ta.localeCompare(tb, 'pt-BR')
-      }
-      return sortDir === 'asc' ? cmp : -cmp
-    })
+  const filtered = useMemo(() => {
+    return alunos
+      .filter(a => {
+        const matchSearch = a.nome.toLowerCase().includes(search.toLowerCase()) || a.email.toLowerCase().includes(search.toLowerCase())
+        const matchTurma  = turmaFilter === 'all' || a.turmaId === turmaFilter
+        return matchSearch && matchTurma
+      })
+      .map(a => {
+        const pm = presencaFiltrada[a.id]
+        return { ...a, presenca: pm && pm.total > 0 ? Math.round((pm.presentes / pm.total) * 100) : 0 }
+      })
+      .sort((a, b) => {
+        let cmp = 0
+        if (sortKey === 'nome')     cmp = a.nome.localeCompare(b.nome, 'pt-BR')
+        if (sortKey === 'idade')    cmp = a.idade - b.idade
+        if (sortKey === 'presenca') cmp = a.presenca - b.presenca
+        if (sortKey === 'turma') {
+          const ta = turmaMap[a.turmaId ?? '']?.nome ?? ''
+          const tb = turmaMap[b.turmaId ?? '']?.nome ?? ''
+          cmp = ta.localeCompare(tb, 'pt-BR')
+        }
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+  }, [alunos, search, turmaFilter, presencaFiltrada, sortKey, sortDir, turmaMap])
 
   const faixaPorTurma: Record<string, string> = {}
   for (const t of turmas) faixaPorTurma[t.id] = t.faixaEtaria

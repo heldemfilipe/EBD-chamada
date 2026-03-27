@@ -29,7 +29,7 @@ import {
   Trash2,
   GraduationCap,
 } from 'lucide-react'
-import { formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
+import { formatarDomingo, converterParaISO, getTrimestreRange } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/lib/toast'
@@ -134,6 +134,9 @@ export default function ChamadaTurmaPage() {
         const db = supabase as any
 
         // Dispara as 5 queries independentes em paralelo
+        // Filtra visitantes apenas do trimestre atual (reset trimestral)
+        const trimRange = getTrimestreRange(dataSelecionada)
+
         const [
           { data: turmaData },
           { data: alunosData },
@@ -150,7 +153,10 @@ export default function ChamadaTurmaPage() {
             .eq('turma_id', turmaId).eq('data', dataSelecionada).maybeSingle(),
           db.from('historico_visitantes')
             .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
-            .eq('turma_id', turmaId).order('data', { ascending: false }).limit(200),
+            .eq('turma_id', turmaId)
+            .gte('data', trimRange.inicio)
+            .lte('data', trimRange.fim)
+            .order('data', { ascending: false }),
         ])
 
         if (cancelado) return

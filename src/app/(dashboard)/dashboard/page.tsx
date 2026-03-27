@@ -85,14 +85,14 @@ export default function DashboardPage() {
   // Stats gerais
   useEffect(() => {
     async function load() {
-      const [{ count: totalAlunos }, { count: totalProfessores }, { count: totalTurmas }] = await Promise.all([
+      const anoAtual = new Date().getFullYear()
+      const [{ count: totalAlunos }, { count: totalProfessores }, { count: totalTurmas }, { data: chamadas }] = await Promise.all([
         db.from('alunos').select('id', { count: 'exact', head: true }).eq('ativo', true),
         db.from('professores').select('id', { count: 'exact', head: true }).eq('ativo', true),
         db.from('turmas').select('id', { count: 'exact', head: true }).eq('ativa', true),
+        db.from('chamadas').select('id').eq('ano', anoAtual),
       ])
 
-      const anoAtual = new Date().getFullYear()
-      const { data: chamadas } = await db.from('chamadas').select('id').eq('ano', anoAtual)
       let presencaMedia = 0
       if (chamadas?.length) {
         const { data: ps } = await db.from('presencas').select('presente').in('chamada_id', chamadas.map((c: any) => c.id))
@@ -179,9 +179,11 @@ export default function DashboardPage() {
   // Top alunos (com cargo e isProfessor)
   useEffect(() => {
     async function load() {
-      const { data: chamadasRaw } = await db.from('chamadas').select('id, turma_id, data').eq('ano', ano)
+      const [{ data: chamadasRaw }, { data: alunos }] = await Promise.all([
+        db.from('chamadas').select('id, turma_id, data').eq('ano', ano),
+        db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true),
+      ])
       const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
-      const { data: alunos } = await db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true)
       if (!chamadas?.length || !alunos?.length) { setTopPorSala({}); setTop10([]); return }
 
       const { data: presencas } = await db.from('presencas').select('aluno_id, presente').in('chamada_id', chamadas.map((c: any) => c.id))
