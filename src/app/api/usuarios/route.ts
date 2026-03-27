@@ -102,19 +102,19 @@ export async function GET(req: NextRequest) {
 
   const ids = (perfis ?? []).map((p: any) => p.id)
   const [{ data: modulos, error: modErr }, { data: turmas, error: turErr }] = await Promise.all([
-    db.from('permissoes_modulos').select('perfil_id, modulo').in('perfil_id', ids),
+    db.from('permissoes_modulos').select('perfil_id, modulo, nivel').in('perfil_id', ids),
     db.from('permissoes_turmas').select('perfil_id, turma_id, turmas(nome)').in('perfil_id', ids),
   ])
 
   if (modErr) logger.warn('Falha ao buscar permissões de módulos', { module: MOD, error: modErr })
   if (turErr) logger.warn('Falha ao buscar permissões de turmas',  { module: MOD, error: turErr })
 
-  const modsPorId: Record<string, string[]> = {}
+  const modsPorId: Record<string, { modulo: string; nivel: string }[]> = {}
   const turmasPorId: Record<string, { id: string; nome: string }[]> = {}
 
   for (const m of modulos ?? []) {
     if (!modsPorId[m.perfil_id]) modsPorId[m.perfil_id] = []
-    modsPorId[m.perfil_id].push(m.modulo)
+    modsPorId[m.perfil_id].push({ modulo: m.modulo, nivel: m.nivel ?? 'editar' })
   }
   for (const t of turmas ?? []) {
     if (!turmasPorId[t.perfil_id]) turmasPorId[t.perfil_id] = []
@@ -212,7 +212,11 @@ export async function POST(req: NextRequest) {
 
   // 3. Se colaborador, salvar permissões
   if (role !== 'admin') {
-    const modInserts   = (modulos ?? []).map((m: string) => ({ perfil_id: newUserId, modulo: m }))
+    const modInserts   = (modulos ?? []).map((m: any) => ({
+      perfil_id: newUserId,
+      modulo: typeof m === 'string' ? m : m.modulo,
+      nivel: typeof m === 'string' ? 'editar' : (m.nivel ?? 'editar'),
+    }))
     const turmaInserts = (turmas  ?? []).map((t: string) => ({ perfil_id: newUserId, turma_id: t }))
 
     if (modInserts.length > 0) {
@@ -291,7 +295,11 @@ export async function PUT(req: NextRequest) {
   await db.from('permissoes_turmas').delete().eq('perfil_id', id)
 
   if (role !== 'admin') {
-    const modInserts   = (modulos ?? []).map((m: string) => ({ perfil_id: id, modulo: m }))
+    const modInserts   = (modulos ?? []).map((m: any) => ({
+      perfil_id: id,
+      modulo: typeof m === 'string' ? m : m.modulo,
+      nivel: typeof m === 'string' ? 'editar' : (m.nivel ?? 'editar'),
+    }))
     const turmaInserts = (turmas  ?? []).map((t: string) => ({ perfil_id: id, turma_id: t }))
 
     if (modInserts.length > 0)   await db.from('permissoes_modulos').insert(modInserts)

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
@@ -13,14 +13,18 @@ export interface Perfil {
   ativo: boolean
 }
 
+export type NivelPermissao = 'ver' | 'editar'
+
 interface AuthContextType {
   user: User | null
   perfil: Perfil | null
   isAdmin: boolean
   modulosPermitidos: string[]   // lista de módulos acessíveis; admin = todos
+  permissoesModulos: Record<string, NivelPermissao>  // modulo -> nivel
   turmasPermitidas: string[]    // lista de turma_ids; admin = ['*']
   loading: boolean
   setupPendente: boolean        // true se setup_auth.sql ainda não foi executado
+  podeEditar: (modulo: string) => boolean
   signOut: () => Promise<void>
 }
 
@@ -35,9 +39,11 @@ const AuthContext = createContext<AuthContextType>({
   perfil: null,
   isAdmin: false,
   modulosPermitidos: [],
+  permissoesModulos: {},
   turmasPermitidas: [],
   loading: true,
   setupPendente: false,
+  podeEditar: () => false,
   signOut: async () => {},
 })
 
@@ -46,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [modulosPermitidos, setModulosPermitidos] = useState<string[]>([])
+  const [permissoesModulos, setPermissoesModulos] = useState<Record<string, NivelPermissao>>({})
   const [turmasPermitidas, setTurmasPermitidas] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [setupPendente, setSetupPendente] = useState(false)
@@ -125,6 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (perfilData.role === 'admin') {
       setModulosPermitidos(TODOS_MODULOS)
+      const adminPerms: Record<string, NivelPermissao> = {}
+      TODOS_MODULOS.forEach(m => { adminPerms[m] = 'editar' })
+      setPermissoesModulos(adminPerms)
       setTurmasPermitidas(['*'])
       logger.info('Acesso admin concedido — todos os módulos e turmas', {
         module: 'auth',
@@ -134,24 +144,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
     } else {
       const [{ data: modulos, error: modErr }, { data: turmas, error: turErr }] = await Promise.all([
-        db.from('permissoes_modulos').select('modulo').eq('perfil_id', userId),
+        db.from('permissoes_modulos').select('modulo, nivel').eq('perfil_id', userId),
         db.from('permissoes_turmas').select('turma_id').eq('perfil_id', userId),
       ])
 
       if (modErr) logger.warn('Erro ao carregar permissões de módulos', { module: 'auth', userId, error: modErr })
       if (turErr) logger.warn('Erro ao carregar permissões de turmas',  { module: 'auth', userId, error: turErr })
 
-      const listaModulos = (modulos ?? []).map((m: any) => m.modulo)
-      const listaTurmas  = (turmas  ?? []).map((t: any) => t.turma_id)
+      const permsMap: Record<string, NivelPermissao> = {}
+      for (const m of modulos ?? []) {
+        permsMap[m.modulo] = (m.nivel ?? 'editar') as NivelPermissao
+      }
+      setPermissoesModulos(permsMap)
+      setModulosPermitidos(Object.keys(permsMap))
 
-      setModulosPermitidos(listaModulos)
+      const listaTurmas = (turmas ?? []).map((t: any) => t.turma_id)
       setTurmasPermitidas(listaTurmas)
 
       logger.info('Permissões de colaborador carregadas', {
         module: 'auth',
         userId,
         nome: perfilData.nome,
-        modulos: listaModulos,
+        modulos: Object.keys(permsMap),
         totalTurmas: listaTurmas.length,
       })
     }
@@ -160,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function resetState() {
     setPerfil(null)
     setModulosPermitidos([])
+    setPermissoesModulos({})
     setTurmasPermitidas([])
     setSetupPendente(false)
   }
@@ -266,15 +281,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = perfil?.role === 'admin'
 
+  const podeEditar = useCallback((modulo: string) => {
+    if (perfil?.role === 'admin') return true
+    return permissoesModulos[modulo] === 'editar'
+  }, [perfil, permissoesModulos])
+
   return (
     <AuthContext.Provider value={{
       user,
       perfil,
       isAdmin,
       modulosPermitidos,
+      permissoesModulos,
       turmasPermitidas,
       loading,
       setupPendente,
+      podeEditar,
       signOut,
     }}>
       {children}

@@ -23,6 +23,11 @@ import { supabase } from '@/lib/supabase'
 import { toast } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
+interface ModuloPermissao {
+  modulo: string
+  nivel: 'ver' | 'editar'
+}
+
 interface UsuarioDB {
   id: string
   nome: string
@@ -30,7 +35,7 @@ interface UsuarioDB {
   role: 'admin' | 'usuario'
   ativo: boolean
   created_at: string
-  modulos: string[]
+  modulos: ModuloPermissao[]
   turmas: { id: string; nome: string }[]
 }
 
@@ -70,13 +75,13 @@ export default function UsuariosPage() {
   const [selectedUser, setSelectedUser] = useState<UsuarioDB | null>(null)
   const [showPassword, setShowPassword] = useState(false)
 
-  // Form state
+  // Form state — modulos agora e Record<modulo, nivel>
   const [form, setForm] = useState({
     nome: '',
     email: '',
     senha: '',
     role: 'usuario' as 'admin' | 'usuario',
-    modulos: [] as string[],
+    modulos: {} as Record<string, 'ver' | 'editar'>,
     turmas: [] as string[],
   })
 
@@ -100,18 +105,18 @@ export default function UsuariosPage() {
   }
 
   async function fetchTurmas() {
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from('turmas')
       .select('id, nome')
-      .eq('ativa', true)
       .order('nome')
+    if (error) console.error('Erro ao carregar turmas:', error)
     setTurmasOpcoes(data ?? [])
   }
 
   function abrirCriar() {
     setEditMode(false)
     setSelectedUser(null)
-    setForm({ nome: '', email: '', senha: '', role: 'usuario', modulos: [], turmas: [] })
+    setForm({ nome: '', email: '', senha: '', role: 'usuario', modulos: {}, turmas: [] })
     setShowPassword(false)
     setDialogOpen(true)
   }
@@ -119,12 +124,17 @@ export default function UsuariosPage() {
   function abrirEditar(u: UsuarioDB) {
     setEditMode(true)
     setSelectedUser(u)
+    // Converter array de {modulo, nivel} para Record
+    const modulosRecord: Record<string, 'ver' | 'editar'> = {}
+    for (const m of u.modulos) {
+      modulosRecord[m.modulo] = (m.nivel ?? 'editar') as 'ver' | 'editar'
+    }
     setForm({
       nome: u.nome,
       email: u.email,
       senha: '',
       role: u.role,
-      modulos: u.modulos,
+      modulos: modulosRecord,
       turmas: u.turmas.map(t => t.id),
     })
     setShowPassword(false)
@@ -132,11 +142,21 @@ export default function UsuariosPage() {
   }
 
   function toggleModulo(modulo: string) {
+    setForm(f => {
+      const novo = { ...f.modulos }
+      if (modulo in novo) {
+        delete novo[modulo]
+      } else {
+        novo[modulo] = 'editar' // padrao ao ativar
+      }
+      return { ...f, modulos: novo }
+    })
+  }
+
+  function setNivelModulo(modulo: string, nivel: 'ver' | 'editar') {
     setForm(f => ({
       ...f,
-      modulos: f.modulos.includes(modulo)
-        ? f.modulos.filter(m => m !== modulo)
-        : [...f.modulos, modulo],
+      modulos: { ...f.modulos, [modulo]: nivel },
     }))
   }
 
@@ -150,12 +170,15 @@ export default function UsuariosPage() {
   }
 
   function selecionarTodosModulos() {
-    setForm(f => ({
-      ...f,
-      modulos: f.modulos.length === MODULOS_INFO.length
-        ? []
-        : MODULOS_INFO.map(m => m.id),
-    }))
+    setForm(f => {
+      const totalAtivos = Object.keys(f.modulos).length
+      if (totalAtivos === MODULOS_INFO.length) {
+        return { ...f, modulos: {} }
+      }
+      const todos: Record<string, 'ver' | 'editar'> = {}
+      MODULOS_INFO.forEach(m => { todos[m.id] = f.modulos[m.id] ?? 'editar' })
+      return { ...f, modulos: todos }
+    })
   }
 
   function selecionarTodasTurmas() {
@@ -173,6 +196,11 @@ export default function UsuariosPage() {
 
     setSaving(true)
 
+    // Converter Record para array de {modulo, nivel}
+    const modulosArray = form.role === 'admin'
+      ? []
+      : Object.entries(form.modulos).map(([modulo, nivel]) => ({ modulo, nivel }))
+
     const payload = {
       id: selectedUser?.id,
       nome: form.nome,
@@ -180,7 +208,7 @@ export default function UsuariosPage() {
       senha: form.senha || undefined,
       novaSenha: editMode && form.senha ? form.senha : undefined,
       role: form.role,
-      modulos: form.role === 'admin' ? [] : form.modulos,
+      modulos: modulosArray,
       turmas: form.role === 'admin' ? [] : form.turmas,
       ativo: selectedUser?.ativo ?? true,
     }
@@ -219,7 +247,7 @@ export default function UsuariosPage() {
         nome: u.nome,
         role: u.role,
         ativo: !u.ativo,
-        modulos: u.modulos,
+        modulos: u.modulos, // ja vem como {modulo, nivel}[] da API
         turmas: u.turmas.map(t => t.id),
       }),
     })
@@ -335,11 +363,16 @@ export default function UsuariosPage() {
                               {u.modulos.length > 0 && (
                                 <div className="flex flex-wrap gap-1">
                                   {u.modulos.map(m => {
-                                    const info = MODULOS_INFO.find(x => x.id === m)
+                                    const info = MODULOS_INFO.find(x => x.id === m.modulo)
                                     return info ? (
-                                      <span key={m} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                      <span key={m.modulo} className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded ${
+                                        m.nivel === 'ver'
+                                          ? 'bg-amber-500/10 text-amber-600'
+                                          : 'bg-muted text-muted-foreground'
+                                      }`}>
                                         <info.icon className="h-2.5 w-2.5" />
                                         {info.label}
+                                        {m.nivel === 'ver' && <Eye className="h-2.5 w-2.5 ml-0.5" />}
                                       </span>
                                     ) : null
                                   })}
@@ -508,45 +541,75 @@ export default function UsuariosPage() {
                 {/* Módulos */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <Label className="text-sm">Módulos de Acesso</Label>
+                    <Label className="text-sm">Modulos de Acesso</Label>
                     <button
                       type="button"
                       onClick={selecionarTodosModulos}
                       className="text-xs text-primary hover:underline"
                     >
-                      {form.modulos.length === MODULOS_INFO.length ? 'Desmarcar todos' : 'Selecionar todos'}
+                      {Object.keys(form.modulos).length === MODULOS_INFO.length ? 'Desmarcar todos' : 'Selecionar todos'}
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {MODULOS_INFO.map(m => {
-                      const ativo = form.modulos.includes(m.id)
+                      const ativo = m.id in form.modulos
+                      const nivel = form.modulos[m.id]
                       const Icon = m.icon
                       return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => toggleModulo(m.id)}
-                          className={`flex items-center gap-2.5 p-3 rounded-lg border text-sm font-medium transition-all ${
-                            ativo
-                              ? 'border-primary bg-primary/5 text-primary'
-                              : 'border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
-                          }`}
-                        >
-                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
-                            ativo ? 'border-primary bg-primary' : 'border-muted-foreground/40'
-                          }`}>
-                            {ativo && <span className="text-[9px] text-primary-foreground font-bold">✓</span>}
-                          </div>
-                          <Icon className="h-4 w-4 flex-shrink-0" />
-                          {m.label}
-                        </button>
+                        <div key={m.id} className="space-y-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleModulo(m.id)}
+                            className={`w-full flex items-center gap-2.5 p-3 rounded-lg border text-sm font-medium transition-all ${
+                              ativo
+                                ? 'border-primary bg-primary/5 text-primary'
+                                : 'border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                              ativo ? 'border-primary bg-primary' : 'border-muted-foreground/40'
+                            }`}>
+                              {ativo && <span className="text-[9px] text-primary-foreground font-bold">✓</span>}
+                            </div>
+                            <Icon className="h-4 w-4 flex-shrink-0" />
+                            {m.label}
+                          </button>
+                          {ativo && (
+                            <div className="flex gap-1 pl-1">
+                              <button
+                                type="button"
+                                onClick={() => setNivelModulo(m.id, 'ver')}
+                                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all ${
+                                  nivel === 'ver'
+                                    ? 'bg-amber-500/15 text-amber-600 border border-amber-500/30'
+                                    : 'bg-muted text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <Eye className="h-3 w-3" />
+                                Visualizar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setNivelModulo(m.id, 'editar')}
+                                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all ${
+                                  nivel === 'editar'
+                                    ? 'bg-green-500/15 text-green-600 border border-green-500/30'
+                                    : 'bg-muted text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <Edit className="h-3 w-3" />
+                                Editar
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )
                     })}
                   </div>
                 </div>
 
                 {/* Turmas */}
-                {form.modulos.includes('chamada') && (
+                {'chamada' in form.modulos && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <Label className="text-sm">Turmas Permitidas na Chamada</Label>
