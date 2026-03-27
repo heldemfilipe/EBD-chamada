@@ -64,10 +64,11 @@ function getOffsetInicial(): number {
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function ChamadaPage() {
   const router = useRouter()
-  const { isAdmin, turmasPermitidas } = useAuth()
+  const { isAdmin, turmasPermitidas, loading: authLoading } = useAuth()
   const db = supabase as any
 
   const [turmasData, setTurmasData] = useState<Turma[]>([])
+  const [turmasLoading, setTurmasLoading] = useState(true)
   const [dataSelecionada, setDataSelecionada] = useState<Date>(getDataInicial)
   const [semanaOffset, setSemanaOffset] = useState<number>(getOffsetInicial)
   const [tempo, setTempo] = useState('')
@@ -96,8 +97,11 @@ export default function ChamadaPage() {
   }
 
   // Carregar turmas (1 query turmas + 1 query contagem — sem N+1)
+  // Aguarda auth estar pronto para evitar filtrar com turmasPermitidas vazia
   useEffect(() => {
+    if (authLoading) return
     async function load() {
+      setTurmasLoading(true)
       const [{ data: turmasRaw }, { data: alunosRaw }] = await Promise.all([
         db.from('turmas').select('id, nome, faixa_etaria, sala, cor').eq('ativa', true).order('nome'),
         db.from('alunos').select('turma_id').eq('ativo', true),
@@ -119,10 +123,11 @@ export default function ChamadaPage() {
       setTurmasData(isAdmin || turmasPermitidas.includes('*')
         ? sorted
         : sorted.filter(t => turmasPermitidas.includes(t.id)))
+      setTurmasLoading(false)
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, turmasPermitidas])
+  }, [authLoading, isAdmin, turmasPermitidas])
 
   // Carregar resumo do dia (chamadas + visitantes em paralelo)
   useEffect(() => {
@@ -365,6 +370,23 @@ export default function ChamadaPage() {
       {/* Resumo Por Sala */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Resumo por Sala</h2>
+        {(authLoading || turmasLoading) ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="rounded-xl border bg-card overflow-hidden animate-pulse">
+                <div className="h-1.5 w-full bg-muted" />
+                <div className="px-5 pt-4 pb-3 space-y-2">
+                  <div className="h-5 w-32 bg-muted rounded" />
+                  <div className="h-4 w-24 bg-muted rounded" />
+                </div>
+                <div className="px-5 pb-3"><div className="h-2 w-full bg-muted rounded-full" /></div>
+                <div className="grid grid-cols-4 gap-0 border-t">
+                  {[...Array(4)].map((_, j) => <div key={j} className="py-3 flex flex-col items-center gap-1"><div className="h-4 w-4 bg-muted rounded" /><div className="h-5 w-6 bg-muted rounded" /></div>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {turmasData.map((turma) => {
             const resumo = resumosPorTurma[turma.id] ?? { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 }
@@ -450,6 +472,7 @@ export default function ChamadaPage() {
             )
           })}
         </div>
+        )}
       </div>
     </div>
   )

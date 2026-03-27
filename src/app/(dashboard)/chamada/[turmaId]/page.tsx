@@ -147,7 +147,7 @@ export default function ChamadaTurmaPage() {
           db.from('turmas').select('id, nome, sala').eq('id', turmaId).single(),
           db.from('alunos').select('id, nome, responsavel, cargo')
             .eq('turma_id', turmaId).eq('ativo', true).order('nome'),
-          db.from('escalas').select('professor_id, turma_id').eq('data', dataSelecionada),
+          db.from('escalas').select('professor_id, turma_id, turmas(nome)').eq('data', dataSelecionada),
           db.from('chamadas')
             .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
             .eq('turma_id', turmaId).eq('data', dataSelecionada).maybeSingle(),
@@ -164,17 +164,12 @@ export default function ChamadaTurmaPage() {
         // Turma
         if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-        // Nomes das turmas da escala (query pequena e dependente de escalaDia)
-        const turmaIdsEscala = [...new Set((escalaDia ?? []).map((e: any) => e.turma_id))]
-        const turmaNomesEscala: Record<string, string> = {}
-        if (turmaIdsEscala.length > 0) {
-          const { data: turmasEscala } = await db.from('turmas').select('id, nome').in('id', turmaIdsEscala)
-          if (cancelado) return
-          for (const t of turmasEscala ?? []) turmaNomesEscala[t.id] = t.nome
-        }
+        // Nomes das turmas vêm do join escalas(turmas(nome)) — sem query extra
         const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
         for (const e of (escalaDia ?? []) as any[]) {
-          professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: turmaNomesEscala[e.turma_id] ?? '' })
+          if (e.professor_id) {
+            professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: e.turmas?.nome ?? '' })
+          }
         }
 
         // Alunos + presenças
@@ -462,13 +457,11 @@ export default function ChamadaTurmaPage() {
           }
         }
 
-        // Atualizar existentes em paralelo
+        // Atualizar existentes em batch único (upsert pelo id)
         if (existentes.length > 0) {
-          await Promise.all(existentes.map(v =>
-            db.from('visitantes')
-              .update({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })
-              .eq('id', v.id)
-          ))
+          await db.from('visitantes').upsert(
+            existentes.map(v => ({ id: v.id, nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null }))
+          )
         }
 
         // Inserir todos os históricos em batch único
