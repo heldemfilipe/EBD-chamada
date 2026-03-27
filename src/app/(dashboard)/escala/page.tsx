@@ -204,6 +204,7 @@ export default function EscalaPage() {
   const [filtroProf,  setFiltroProf]  = useState('todos')
   const [filtroTurma, setFiltroTurma] = useState('todas')
   const [viewMode,    setViewMode]    = useState<'tabela' | 'cards'>('cards')
+  const [selectedRow, setSelectedRow] = useState<string | null>(null)
 
   // Dialog
   const [dialogOpen,       setDialogOpen]       = useState(false)
@@ -453,8 +454,8 @@ export default function EscalaPage() {
   }
 
   const salvarEscala = useCallback(async () => {
-    if (!dataComputada || !formData.turmaId) {
-      toast('Selecione a turma e a aula.', 'error'); return
+    if (!dataComputada || !formData.turmaId || !formData.professorId) {
+      toast('Preencha todos os campos obrigatórios (turma e professor).', 'error'); return
     }
     if (isSaving) return
     setIsSaving(true)
@@ -465,10 +466,10 @@ export default function EscalaPage() {
         const { error } = await db.from('escalas').update({
           data: dataComputada,
           turma_id: formData.turmaId,
-          professor_id: formData.professorId || null,
+          professor_id: formData.professorId,
           observacoes: formData.observacao,
         }).eq('id', selectedEscala.id)
-        if (error) { toast('Erro ao atualizar escala.', 'error'); return }
+        if (error) { console.error('Erro ao atualizar escala:', error); toast('Erro ao atualizar: ' + (error.message ?? 'erro'), 'error'); return }
         setEscalasData(prev => prev.map(e =>
           e.id === selectedEscala.id
             ? { ...e, data: dataComputada, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }
@@ -480,10 +481,10 @@ export default function EscalaPage() {
         const { data, error } = await db.from('escalas').insert({
           data: dataComputada,
           turma_id: formData.turmaId,
-          professor_id: formData.professorId || null,
+          professor_id: formData.professorId,
           observacoes: formData.observacao,
         }).select('id').single()
-        if (error || !data) { toast('Erro ao cadastrar escala.', 'error'); return }
+        if (error || !data) { console.error('Erro ao cadastrar escala:', error); toast('Erro ao cadastrar: ' + (error?.message ?? 'erro'), 'error'); return }
         setEscalasData(prev => [...prev, {
           id: data.id, data: dataComputada, turmaId: formData.turmaId,
           professorId: formData.professorId, trimestre, observacao: formData.observacao,
@@ -839,22 +840,29 @@ export default function EscalaPage() {
         ) : (
           <div className="rounded-xl border overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed" style={{ minWidth: `${112 + tabelaView.turmas.length * 200}px` }}>
+                <colgroup>
+                  <col style={{ width: '48px' }} />
+                  <col style={{ width: '64px' }} />
+                  {tabelaView.turmas.map(t => (
+                    <col key={t.id} style={{ minWidth: '180px' }} />
+                  ))}
+                </colgroup>
                 <thead>
                   <tr className="border-b">
-                    <th className="sticky left-0 z-20 bg-card px-3 py-3 text-center font-semibold text-muted-foreground w-12 text-xs border-r">
+                    <th className="sticky left-0 z-20 bg-card px-2 py-3 text-center font-semibold text-muted-foreground text-xs border-r" style={{ width: '48px' }}>
                       L#
                     </th>
-                    <th className="sticky left-12 z-20 bg-card px-3 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap text-xs w-16 border-r">
+                    <th className="sticky left-12 z-20 bg-card px-2 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap text-xs border-r" style={{ width: '64px' }}>
                       Data
                     </th>
-                    {tabelaView.turmas.map(t => {
+                    {tabelaView.turmas.map((t, colIdx) => {
                       const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
                       return (
-                        <th key={t.id} className="px-4 py-0 text-left font-semibold min-w-[150px]">
-                          <div className={`h-1 -mx-4 mb-2 ${t.cor}`} />
+                        <th key={t.id} className={`px-3 py-0 text-left font-semibold ${colIdx % 2 === 1 ? 'bg-muted/20' : ''}`}>
+                          <div className={`h-1.5 -mx-3 mb-2 ${t.cor}`} />
                           <div className="flex items-center gap-1 mb-0.5 group/col">
-                            <span className="text-xs font-bold flex-1">{t.nome}</span>
+                            <span className="text-xs font-bold flex-1 truncate">{t.nome}</span>
                             <button
                               onClick={() => { setExcluirTurmaId(t.id); setExcluirTurmaDialogOpen(true) }}
                               className="opacity-0 group-hover/col:opacity-100 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all flex-shrink-0"
@@ -864,7 +872,7 @@ export default function EscalaPage() {
                             </button>
                           </div>
                           {tema && (
-                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2 truncate max-w-[160px]" title={tema}>
+                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2 line-clamp-2">
                               {tema}
                             </p>
                           )}
@@ -875,29 +883,31 @@ export default function EscalaPage() {
                 </thead>
                 <tbody>
                   {tabelaView.linhas.map((linha) => {
-                    const rowBase = linha.isProxima
+                    const isSelected = selectedRow === linha.data
+                    const rowBase = isSelected
+                      ? 'ring-2 ring-inset ring-primary bg-primary/8'
+                      : linha.isProxima
                       ? 'bg-primary/5 border-l-2 border-l-primary'
                       : linha.is2nd
                       ? 'bg-amber-50/40 dark:bg-amber-950/10'
                       : 'hover:bg-muted/20'
-                    // Sticky cells precisam de background sólido para não "vazar" conteúdo
-                    const stickyBg = linha.isProxima
-                      ? 'bg-primary/5'
-                      : linha.is2nd
-                      ? 'bg-amber-50/40 dark:bg-amber-950/10'
-                      : 'bg-card'
                     return (
                       <tr
                         key={linha.data}
-                        className={`border-b last:border-0 transition-colors ${rowBase}`}
+                        className={`border-b last:border-0 transition-all ${rowBase}`}
                       >
                         <td
-                          className="sticky left-0 z-10 w-12 px-3 py-2.5 text-center border-r"
+                          className="sticky left-0 z-10 px-2 py-2.5 text-center border-r cursor-pointer"
                           style={{ background: 'hsl(var(--card))' }}
+                          onClick={() => setSelectedRow(prev => prev === linha.data ? null : linha.data)}
                         >
                           <div className="flex flex-col items-center gap-0.5">
-                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                              linha.isProxima ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold transition-colors ${
+                              isSelected
+                                ? 'bg-primary text-primary-foreground'
+                                : linha.isProxima
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-muted text-muted-foreground'
                             }`}>
                               {linha.aula}
                             </span>
@@ -907,29 +917,31 @@ export default function EscalaPage() {
                           </div>
                         </td>
                         <td
-                          className="sticky left-12 z-10 px-3 py-2.5 whitespace-nowrap border-r"
+                          className="sticky left-12 z-10 px-2 py-2.5 whitespace-nowrap border-r cursor-pointer"
                           style={{ background: 'hsl(var(--card))' }}
+                          onClick={() => setSelectedRow(prev => prev === linha.data ? null : linha.data)}
                         >
-                          <span className={`text-xs font-medium ${linha.isProxima ? 'text-primary' : ''}`}>
+                          <span className={`text-xs font-medium ${isSelected || linha.isProxima ? 'text-primary' : ''}`}>
                             {fmtDataCurta(linha.data)}
                           </span>
                         </td>
-                        {linha.celulas.map(c => {
+                        {linha.celulas.map((c, colIdx) => {
                           const temaLicao = getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
+                          const colBg = colIdx % 2 === 1 ? 'bg-muted/10' : ''
                           return (
-                          <td key={c.turmaId} className="px-4 py-2">
+                          <td key={c.turmaId} className={`px-3 py-2 ${colBg}`}>
                             {c.isMerged ? (
                               c.professor ? (
                                 <div className="flex items-center justify-between gap-1 group">
                                   <div className="flex flex-col min-w-0">
-                                    <span className={`text-xs truncate max-w-[110px] ${c.destacado ? 'text-primary font-semibold' : ''}`}>
+                                    <span className={`text-xs ${c.destacado ? 'text-primary font-semibold' : ''}`}>
                                       {c.professor}
                                     </span>
                                     <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-500 italic">
                                       <Link2 className="h-2.5 w-2.5 flex-shrink-0" />{c.unidaComNome}
                                     </span>
                                     {temaLicao && (
-                                      <span className="text-[10px] text-muted-foreground/60 truncate max-w-[110px]" title={temaLicao}>
+                                      <span className="text-[10px] text-muted-foreground/60 leading-snug mt-0.5">
                                         {temaLicao}
                                       </span>
                                     )}
@@ -977,11 +989,11 @@ export default function EscalaPage() {
                             ) : c.professor ? (
                               <div className="flex items-center justify-between gap-1 group">
                                 <div className="flex flex-col min-w-0">
-                                  <span className={`text-xs truncate max-w-[120px] ${c.destacado ? 'text-primary font-semibold' : ''}`}>
+                                  <span className={`text-xs ${c.destacado ? 'text-primary font-semibold' : ''}`}>
                                     {c.professor}
                                   </span>
                                   {temaLicao && (
-                                    <span className="text-[10px] text-muted-foreground/60 truncate max-w-[130px]" title={temaLicao}>
+                                    <span className="text-[10px] text-muted-foreground/60 leading-snug mt-0.5">
                                       {temaLicao}
                                     </span>
                                   )}
@@ -1014,7 +1026,7 @@ export default function EscalaPage() {
                                   })
                                   setDialogOpen(true)
                                 }}
-                                className="w-full h-full flex items-center justify-center text-xs text-muted-foreground/30 hover:text-primary hover:bg-primary/5 rounded px-2 py-1 transition-colors group/empty"
+                                className="w-full flex items-center justify-center text-xs text-muted-foreground/30 hover:text-primary hover:bg-primary/5 rounded px-2 py-1 transition-colors group/empty"
                                 title="Adicionar escala"
                               >
                                 <span className="group-hover/empty:hidden">—</span>

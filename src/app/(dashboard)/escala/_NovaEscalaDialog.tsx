@@ -232,11 +232,10 @@ export function NovaEscalaDialog({
 
           {/* Professor */}
           <div className="space-y-1.5">
-            <Label className="text-sm">Professor <span className="text-muted-foreground text-xs">(opcional)</span></Label>
-            <Select value={formData.professorId || '_none'} onValueChange={v => onChange({ ...formData, professorId: v === '_none' ? '' : v })}>
+            <Label className="text-sm">Professor *</Label>
+            <Select value={formData.professorId} onValueChange={v => onChange({ ...formData, professorId: v })}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o professor" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="_none"><span className="text-muted-foreground italic">Nenhum (definir depois)</span></SelectItem>
                 {professores.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
               </SelectContent>
             </Select>
