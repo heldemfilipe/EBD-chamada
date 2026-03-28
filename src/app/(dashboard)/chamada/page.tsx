@@ -305,12 +305,12 @@ export default function ChamadaPage() {
           </div>
         </div>
 
-        {/* Numeros em grid */}
+        {/* Numeros em grid — Matriculados, Ausentes, Presentes, Visitantes */}
         <div className="grid grid-cols-4 gap-0 border-t">
           <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
-            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mb-0.5" />
-            <span className="text-base sm:text-lg font-bold text-green-600">{resumoDia.total_presentes}</span>
-            <span className="text-[9px] text-muted-foreground">Presentes</span>
+            <Users className="h-3.5 w-3.5 text-muted-foreground mb-0.5" />
+            <span className="text-base sm:text-lg font-bold">{resumoDia.total_matriculados}</span>
+            <span className="text-[9px] text-muted-foreground">Matriculados</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
             <XCircle className="h-3.5 w-3.5 text-red-500 mb-0.5" />
@@ -318,17 +318,23 @@ export default function ChamadaPage() {
             <span className="text-[9px] text-muted-foreground">Ausentes</span>
           </div>
           <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mb-0.5" />
+            <span className="text-base sm:text-lg font-bold text-green-600">{resumoDia.total_presentes}</span>
+            <span className="text-[9px] text-muted-foreground">Presentes</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2.5 px-1">
             <UserPlus className="h-3.5 w-3.5 text-blue-500 mb-0.5" />
             <span className="text-base sm:text-lg font-bold text-blue-600">{resumoDia.total_visitantes}</span>
             <span className="text-[9px] text-muted-foreground">Visitantes</span>
           </div>
-          <div className="flex flex-col items-center justify-center py-2.5 px-1">
-            <Users className="h-3.5 w-3.5 text-muted-foreground mb-0.5" />
-            <span className="text-base sm:text-lg font-bold">{resumoDia.total_matriculados}</span>
-            <span className="text-[9px] text-muted-foreground">Matrículas</span>
-          </div>
         </div>
-        <div className="grid grid-cols-3 gap-0 border-t bg-muted/30">
+        {/* Total, Bíblias, Revistas, Oferta */}
+        <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
+          <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+            <ClipboardList className="h-3 w-3 text-muted-foreground mb-0.5" />
+            <span className="text-sm font-semibold">{resumoDia.total_presentes + resumoDia.total_visitantes}</span>
+            <span className="text-[9px] text-muted-foreground">Total</span>
+          </div>
           <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
             <Book className="h-3 w-3 text-purple-500 mb-0.5" />
             <span className="text-sm font-semibold text-purple-600">{resumoDia.total_biblias}</span>
@@ -415,19 +421,38 @@ export default function ChamadaPage() {
                   </div>
                 </div>
 
-                {/* Estatisticas */}
+                {/* Estatísticas — linha 1: Matr., Aus., Pres., Visit. */}
                 <div className="grid grid-cols-4 gap-0 border-t">
+                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                    <span className="text-sm font-bold">{turma.totalAlunos}</span>
+                    <span className="text-[9px] text-muted-foreground">Matr.</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                    <span className="text-sm font-bold text-red-600">{resumo.faltas}</span>
+                    <span className="text-[9px] text-muted-foreground">Aus.</span>
+                  </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
                     <span className="text-sm font-bold text-green-600">{resumo.presentes}</span>
                     <span className="text-[9px] text-muted-foreground">Pres.</span>
                   </div>
-                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-                    <span className="text-sm font-bold text-red-600">{resumo.faltas}</span>
-                    <span className="text-[9px] text-muted-foreground">Faltas</span>
-                  </div>
-                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                  <div className="flex flex-col items-center justify-center py-2 px-1">
                     <span className="text-sm font-bold text-blue-600">{resumo.visitantes}</span>
                     <span className="text-[9px] text-muted-foreground">Visit.</span>
+                  </div>
+                </div>
+                {/* Estatísticas — linha 2: Total, Bíbl., Rev., Oferta */}
+                <div className="grid grid-cols-4 gap-0 border-t bg-muted/20">
+                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                    <span className="text-sm font-bold">{resumo.presentes + resumo.visitantes}</span>
+                    <span className="text-[9px] text-muted-foreground">Total</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                    <span className="text-sm font-bold text-purple-600">{resumo.biblias}</span>
+                    <span className="text-[9px] text-muted-foreground">Bíbl.</span>
+                  </div>
+                  <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+                    <span className="text-sm font-bold text-orange-600">{resumo.revistas}</span>
+                    <span className="text-[9px] text-muted-foreground">Rev.</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1">
                     <span className="text-sm font-bold text-green-600">R$ {resumo.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
