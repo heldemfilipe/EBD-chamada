@@ -22,19 +22,19 @@ async function verificarAdmin(req: NextRequest) {
       },
     }
   )
-  const { data: { session }, error: sessionErr } = await supabase.auth.getSession()
+  const { data: { user }, error: userErr } = await supabase.auth.getUser()
 
-  if (sessionErr) {
-    logger.error('Falha ao obter sessão na rota de usuários', {
+  if (userErr) {
+    logger.error('Falha ao verificar usuário na rota de usuários', {
       module: MOD,
       method: req.method,
       path: req.nextUrl.pathname,
-      error: sessionErr,
+      error: userErr,
     })
     return null
   }
 
-  if (!session) {
+  if (!user) {
     logger.warn('Requisição sem sessão ativa', {
       module: MOD,
       method: req.method,
@@ -47,13 +47,13 @@ async function verificarAdmin(req: NextRequest) {
   const { data: perfil, error: perfilErr } = await (db as any)
     .from('perfis')
     .select('role')
-    .eq('id', session.user.id)
+    .eq('id', user.id)
     .single()
 
   if (perfilErr) {
     logger.error('Falha ao verificar role do usuário', {
       module: MOD,
-      userId: session.user.id,
+      userId: user.id,
       error: perfilErr,
     })
     return null
@@ -62,14 +62,14 @@ async function verificarAdmin(req: NextRequest) {
   if (perfil?.role !== 'admin') {
     logger.warn('Acesso negado — usuário não é admin', {
       module: MOD,
-      userId: session.user.id,
+      userId: user.id,
       role: perfil?.role ?? 'desconhecido',
       method: req.method,
     })
     return null
   }
 
-  return session
+  return user
 }
 
 // ─── GET — Listar usuários ────────────────────────────────────────────────────
@@ -88,13 +88,13 @@ export async function GET(req: NextRequest) {
     .order('nome')
 
   if (perfisErr) {
-    logger.error('Falha ao buscar perfis', { module: MOD, userId: session.user.id, error: perfisErr })
+    logger.error('Falha ao buscar perfis', { module: MOD, userId: session.id, error: perfisErr })
     return NextResponse.json({ error: 'Erro ao buscar usuários' }, { status: 500 })
   }
 
   const { data: { users }, error: usersErr } = await db.auth.admin.listUsers()
   if (usersErr) {
-    logger.error('Falha ao listar auth.users', { module: MOD, userId: session.user.id, error: usersErr })
+    logger.error('Falha ao listar auth.users', { module: MOD, userId: session.id, error: usersErr })
   }
 
   const emailPorId: Record<string, string> = {}
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
 
   logger.info(`GET /api/usuarios — ${result.length} usuário(s) retornado(s)`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     total: result.length,
     duration: Date.now() - t0,
   })
@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
   if (!nome || !email || !senha) {
     logger.warn('POST /api/usuarios — campos obrigatórios ausentes', {
       module: MOD,
-      userId: session.user.id,
+      userId: session.id,
       camposFaltando: [!nome && 'nome', !email && 'email', !senha && 'senha'].filter(Boolean),
     })
     return NextResponse.json({ error: 'Nome, e-mail e senha são obrigatórios' }, { status: 400 })
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
 
   logger.info(`Criando usuário: ${email} (role: ${role ?? 'usuario'})`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     email,
     role,
   })
@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
   if (authError) {
     logger.error('Falha ao criar usuário no Supabase Auth', {
       module: MOD,
-      userId: session.user.id,
+      userId: session.id,
       email,
       error: authError,
     })
@@ -238,7 +238,7 @@ export async function POST(req: NextRequest) {
 
   logger.info(`Usuário criado com sucesso: ${email}`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     newUserId,
     role: role ?? 'usuario',
     duration: Date.now() - t0,
@@ -264,13 +264,13 @@ export async function PUT(req: NextRequest) {
   const { id, nome, role, ativo, modulos, turmas, novaSenha } = body
 
   if (!id) {
-    logger.warn('PUT /api/usuarios — ID ausente no body', { module: MOD, userId: session.user.id })
+    logger.warn('PUT /api/usuarios — ID ausente no body', { module: MOD, userId: session.id })
     return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
   }
 
   logger.info(`Atualizando usuário: ${id}`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     targetId: id,
     role,
     ativo,
@@ -308,7 +308,7 @@ export async function PUT(req: NextRequest) {
 
   logger.info(`Usuário atualizado com sucesso: ${id}`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     targetId: id,
     duration: Date.now() - t0,
   })
@@ -325,12 +325,12 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get('id')
 
   if (!id) {
-    logger.warn('DELETE /api/usuarios — ID ausente nos params', { module: MOD, userId: session.user.id })
+    logger.warn('DELETE /api/usuarios — ID ausente nos params', { module: MOD, userId: session.id })
     return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
   }
 
-  if (id === session.user.id) {
-    logger.warn('Tentativa de auto-exclusão bloqueada', { module: MOD, userId: session.user.id })
+  if (id === session.id) {
+    logger.warn('Tentativa de auto-exclusão bloqueada', { module: MOD, userId: session.id })
     return NextResponse.json({ error: 'Você não pode apagar sua própria conta' }, { status: 400 })
   }
 
@@ -342,19 +342,19 @@ export async function DELETE(req: NextRequest) {
 
   const { error: perfilErr } = await db.from('perfis').delete().eq('id', id)
   if (perfilErr) {
-    logger.error('Falha ao apagar perfil', { module: MOD, userId: session.user.id, targetId: id, error: perfilErr })
+    logger.error('Falha ao apagar perfil', { module: MOD, userId: session.id, targetId: id, error: perfilErr })
     return NextResponse.json({ error: 'Falha ao apagar usuário' }, { status: 500 })
   }
 
   const { error: authErr } = await db.auth.admin.deleteUser(id)
   if (authErr) {
-    logger.error('Falha ao apagar auth user (perfil ja removido)', { module: MOD, userId: session.user.id, targetId: id, error: authErr })
+    logger.error('Falha ao apagar auth user (perfil ja removido)', { module: MOD, userId: session.id, targetId: id, error: authErr })
     // Nao retorna erro — perfil ja foi removido, auth pode ter sido removido em outro momento
   }
 
   logger.info(`Usuário apagado permanentemente: ${id}`, {
     module: MOD,
-    userId: session.user.id,
+    userId: session.id,
     targetId: id,
   })
 

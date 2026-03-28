@@ -36,10 +36,8 @@ export async function middleware(req: NextRequest) {
     }
   )
 
-  // getSession() usa cache local — sem roundtrip ao servidor Supabase
-  // A validacao real do JWT acontece no AuthContext em background
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  // getUser() verifica o JWT no servidor Supabase — seguro para uso em middleware
+  const { data: { user } } = await supabase.auth.getUser()
   const userId = user?.id ?? undefined
 
   // ─── Nao autenticado tentando acessar rota protegida ──────────────────────
