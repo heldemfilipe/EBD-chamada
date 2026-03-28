@@ -2,21 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import {
   ArrowLeft,
   Save,
@@ -28,11 +20,14 @@ import {
   PartyPopper,
   Trash2,
   GraduationCap,
+  Users,
+  DollarSign,
 } from 'lucide-react'
 import { formatarDomingo, converterParaISO, getTrimestreRange } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/lib/toast'
+import { corPresenca } from '@/lib/presence'
 import { AlunoRow } from './_AlunoRow'
 import { AdicionarVisitanteDialog } from './_AdicionarVisitanteDialog'
 
@@ -45,34 +40,30 @@ interface AlunoPresenca {
   trouxe_biblia: boolean
   trouxe_revista: boolean
   justificativa: string
-  // Informações extras para identificação na lista
   isProfessor: boolean
-  professorId: string | null   // ID do professor (extraído de responsavel)
-  cargo: string                // Cargo eclesiástico
-  dadoAula: boolean            // Está na escala hoje (qualquer turma)
-  turmaDaAulaId: string | null    // ID da turma onde está lecionando hoje
-  turmaDaAulaNome: string | null  // Nome da turma onde está lecionando hoje
+  professorId: string | null
+  cargo: string
+  dadoAula: boolean
+  turmaDaAulaId: string | null
+  turmaDaAulaNome: string | null
 }
 
 interface HistoricoItem {
-  data: string         // ISO 'YYYY-MM-DD'
-  presente: boolean | null  // null = sem registro
+  data: string
+  presente: boolean | null
 }
 
 interface Visitante {
-  // id real do banco (UUID) ou id temporário 'new_<timestamp>' para novos
   id: string
-  isNovo: boolean       // true = ainda não salvo no banco
+  isNovo: boolean
   nome: string
   telefone: string
   observacao: string
-  // presença no dia atual (o que o usuário marcou na tela)
   presenteHoje: 'presente' | 'ausente' | 'pendente'
   trouxe_biblia: boolean
   trouxe_revista: boolean
-  // histórico das últimas visitas (sem o dia atual)
   historico: HistoricoItem[]
-  totalVisitas: number  // contagem total de visitas confirmadas
+  totalVisitas: number
 }
 
 interface TurmaInfo {
@@ -84,19 +75,14 @@ interface TurmaInfo {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Últimos N domingos a partir de uma data base (sem incluir ela) */
 function getUltimosDomingosAntesde(dataISO: string, n: number): string[] {
   const base = new Date(dataISO + 'T12:00:00')
   const domingos: string[] = []
   let cursor = new Date(base)
-  cursor.setDate(cursor.getDate() - 7) // começa no domingo anterior
+  cursor.setDate(cursor.getDate() - 7)
   while (domingos.length < n) {
-    // garante que é domingo (0)
     const dow = cursor.getDay()
-    if (dow !== 0) {
-      // ajusta para o domingo mais próximo anterior
-      cursor.setDate(cursor.getDate() - dow)
-    }
+    if (dow !== 0) cursor.setDate(cursor.getDate() - dow)
     domingos.push(converterParaISO(cursor))
     cursor.setDate(cursor.getDate() - 7)
   }
@@ -124,26 +110,26 @@ export default function ChamadaTurmaPage() {
   const [qtdBiblias, setQtdBiblias] = useState<string>('')
   const [qtdRevistas, setQtdRevistas] = useState<string>('')
 
-  // ── Busca inicial (queries em paralelo) ──────────────────────────────────────
+  // ── Busca inicial ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelado = false
 
     async function fetchDados() {
       setCarregando(true)
+
+      // Safety: garante que loading nunca fica infinito
+      const safetyTimer = setTimeout(() => {
+        if (!cancelado) {
+          setCarregando(false)
+          toast('Carregamento lento — alguns dados podem estar incompletos', 'error')
+        }
+      }, 12000)
+
       try {
         const db = supabase as any
-
-        // Dispara as 5 queries independentes em paralelo
-        // Filtra visitantes apenas do trimestre atual (reset trimestral)
         const trimRange = getTrimestreRange(dataSelecionada)
 
-        const [
-          { data: turmaData },
-          { data: alunosData },
-          { data: escalaDia },
-          { data: chamadaExistente },
-          { data: todoHistorico },
-        ] = await Promise.all([
+        const results = await Promise.allSettled([
           db.from('turmas').select('id, nome, sala').eq('id', turmaId).single(),
           db.from('alunos').select('id, nome, responsavel, cargo')
             .eq('turma_id', turmaId).eq('ativo', true).order('nome'),
@@ -159,12 +145,18 @@ export default function ChamadaTurmaPage() {
             .order('data', { ascending: false }),
         ])
 
+        clearTimeout(safetyTimer)
+
+        const turmaData = results[0].status === 'fulfilled' ? results[0].value.data : null
+        const alunosData = results[1].status === 'fulfilled' ? results[1].value.data : null
+        const escalaDia = results[2].status === 'fulfilled' ? results[2].value.data : null
+        const chamadaExistente = results[3].status === 'fulfilled' ? results[3].value.data : null
+        const todoHistorico = results[4].status === 'fulfilled' ? results[4].value.data : null
+
         if (cancelado) return
 
-        // Turma
         if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
 
-        // Nomes das turmas vêm do join escalas(turmas(nome)) — sem query extra
         const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
         for (const e of (escalaDia ?? []) as any[]) {
           if (e.professor_id) {
@@ -172,7 +164,6 @@ export default function ChamadaTurmaPage() {
           }
         }
 
-        // Alunos + presenças
         const mapAluno = (a: any) => {
           const profId = (a.responsavel ?? '').startsWith('professor:')
             ? (a.responsavel as string).replace('professor:', '') : null
@@ -335,7 +326,7 @@ export default function ChamadaTurmaPage() {
       nome: novoVisitante.nome.trim(),
       telefone: novoVisitante.telefone,
       observacao: novoVisitante.observacao,
-      presenteHoje: 'presente', // novo visitante já é presente por padrão
+      presenteHoje: 'presente',
       trouxe_biblia: false,
       trouxe_revista: false,
       historico: [],
@@ -359,15 +350,12 @@ export default function ChamadaTurmaPage() {
       .single()
     if (error || !novoAluno) { toast('Erro ao converter visitante em aluno.', 'error'); return }
 
-    // Marcar visitante como convertido
     if (!visitante.isNovo) {
       await db.from('visitantes').update({ convertido_em_aluno: true, aluno_id: novoAluno.id }).eq('id', visitanteId)
     }
 
     toast(`${visitante.nome} convertido em aluno com sucesso!`)
-    // Remover da lista de visitantes (vai aparecer como aluno)
     setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
-    // Adicionar na lista de alunos imediatamente
     setAlunos(prev => [...prev, {
       aluno_id: novoAluno.id,
       nome: visitante.nome,
@@ -391,7 +379,6 @@ export default function ChamadaTurmaPage() {
     try {
       const db = supabase as any
 
-      // 1. Upsert da chamada + obter ID em um único roundtrip
       const { data: chamadaRow, error: errChamada } = await db
         .from('chamadas')
         .upsert(
@@ -408,7 +395,6 @@ export default function ChamadaTurmaPage() {
 
       const chamadaId: string = chamadaRow.id
 
-      // 2. Upsert de presenças (batch único) + limpar histórico visitantes em paralelo
       const presencasPayload = alunos.map(a => ({
         chamada_id: chamadaId,
         aluno_id: a.aluno_id,
@@ -428,7 +414,6 @@ export default function ChamadaTurmaPage() {
         )
       }
 
-      // Limpar registros do dia (paralelo com presenças)
       promises.push(
         db.from('historico_visitantes')
           .delete()
@@ -438,12 +423,10 @@ export default function ChamadaTurmaPage() {
 
       await Promise.all(promises)
 
-      // 3. Salvar visitantes em batch
       if (visitantes.length > 0) {
         const novos = visitantes.filter(v => v.isNovo)
         const existentes = visitantes.filter(v => !v.isNovo)
 
-        // Inserir novos visitantes em batch único
         const novosIds = new Map<string, string>()
         if (novos.length > 0) {
           const { data: inseridos, error: errNovos } = await db
@@ -457,14 +440,12 @@ export default function ChamadaTurmaPage() {
           }
         }
 
-        // Atualizar existentes em batch único (upsert pelo id)
         if (existentes.length > 0) {
           await db.from('visitantes').upsert(
             existentes.map(v => ({ id: v.id, nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null }))
           )
         }
 
-        // Inserir todos os históricos em batch único
         const historicoPayload = visitantes
           .map(v => {
             const realId = v.isNovo ? novosIds.get(v.id) : v.id
@@ -500,6 +481,7 @@ export default function ChamadaTurmaPage() {
 
   const totalPresentes = useMemo(() => alunos.filter(a => a.presente === 'presente').length, [alunos])
   const totalAusentes  = useMemo(() => alunos.filter(a => a.presente === 'ausente').length, [alunos])
+  const totalPendentes = useMemo(() => alunos.filter(a => a.presente === 'pendente').length, [alunos])
 
   const visitantesPresentes = useMemo(() => visitantes.filter(v => v.presenteHoje === 'presente'), [visitantes])
 
@@ -507,61 +489,49 @@ export default function ChamadaTurmaPage() {
     matriculados: alunos.length,
     presentes: totalPresentes,
     faltas: totalAusentes,
+    pendentes: totalPendentes,
     visitantes: visitantesPresentes.length,
     biblias: alunos.filter(a => a.trouxe_biblia).length + visitantesPresentes.filter(v => v.trouxe_biblia).length,
     revistas: alunos.filter(a => a.trouxe_revista).length + visitantesPresentes.filter(v => v.trouxe_revista).length,
     percentual_presenca: alunos.length > 0
       ? Math.round((totalPresentes / alunos.length) * 100)
       : 0,
-  }), [alunos, totalPresentes, totalAusentes, visitantesPresentes])
+  }), [alunos, totalPresentes, totalAusentes, totalPendentes, visitantesPresentes])
 
-  // ── Renderizar indicador de histórico de presença ────────────────────────────
+  // ── Histórico de presença de visitante ────────────────────────────────────
 
   const renderIndicadorPresencas = (visitante: Visitante) => {
-    // Pega os 3 últimos domingos ANTES da data atual
     const domingosPrev = getUltimosDomingosAntesde(dataSelecionada, 3).reverse()
 
     return (
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-1.5 items-center">
         {domingosPrev.map((data, index) => {
           const reg = visitante.historico.find(h => h.data === data)
-          if (!reg) {
-            // Sem registro nesse domingo
-            return (
-              <div key={index} className="flex flex-col items-center gap-1">
-                <div className="w-8 h-8 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center">
-                  <div className="w-3 h-3 rounded-full bg-muted-foreground/30" />
-                </div>
-                <span className="text-[10px] text-muted-foreground">
-                  {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                </span>
-              </div>
-            )
-          }
           return (
-            <div key={index} className="flex flex-col items-center gap-1">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${reg.presente ? 'bg-green-500' : 'bg-red-500'}`}>
-                {reg.presente
-                  ? <CheckCircle2 className="h-4 w-4 text-white" />
-                  : <XCircle className="h-4 w-4 text-white" />
-                }
+            <div key={index} className="flex flex-col items-center gap-0.5">
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
+                !reg ? 'border-2 border-muted-foreground/30' :
+                reg.presente ? 'bg-green-500' : 'bg-red-500'
+              }`}>
+                {!reg ? <div className="w-2.5 h-2.5 rounded-full bg-muted-foreground/30" /> :
+                 reg.presente ? <CheckCircle2 className="h-3.5 w-3.5 text-white" /> :
+                 <XCircle className="h-3.5 w-3.5 text-white" />}
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[9px] text-muted-foreground">
                 {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
               </span>
             </div>
           )
         })}
-        {/* Hoje */}
-        <div className="flex flex-col items-center gap-1">
-          <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm
+        <div className="flex flex-col items-center gap-0.5">
+          <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold
             ${visitante.presenteHoje === 'presente' ? 'bg-green-500 border-green-500 text-white' :
               visitante.presenteHoje === 'ausente' ? 'bg-red-500 border-red-500 text-white' :
-              'border-yellow-400 text-yellow-400'}`}>
-            {visitante.presenteHoje === 'presente' ? <CheckCircle2 className="h-4 w-4" /> :
-             visitante.presenteHoje === 'ausente' ? <XCircle className="h-4 w-4" /> : '?'}
+              'border-yellow-400 text-yellow-500'}`}>
+            {visitante.presenteHoje === 'presente' ? <CheckCircle2 className="h-3.5 w-3.5" /> :
+             visitante.presenteHoje === 'ausente' ? <XCircle className="h-3.5 w-3.5" /> : '?'}
           </div>
-          <span className="text-[10px] text-yellow-400 font-medium">Hoje</span>
+          <span className="text-[9px] text-yellow-500 font-medium">Hoje</span>
         </div>
       </div>
     )
@@ -571,30 +541,30 @@ export default function ChamadaTurmaPage() {
 
   if (carregando) {
     return (
-      <div className="space-y-6 pb-20 lg:pb-0">
+      <div className="space-y-4 pb-20 lg:pb-0">
         <div className="flex items-center gap-3">
           <Button variant="outline" size="icon" onClick={() => router.push('/chamada')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="space-y-2">
-            <div className="h-7 w-48 bg-muted animate-pulse rounded" />
-            <div className="h-4 w-64 bg-muted animate-pulse rounded" />
+            <div className="h-6 w-40 bg-muted animate-pulse rounded" />
+            <div className="h-4 w-56 bg-muted animate-pulse rounded" />
           </div>
         </div>
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+        <div className="grid grid-cols-4 gap-2">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="rounded-xl border bg-card p-4 space-y-2">
-              <div className="h-4 w-20 bg-muted animate-pulse rounded" />
-              <div className="h-8 w-12 bg-muted animate-pulse rounded" />
+            <div key={i} className="rounded-lg border bg-card p-3 space-y-1.5">
+              <div className="h-3 w-12 bg-muted animate-pulse rounded" />
+              <div className="h-6 w-8 bg-muted animate-pulse rounded" />
             </div>
           ))}
         </div>
         <div className="rounded-xl border bg-card p-4 space-y-3">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="flex items-center gap-3 py-2">
-              <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+              <div className="h-7 w-7 rounded-full bg-muted animate-pulse" />
               <div className="h-4 flex-1 bg-muted animate-pulse rounded" />
-              <div className="h-8 w-24 bg-muted animate-pulse rounded" />
+              <div className="h-7 w-20 bg-muted animate-pulse rounded" />
             </div>
           ))}
         </div>
@@ -603,44 +573,73 @@ export default function ChamadaTurmaPage() {
   }
 
   return (
-    <div className="space-y-6 pb-20 lg:pb-0">
-      {/* Header */}
-      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" className="flex-shrink-0" onClick={() => router.push('/chamada')}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-xl sm:text-3xl font-bold tracking-tight">{turma.nome || 'Turma'}</h1>
-            <p className="text-muted-foreground mt-1">
-              {formatarDomingo(dataSelecionada)}
-              {turma.professor ? ` • Professor: ${turma.professor}` : ''}
-              {turma.sala ? ` • ${turma.sala}` : ''}
-            </p>
+    <div className="space-y-4 pb-20 lg:pb-0">
+      {/* Header compacto */}
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="icon" className="flex-shrink-0 h-9 w-9" onClick={() => router.push('/chamada')}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{turma.nome || 'Turma'}</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground truncate">
+            {formatarDomingo(dataSelecionada)}
+            {turma.sala ? ` · ${turma.sala}` : ''}
+          </p>
+        </div>
+        {/* Botao salvar no header — desktop */}
+        <Button className="hidden lg:flex" onClick={handleSalvarChamada} disabled={salvando}>
+          <Save className="h-4 w-4 mr-2" />
+          {salvando ? 'Salvando...' : 'Salvar'}
+        </Button>
+      </div>
+
+      {/* Mini resumo sticky no mobile */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="grid grid-cols-4 gap-0">
+          <div className="flex flex-col items-center py-2 px-1 border-r">
+            <span className="text-lg font-bold" style={{ color: corPresenca(resumo.percentual_presenca) }}>{resumo.percentual_presenca}%</span>
+            <span className="text-[9px] text-muted-foreground">Presença</span>
+          </div>
+          <div className="flex flex-col items-center py-2 px-1 border-r">
+            <span className="text-lg font-bold text-green-600">{resumo.presentes}</span>
+            <span className="text-[9px] text-muted-foreground">Pres.</span>
+          </div>
+          <div className="flex flex-col items-center py-2 px-1 border-r">
+            <span className="text-lg font-bold text-red-600">{resumo.faltas}</span>
+            <span className="text-[9px] text-muted-foreground">Faltas</span>
+          </div>
+          <div className="flex flex-col items-center py-2 px-1">
+            <span className="text-lg font-bold text-yellow-600">{resumo.pendentes}</span>
+            <span className="text-[9px] text-muted-foreground">Pend.</span>
+          </div>
+        </div>
+        <div className="px-3 py-1.5 bg-muted/30 border-t">
+          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${resumo.percentual_presenca}%`, backgroundColor: corPresenca(resumo.percentual_presenca) }} />
           </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Coluna Principal */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4">
 
           {/* Lista de Alunos */}
           <Card>
-            <CardHeader className="space-y-3">
-              <div>
-                <CardTitle>Lista de Presença</CardTitle>
-                <CardDescription>Marque a presença de cada aluno</CardDescription>
+            <CardHeader className="pb-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Lista de Presença</CardTitle>
+                <Badge variant="secondary" className="text-[10px]">{alunos.length} alunos</Badge>
               </div>
               {alunos.some(a => a.presente === 'presente') && (
-                <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg text-sm">
-                  <span className="text-xs font-medium text-muted-foreground shrink-0">Preencher rápido:</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <Book className="h-3.5 w-3.5 text-muted-foreground" />
+                <div className="flex flex-wrap items-center gap-1.5 p-2.5 bg-muted/50 rounded-lg text-sm">
+                  <span className="text-[10px] font-medium text-muted-foreground shrink-0">Rápido:</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex items-center gap-1">
+                      <Book className="h-3 w-3 text-muted-foreground" />
                       <Input
                         type="number"
-                        className="h-7 w-14 text-center text-sm px-1"
+                        className="h-6 w-12 text-center text-xs px-1"
                         placeholder="Qtd"
                         min={0}
                         max={resumo.presentes}
@@ -648,11 +647,11 @@ export default function ChamadaTurmaPage() {
                         onChange={e => setQtdBiblias(e.target.value)}
                       />
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                    <div className="flex items-center gap-1">
+                      <BookOpen className="h-3 w-3 text-muted-foreground" />
                       <Input
                         type="number"
-                        className="h-7 w-14 text-center text-sm px-1"
+                        className="h-6 w-12 text-center text-xs px-1"
                         placeholder="Qtd"
                         min={0}
                         max={resumo.presentes}
@@ -660,23 +659,25 @@ export default function ChamadaTurmaPage() {
                         onChange={e => setQtdRevistas(e.target.value)}
                       />
                     </div>
-                    <Button size="sm" className="h-7 px-3 text-xs" onClick={handleAplicarQuantidades}>
+                    <Button size="sm" className="h-6 px-2 text-[10px]" onClick={handleAplicarQuantidades}>
                       Aplicar
                     </Button>
-                    <span className="text-muted-foreground text-xs">ou todos:</span>
-                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={handleMarcarTodosBiblia}>
-                      <Book className="h-3 w-3 mr-1" /> Bíblia
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={handleMarcarTodosRevista}>
-                      <BookOpen className="h-3 w-3 mr-1" /> Revista
-                    </Button>
+                    <div className="hidden sm:flex items-center gap-1">
+                      <span className="text-muted-foreground text-[10px]">todos:</span>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={handleMarcarTodosBiblia}>
+                        <Book className="h-2.5 w-2.5 mr-0.5" /> Bíblia
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={handleMarcarTodosRevista}>
+                        <BookOpen className="h-2.5 w-2.5 mr-0.5" /> Revista
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2">
               {alunos.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">Nenhum aluno cadastrado nesta turma</p>
+                <p className="text-center text-muted-foreground py-8 text-sm">Nenhum aluno cadastrado nesta turma</p>
               ) : (
                 alunos.map((aluno, index) => (
                   <AlunoRow
@@ -696,123 +697,114 @@ export default function ChamadaTurmaPage() {
 
           {/* Visitantes */}
           <Card>
-            <CardHeader>
-              <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <CardTitle>Visitantes</CardTitle>
-                  <CardDescription>
-                    Visitantes anteriores aparecem automaticamente — marque presença ou ausência
-                  </CardDescription>
+                  <CardTitle className="text-base">Visitantes</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">Visitantes do trimestre aparecem automaticamente</p>
                 </div>
-                <Button onClick={() => setDialogVisitanteOpen(true)}>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Novo Visitante
+                <Button size="sm" onClick={() => setDialogVisitanteOpen(true)} className="h-8">
+                  <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                  <span className="hidden sm:inline">Novo Visitante</span>
+                  <span className="sm:hidden">Novo</span>
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               {visitantes.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
-                  Nenhum visitante registrado para esta turma
+                <p className="text-center text-muted-foreground py-6 text-sm">
+                  Nenhum visitante registrado
                 </p>
               ) : (
                 visitantes.map((visitante) => {
-                  const totalComHoje = visitante.totalVisitas + (visitante.presenteHoje === 'presente' ? (visitante.isNovo ? 1 : 0) : 0)
-                  // Contagem real: histórico com presente=true + hoje se presente
                   const visitasConfirmadas = visitante.historico.filter(h => h.presente).length +
                     (visitante.presenteHoje === 'presente' ? 1 : 0)
                   const podeConverter = visitasConfirmadas >= 3
 
                   return (
-                    <div key={visitante.id} className={`p-4 border rounded-lg space-y-3 ${podeConverter ? 'border-green-500/50 bg-green-500/5' : ''}`}>
+                    <div key={visitante.id} className={`p-3 border rounded-lg space-y-2.5 ${podeConverter ? 'border-green-500/50 bg-green-500/5' : ''}`}>
                       {/* Cabeçalho */}
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="font-medium">{visitante.nome}</h4>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-medium text-sm">{visitante.nome}</h4>
                             {visitante.isNovo && (
-                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">Novo</Badge>
+                              <Badge variant="outline" className="text-[10px] px-1 py-0 border-blue-400 text-blue-400">Novo</Badge>
                             )}
                             {podeConverter && (
-                              <Badge className="bg-green-500 text-xs">
-                                <PartyPopper className="h-3 w-3 mr-1" />
-                                {visitasConfirmadas} visitas — Pronto para ser aluno!
+                              <Badge className="bg-green-500 text-[10px] px-1.5 py-0">
+                                <PartyPopper className="h-2.5 w-2.5 mr-0.5" />
+                                {visitasConfirmadas} visitas
                               </Badge>
                             )}
                           </div>
                           {visitante.telefone && (
-                            <p className="text-sm text-muted-foreground">{visitante.telefone}</p>
-                          )}
-                          {visitante.observacao && (
-                            <p className="text-xs text-muted-foreground mt-1">{visitante.observacao}</p>
+                            <p className="text-xs text-muted-foreground">{visitante.telefone}</p>
                           )}
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-7 w-7 flex-shrink-0"
                           onClick={() => handleRemoverVisitante(visitante.id)}
-                          title="Remover da lista hoje"
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
                         </Button>
                       </div>
 
-                      {/* Histórico + presença hoje */}
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Histórico de Presenças</Label>
+                      {/* Histórico */}
+                      <div className="space-y-1.5">
                         {renderIndicadorPresencas(visitante)}
-                        <Progress value={(Math.min(visitasConfirmadas, 3) / 3) * 100} className="h-2" />
-                        <p className="text-xs text-muted-foreground">
-                          {visitasConfirmadas}/3 visitas confirmadas
-                        </p>
+                        <Progress value={(Math.min(visitasConfirmadas, 3) / 3) * 100} className="h-1.5" />
+                        <p className="text-[10px] text-muted-foreground">{visitasConfirmadas}/3 visitas</p>
                       </div>
 
                       {/* Botões Presente / Ausente */}
-                      <div className="flex gap-2">
+                      <div className="flex gap-1.5">
                         <Button
                           variant={visitante.presenteHoje === 'presente' ? 'default' : 'outline'}
                           size="sm"
+                          className={`h-7 text-xs ${visitante.presenteHoje === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}`}
                           onClick={() => handleMarcarPresencaVisitante(visitante.id, 'presente')}
-                          className={visitante.presenteHoje === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}
                         >
                           Presente
                         </Button>
                         <Button
                           variant={visitante.presenteHoje === 'ausente' ? 'default' : 'outline'}
                           size="sm"
+                          className={`h-7 text-xs ${visitante.presenteHoje === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}`}
                           onClick={() => handleMarcarPresencaVisitante(visitante.id, 'ausente')}
-                          className={visitante.presenteHoje === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}
                         >
                           Ausente
                         </Button>
                         {visitante.presenteHoje === 'pendente' && (
-                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-[10px]">
                             Pendente
                           </Badge>
                         )}
                       </div>
 
-                      {/* Bíblia / Revista (só se presente) */}
+                      {/* Bíblia / Revista */}
                       {visitante.presenteHoje === 'presente' && (
-                        <div className="flex flex-wrap gap-4 sm:gap-6">
-                          <div className="flex items-center space-x-2">
+                        <div className="flex flex-wrap gap-3">
+                          <div className="flex items-center space-x-1.5">
                             <Checkbox
                               id={`vbiblia-${visitante.id}`}
                               checked={visitante.trouxe_biblia}
                               onCheckedChange={() => handleToggleVisitanteBiblia(visitante.id)}
                             />
-                            <label htmlFor={`vbiblia-${visitante.id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-                              <Book className="h-4 w-4" /> Trouxe Bíblia
+                            <label htmlFor={`vbiblia-${visitante.id}`} className="text-xs font-medium flex items-center gap-1 cursor-pointer">
+                              <Book className="h-3.5 w-3.5" /> Bíblia
                             </label>
                           </div>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-1.5">
                             <Checkbox
                               id={`vrevista-${visitante.id}`}
                               checked={visitante.trouxe_revista}
                               onCheckedChange={() => handleToggleVisitanteRevista(visitante.id)}
                             />
-                            <label htmlFor={`vrevista-${visitante.id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-                              <BookOpen className="h-4 w-4" /> Trouxe Revista
+                            <label htmlFor={`vrevista-${visitante.id}`} className="text-xs font-medium flex items-center gap-1 cursor-pointer">
+                              <BookOpen className="h-3.5 w-3.5" /> Revista
                             </label>
                           </div>
                         </div>
@@ -820,8 +812,8 @@ export default function ChamadaTurmaPage() {
 
                       {/* Botão converter */}
                       {podeConverter && (
-                        <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleConverterEmAluno(visitante.id)}>
-                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                        <Button size="sm" className="w-full bg-green-600 hover:bg-green-700 h-8 text-xs" onClick={() => handleConverterEmAluno(visitante.id)}>
+                          <GraduationCap className="h-3.5 w-3.5 mr-1.5" />
                           Converter em Aluno
                         </Button>
                       )}
@@ -834,48 +826,83 @@ export default function ChamadaTurmaPage() {
         </div>
 
         {/* Coluna Lateral - Resumo */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Resumo da Sala</CardTitle>
+        <div className="space-y-4">
+          <Card className="lg:sticky lg:top-4">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Resumo</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Matriculados:</span>
-                  <span className="font-semibold">{resumo.matriculados}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Presentes:</span>
-                  <span className="font-semibold text-green-600">{resumo.presentes} ({resumo.percentual_presenca}%)</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Faltas:</span>
-                  <span className="font-semibold text-red-600">{resumo.faltas}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Visitantes:</span>
-                  <span className="font-semibold text-blue-600">{resumo.visitantes}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Bíblias:</span>
-                  <span className="font-semibold">{resumo.biblias}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Revistas:</span>
-                  <span className="font-semibold">{resumo.revistas}</span>
+            <CardContent className="space-y-3">
+              {/* Presença destaque */}
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <span className="text-3xl font-bold" style={{ color: corPresenca(resumo.percentual_presenca) }}>{resumo.percentual_presenca}%</span>
+                <p className="text-xs text-muted-foreground mt-0.5">de presença</p>
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden mt-2">
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${resumo.percentual_presenca}%`, backgroundColor: corPresenca(resumo.percentual_presenca) }} />
                 </div>
               </div>
 
-              <div className="border-t pt-4 space-y-2">
-                <Label htmlFor="oferta">Oferta (R$)</Label>
+              {/* Grid de stats */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 p-2 rounded-lg border">
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <div className="text-sm font-bold">{resumo.matriculados}</div>
+                    <div className="text-[10px] text-muted-foreground">Matrículas</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg border">
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <div>
+                    <div className="text-sm font-bold text-green-600">{resumo.presentes}</div>
+                    <div className="text-[10px] text-muted-foreground">Presentes</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg border">
+                  <XCircle className="h-4 w-4 text-red-500" />
+                  <div>
+                    <div className="text-sm font-bold text-red-600">{resumo.faltas}</div>
+                    <div className="text-[10px] text-muted-foreground">Faltas</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg border">
+                  <UserPlus className="h-4 w-4 text-blue-500" />
+                  <div>
+                    <div className="text-sm font-bold text-blue-600">{resumo.visitantes}</div>
+                    <div className="text-[10px] text-muted-foreground">Visitantes</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bíblias e Revistas */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                  <Book className="h-4 w-4 text-purple-500" />
+                  <div>
+                    <div className="text-sm font-bold text-purple-600">{resumo.biblias}</div>
+                    <div className="text-[10px] text-muted-foreground">Bíblias</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                  <BookOpen className="h-4 w-4 text-orange-500" />
+                  <div>
+                    <div className="text-sm font-bold text-orange-600">{resumo.revistas}</div>
+                    <div className="text-[10px] text-muted-foreground">Revistas</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Oferta */}
+              <div className="border-t pt-3 space-y-1.5">
+                <Label htmlFor="oferta" className="text-xs flex items-center gap-1.5">
+                  <DollarSign className="h-3.5 w-3.5 text-green-500" />
+                  Oferta (R$)
+                </Label>
                 <Input
                   id="oferta"
                   type="text"
                   inputMode="numeric"
                   value={(ofertaCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   onChange={(e) => {
-                    // Fallback para mobile (onKeyDown não funciona com teclado virtual)
                     const digits = e.target.value.replace(/\D/g, '')
                     setOfertaCents(digits ? Math.min(parseInt(digits, 10), 9999999) : 0)
                   }}
@@ -890,24 +917,26 @@ export default function ChamadaTurmaPage() {
                       e.preventDefault()
                       setOfertaCents(0)
                     }
-                    // Demais teclas: deixa passar (mobile envia key='Unidentified')
                   }}
-                  className="text-right font-mono tabular-nums"
+                  className="text-right font-mono tabular-nums h-9"
                 />
               </div>
 
-              <div className="border-t pt-4 space-y-2">
-                <Label htmlFor="anotacoes">Anotações</Label>
+              {/* Anotações */}
+              <div className="border-t pt-3 space-y-1.5">
+                <Label htmlFor="anotacoes" className="text-xs">Anotações</Label>
                 <Textarea
                   id="anotacoes"
-                  placeholder="Observações sobre a aula..."
-                  rows={4}
+                  placeholder="Observações..."
+                  rows={3}
                   value={anotacoes}
                   onChange={(e) => setAnotacoes(e.target.value)}
+                  className="text-sm"
                 />
               </div>
 
-              <Button className="w-full" onClick={handleSalvarChamada} disabled={salvando}>
+              {/* Salvar — desktop */}
+              <Button className="w-full hidden lg:flex" onClick={handleSalvarChamada} disabled={salvando}>
                 <Save className="h-4 w-4 mr-2" />
                 {salvando ? 'Salvando...' : 'Salvar Chamada'}
               </Button>
@@ -925,9 +954,9 @@ export default function ChamadaTurmaPage() {
         onAdicionar={handleAdicionarVisitante}
       />
 
-      {/* Botão salvar sticky — visível apenas no mobile */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t p-4 z-20">
-        <Button className="w-full" size="lg" onClick={handleSalvarChamada} disabled={salvando}>
+      {/* Botão salvar sticky mobile */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t p-3 z-20">
+        <Button className="w-full h-11" onClick={handleSalvarChamada} disabled={salvando}>
           <Save className="h-4 w-4 mr-2" />
           {salvando ? 'Salvando...' : 'Salvar Chamada'}
         </Button>

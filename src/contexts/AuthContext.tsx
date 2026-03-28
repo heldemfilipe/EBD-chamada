@@ -188,7 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logger.warn('Timeout no carregamento do perfil — liberando tela', { module: 'auth' })
         setLoading(false)
       }
-    }, 8000)
+    }, 5000)
 
     async function init() {
       try {

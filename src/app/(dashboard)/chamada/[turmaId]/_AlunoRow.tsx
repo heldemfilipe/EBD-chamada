@@ -2,11 +2,9 @@
 
 import React, { memo } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Book, BookOpen, GraduationCap } from 'lucide-react'
+import { Book, BookOpen, GraduationCap, CheckCircle2, XCircle } from 'lucide-react'
 import { getCargo } from '@/lib/constants'
 
 interface AlunoPresenca {
@@ -44,104 +42,116 @@ export const AlunoRow = memo(function AlunoRow({
   onJustificativa,
 }: AlunoRowProps) {
   const cargoInfo = getCargo(aluno.cargo)
+  const isPresente = aluno.presente === 'presente'
+  const isAusente = aluno.presente === 'ausente'
 
   return (
     <div
-      className={`p-4 border rounded-lg space-y-3 ${aluno.dadoAula ? 'border-red-500/60 bg-red-500/5' : ''}`}
+      className={`p-3 border rounded-lg transition-colors ${
+        aluno.dadoAula ? 'border-red-500/50 bg-red-500/5' :
+        isPresente ? 'border-green-500/20 bg-green-500/[0.02]' :
+        isAusente ? 'border-red-500/20 bg-red-500/[0.02]' : ''
+      }`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-muted text-sm font-medium flex-shrink-0">
-            {index + 1}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium">{aluno.nome}</span>
-              {aluno.isProfessor && (
-                <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 px-1.5 py-0">
-                  Professor
-                </Badge>
-              )}
-              {cargoInfo && (
-                <span
-                  className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
-                  style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
-                >
-                  {cargoInfo.label}
-                </span>
-              )}
-            </div>
-            {aluno.dadoAula && (
-              <div className="flex items-center gap-1 mt-0.5">
-                <GraduationCap className="h-3 w-3 text-red-400" />
-                <span className="text-[11px] font-semibold text-red-400">
-                  {aluno.turmaDaAulaId === turmaId
-                    ? 'Lecionando hoje nesta turma'
-                    : `Lecionando hoje em: ${aluno.turmaDaAulaNome}`}
-                </span>
-              </div>
+      {/* Nome (linha 1) */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold flex-shrink-0 ${
+          isPresente ? 'bg-green-500/15 text-green-600' :
+          isAusente ? 'bg-red-500/15 text-red-600' :
+          'bg-muted text-muted-foreground'
+        }`}>
+          {index + 1}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-medium text-sm">{aluno.nome}</span>
+            {aluno.isProfessor && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 border-blue-400 text-blue-400">
+                Prof.
+              </Badge>
+            )}
+            {cargoInfo && (
+              <span
+                className="text-[10px] font-semibold px-1.5 py-0 rounded-full border"
+                style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}
+              >
+                {cargoInfo.label}
+              </span>
             )}
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={aluno.presente === 'presente' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onPresenca(aluno.aluno_id, 'presente')}
-            className={aluno.presente === 'presente' ? 'bg-green-500 hover:bg-green-600' : ''}
-          >
-            Presente
-          </Button>
-          <Button
-            variant={aluno.presente === 'ausente' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onPresenca(aluno.aluno_id, 'ausente')}
-            className={aluno.presente === 'ausente' ? 'bg-red-500 hover:bg-red-600' : ''}
-          >
-            Ausente
-          </Button>
-          {aluno.presente === 'pendente' && (
-            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-              Pendente
-            </Badge>
+          {aluno.dadoAula && (
+            <div className="flex items-center gap-1 mt-0.5">
+              <GraduationCap className="h-2.5 w-2.5 text-red-400" />
+              <span className="text-[10px] font-semibold text-red-400">
+                {aluno.turmaDaAulaId === turmaId
+                  ? 'Lecionando hoje'
+                  : `Lecionando em: ${aluno.turmaDaAulaNome}`}
+              </span>
+            </div>
           )}
         </div>
       </div>
-      {aluno.presente === 'presente' && (
-        <div className="flex flex-wrap gap-4 sm:gap-6 ml-8 sm:ml-11">
-          <div className="flex items-center space-x-2">
+
+      {/* Botões de presença (linha 2) */}
+      <div className="flex gap-2 ml-9">
+        <button
+          onClick={() => onPresenca(aluno.aluno_id, 'presente')}
+          className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg border text-xs font-semibold transition-all ${
+            isPresente
+              ? 'bg-green-500 text-white border-green-500 shadow-sm'
+              : 'border-border hover:border-green-400 hover:bg-green-500/10 text-muted-foreground hover:text-green-600'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          Presente
+        </button>
+        <button
+          onClick={() => onPresenca(aluno.aluno_id, 'ausente')}
+          className={`flex-1 flex items-center justify-center gap-1.5 h-9 rounded-lg border text-xs font-semibold transition-all ${
+            isAusente
+              ? 'bg-red-500 text-white border-red-500 shadow-sm'
+              : 'border-border hover:border-red-400 hover:bg-red-500/10 text-muted-foreground hover:text-red-600'
+          }`}
+        >
+          <XCircle className="h-4 w-4" />
+          Ausente
+        </button>
+      </div>
+
+      {/* Bíblia e Revista — aparece só quando presente */}
+      {isPresente && (
+        <div className="flex flex-wrap gap-3 mt-2 ml-9">
+          <div className="flex items-center space-x-1.5">
             <Checkbox
               id={`biblia-${aluno.aluno_id}`}
               checked={aluno.trouxe_biblia}
               onCheckedChange={() => onBiblia(aluno.aluno_id)}
             />
-            <label htmlFor={`biblia-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-              <Book className="h-4 w-4" /> Trouxe Bíblia
+            <label htmlFor={`biblia-${aluno.aluno_id}`} className="text-xs font-medium flex items-center gap-1 cursor-pointer">
+              <Book className="h-3.5 w-3.5" /> Bíblia
             </label>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1.5">
             <Checkbox
               id={`revista-${aluno.aluno_id}`}
               checked={aluno.trouxe_revista}
               onCheckedChange={() => onRevista(aluno.aluno_id)}
             />
-            <label htmlFor={`revista-${aluno.aluno_id}`} className="text-sm font-medium flex items-center gap-2 cursor-pointer">
-              <BookOpen className="h-4 w-4" /> Trouxe Revista
+            <label htmlFor={`revista-${aluno.aluno_id}`} className="text-xs font-medium flex items-center gap-1 cursor-pointer">
+              <BookOpen className="h-3.5 w-3.5" /> Revista
             </label>
           </div>
         </div>
       )}
-      {aluno.presente === 'ausente' && (
-        <div className="ml-8 sm:ml-11 space-y-2">
-          <Label htmlFor={`justificativa-${aluno.aluno_id}`} className="text-xs text-muted-foreground">
-            Justificativa (opcional)
-          </Label>
+
+      {/* Justificativa — aparece só quando ausente */}
+      {isAusente && (
+        <div className="mt-2 ml-9">
           <Input
-            id={`justificativa-${aluno.aluno_id}`}
-            placeholder="Ex: Viagem, doente..."
+            placeholder="Justificativa (opcional)"
             value={aluno.justificativa}
             onChange={(e) => onJustificativa(aluno.aluno_id, e.target.value)}
-            className="text-sm"
+            className="text-xs h-8"
           />
         </div>
       )}

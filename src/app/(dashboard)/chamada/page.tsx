@@ -2,19 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { StatCard } from '@/components/ui/stat-card'
+import { Button } from '@/components/ui/button'
 import {
   Users, CheckCircle2, XCircle, UserPlus, Book, BookOpen, DollarSign,
   CalendarDays, ChevronRight, ChevronLeft, ClipboardList,
   Sun, CloudSun, Cloud, CloudDrizzle, CloudRain, CloudLightning, Zap, Thermometer,
+  TrendingUp, TrendingDown,
 } from 'lucide-react'
 import { getDomingoAtual, getProximoDomingo, formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import { calcularPct } from '@/lib/presence'
+import { calcularPct, corPresenca, resolverCor } from '@/lib/presence'
 import { format, addDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -96,8 +95,7 @@ export default function ChamadaPage() {
     setTempo(novo)
   }
 
-  // Carregar turmas (1 query turmas + 1 query contagem — sem N+1)
-  // Aguarda auth estar pronto para evitar filtrar com turmasPermitidas vazia
+  // Carregar turmas
   useEffect(() => {
     if (authLoading) return
     async function load() {
@@ -108,7 +106,6 @@ export default function ChamadaPage() {
       ])
       if (!turmasRaw) return
 
-      // Contagem de alunos por turma em JS (evita N queries individuais)
       const contagemPorTurma: Record<string, number> = {}
       for (const a of alunosRaw ?? []) {
         contagemPorTurma[a.turma_id] = (contagemPorTurma[a.turma_id] ?? 0) + 1
@@ -129,7 +126,7 @@ export default function ChamadaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isAdmin, turmasPermitidas])
 
-  // Carregar resumo do dia (chamadas + visitantes em paralelo)
+  // Carregar resumo do dia
   useEffect(() => {
     async function load() {
       const dataISO = converterParaISO(dataSelecionada)
@@ -186,6 +183,10 @@ export default function ChamadaPage() {
   const isProximo = isMesmoDomingo(dataSelecionada, proximoDomingo)
 
   const presencaPct = calcularPct(resumoDia.total_presentes, resumoDia.total_matriculados)
+  const turmasComChamada = turmasData.filter(t => {
+    const r = resumosPorTurma[t.id]
+    return r && (r.presentes > 0 || r.faltas > 0)
+  }).length
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -193,39 +194,37 @@ export default function ChamadaPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Chamada</h1>
-        <p className="text-muted-foreground mt-2">Selecione a data e visualize os resumos das turmas</p>
+        <p className="text-muted-foreground mt-1 text-sm">Selecione a data e registre a presença das turmas</p>
       </div>
 
-      {/* Seletor de Data */}
+      {/* Seletor de Data — compacto */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b bg-muted/30">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10"><CalendarDays className="h-5 w-5 text-primary" /></div>
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-primary/10"><CalendarDays className="h-4 w-4 text-primary" /></div>
             <div>
-              <h2 className="font-semibold text-base">Data da Chamada</h2>
-              <p className="text-xs text-muted-foreground">Selecione o domingo</p>
+              <h2 className="font-semibold text-sm">Data da Chamada</h2>
+              <p className="text-[11px] text-muted-foreground hidden sm:block">Selecione o domingo</p>
             </div>
           </div>
-          <div className="text-right hidden sm:block">
-            <div className="flex items-center gap-2">
-              {isHoje   && <Badge className="bg-primary/15 text-primary border-primary/30 text-xs">Atual</Badge>}
-              {isProximo && <Badge className="bg-orange-500/15 text-orange-600 border-orange-500/30 text-xs">Próximo</Badge>}
-              <span className="text-sm font-semibold text-primary capitalize">
-                {format(dataSelecionada, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
+            {isHoje   && <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] px-1.5">Atual</Badge>}
+            {isProximo && <Badge className="bg-orange-500/15 text-orange-600 border-orange-500/30 text-[10px] px-1.5">Próximo</Badge>}
+            <span className="text-sm font-semibold text-primary capitalize hidden sm:inline">
+              {format(dataSelecionada, "dd 'de' MMMM", { locale: ptBR })}
+            </span>
           </div>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant={isHoje ? 'default' : 'outline'} onClick={() => { setDataSelecionada(hoje); setSemanaOffset(0) }} className="h-8 text-xs">Domingo Atual</Button>
-            <Button size="sm" variant={isProximo ? 'default' : 'outline'} onClick={() => { setDataSelecionada(proximoDomingo); setSemanaOffset(1) }} className="h-8 text-xs">Próximo Domingo</Button>
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant={isHoje ? 'default' : 'outline'} onClick={() => { setDataSelecionada(hoje); setSemanaOffset(0) }} className="h-7 text-xs px-2.5">Domingo Atual</Button>
+            <Button size="sm" variant={isProximo ? 'default' : 'outline'} onClick={() => { setDataSelecionada(proximoDomingo); setSemanaOffset(1) }} className="h-7 text-xs px-2.5">Próximo Domingo</Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button onClick={() => setSemanaOffset(prev => prev - 1)} className="flex-shrink-0 p-2 rounded-lg border bg-muted/40 hover:bg-muted transition-colors"><ChevronLeft className="h-4 w-4" /></button>
-            <div className="flex-1 grid grid-cols-5 gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setSemanaOffset(prev => prev - 1)} className="flex-shrink-0 p-1.5 rounded-lg border bg-muted/40 hover:bg-muted transition-colors"><ChevronLeft className="h-4 w-4" /></button>
+            <div className="flex-1 grid grid-cols-5 gap-1">
               {domingosDaSemana.map((domingo) => {
                 const selecionado = isMesmoDomingo(domingo, dataSelecionada)
                 const ehHoje   = isMesmoDomingo(domingo, hoje)
@@ -234,20 +233,20 @@ export default function ChamadaPage() {
                 const dataISO   = converterParaISO(domingo)
                 return (
                   <button key={dataISO} onClick={() => setDataSelecionada(domingo)}
-                    className={`relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl border text-center transition-all duration-150 ${selecionado ? 'bg-primary text-primary-foreground border-primary shadow-md scale-105' : ehHoje ? 'border-primary/50 bg-primary/5 hover:bg-primary/10' : isFuturo ? 'border-dashed border-muted-foreground/30 bg-muted/20 hover:bg-muted/40' : 'border-border bg-background hover:bg-muted/50'}`}>
+                    className={`relative flex flex-col items-center justify-center py-2 px-0.5 rounded-xl border text-center transition-all duration-150 ${selecionado ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.03]' : ehHoje ? 'border-primary/50 bg-primary/5 hover:bg-primary/10' : isFuturo ? 'border-dashed border-muted-foreground/30 bg-muted/20 hover:bg-muted/40' : 'border-border bg-background hover:bg-muted/50'}`}>
                     {(ehHoje || ehProximo) && !selecionado && (
-                      <span className={`absolute -top-1.5 left-1/2 -translate-x-1/2 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${ehHoje ? 'bg-primary text-primary-foreground' : 'bg-orange-500 text-white'}`}>
+                      <span className={`absolute -top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-bold px-1 py-0.5 rounded-full ${ehHoje ? 'bg-primary text-primary-foreground' : 'bg-orange-500 text-white'}`}>
                         {ehHoje ? 'Hoje' : 'Próx'}
                       </span>
                     )}
-                    <span className={`text-[10px] font-medium uppercase tracking-wide mb-0.5 ${selecionado ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{format(domingo, 'MMM', { locale: ptBR })}</span>
-                    <span className={`text-xl font-bold leading-none ${selecionado ? 'text-primary-foreground' : ''}`}>{format(domingo, 'dd')}</span>
-                    <span className={`text-[10px] mt-0.5 ${selecionado ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{format(domingo, 'yyyy')}</span>
+                    <span className={`text-[9px] font-medium uppercase tracking-wide mb-0.5 ${selecionado ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{format(domingo, 'MMM', { locale: ptBR })}</span>
+                    <span className={`text-lg sm:text-xl font-bold leading-none ${selecionado ? 'text-primary-foreground' : ''}`}>{format(domingo, 'dd')}</span>
+                    <span className={`text-[9px] mt-0.5 ${selecionado ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{format(domingo, 'yyyy')}</span>
                   </button>
                 )
               })}
             </div>
-            <button onClick={() => setSemanaOffset(prev => prev + 1)} className="flex-shrink-0 p-2 rounded-lg border bg-muted/40 hover:bg-muted transition-colors"><ChevronRight className="h-4 w-4" /></button>
+            <button onClick={() => setSemanaOffset(prev => prev + 1)} className="flex-shrink-0 p-1.5 rounded-lg border bg-muted/40 hover:bg-muted transition-colors"><ChevronRight className="h-4 w-4" /></button>
           </div>
 
           <div className="sm:hidden text-center">
@@ -256,33 +255,33 @@ export default function ChamadaPage() {
         </div>
       </div>
 
-      {/* Condições do Tempo */}
+      {/* Condições do Tempo — mais compacto */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b bg-muted/30">
           <Sun className="h-4 w-4 text-yellow-500" />
-          <span className="font-semibold text-sm">Condições do Tempo</span>
+          <span className="font-semibold text-sm">Tempo</span>
           {tempo && (
-            <span className="ml-auto text-xs text-muted-foreground">
+            <Badge variant="secondary" className="ml-auto text-[10px]">
               {TEMPO_OPTIONS.find(t => t.value === tempo)?.label}
-            </span>
+            </Badge>
           )}
         </div>
-        <div className="px-5 py-3">
-          <div className="flex flex-wrap gap-2">
+        <div className="px-4 py-2.5">
+          <div className="flex flex-wrap gap-1.5">
             {TEMPO_OPTIONS.map(({ value, label, Icon, cor }) => {
               const ativo = tempo === value
               return (
                 <button
                   key={value}
                   onClick={() => handleTempoChange(value)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-medium transition-all ${
                     ativo
                       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                       : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  <Icon className={`h-4 w-4 ${ativo ? 'text-primary-foreground' : cor}`} />
-                  {label}
+                  <Icon className={`h-3.5 w-3.5 ${ativo ? 'text-primary-foreground' : cor}`} />
+                  <span className="hidden sm:inline">{label}</span>
                 </button>
               )
             })}
@@ -290,182 +289,167 @@ export default function ChamadaPage() {
         </div>
       </div>
 
-      {/* Resumo Geral do Dia */}
-      <div>
-        <h2 className="text-xl font-semibold mb-4">Resumo Geral do Dia</h2>
-
-        {/* Mobile: card compacto estilo resumo por sala */}
-        <div className="sm:hidden rounded-xl border bg-card overflow-hidden">
-          <div className="px-4 pt-3 pb-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-              <span>Presença geral</span>
-              <span className="font-semibold text-foreground">{presencaPct}%</span>
-            </div>
-            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${presencaPct >= 75 ? 'bg-green-500' : presencaPct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                style={{ width: `${presencaPct}%` }}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-0 border-t">
-            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
-              <Users className="h-4 w-4 text-muted-foreground mb-1" />
-              <span className="text-lg font-bold">{resumoDia.total_matriculados}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
-              <XCircle className="h-4 w-4 text-red-500 mb-1" />
-              <span className="text-lg font-bold text-red-600">{resumoDia.total_faltas}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Ausentes</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-3 px-1 border-r">
-              <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
-              <span className="text-lg font-bold text-green-600">{resumoDia.total_presentes}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Presentes</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-3 px-1">
-              <UserPlus className="h-4 w-4 text-blue-500 mb-1" />
-              <span className="text-lg font-bold text-blue-600">{resumoDia.total_visitantes}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Visitantes</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
-            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-              <CheckCircle2 className="h-3.5 w-3.5 text-primary mb-0.5" />
-              <span className="text-sm font-semibold text-primary">{resumoDia.total_presentes + resumoDia.total_visitantes}</span>
-              <span className="text-[9px] text-muted-foreground">Total</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-              <Book className="h-3.5 w-3.5 text-purple-500 mb-0.5" />
-              <span className="text-sm font-semibold text-purple-600">{resumoDia.total_biblias}</span>
-              <span className="text-[9px] text-muted-foreground">Bíblias</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-              <BookOpen className="h-3.5 w-3.5 text-orange-500 mb-0.5" />
-              <span className="text-sm font-semibold text-orange-600">{resumoDia.total_revistas}</span>
-              <span className="text-[9px] text-muted-foreground">Revistas</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-2 px-1">
-              <DollarSign className="h-3.5 w-3.5 text-green-500 mb-0.5" />
-              <span className="text-sm font-semibold text-green-600">{resumoDia.total_oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              <span className="text-[9px] text-muted-foreground">Oferta R$</span>
-            </div>
+      {/* Resumo Geral do Dia — card unico e mais visual */}
+      <div className="rounded-xl border bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+          <h2 className="font-semibold text-sm">Resumo do Dia</h2>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[10px]">
+              {turmasComChamada}/{turmasData.length} turmas
+            </Badge>
           </div>
         </div>
 
-        {/* Desktop: grid de StatCards */}
-        <div className="hidden sm:grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard title="Total Matriculados" value={resumoDia.total_matriculados} icon={Users}         description="Todas as turmas" />
-          <StatCard title="Total Ausentes"     value={resumoDia.total_faltas}       icon={XCircle}       description="Ausências"               valueClassName="text-red-600" />
-          <StatCard title="Total Presentes"    value={resumoDia.total_presentes}    icon={CheckCircle2}  description={`${presencaPct}% de presença`} valueClassName="text-green-600" />
-          <StatCard title="Total Visitantes"   value={resumoDia.total_visitantes}   icon={UserPlus}      description="Novos visitantes"        valueClassName="text-blue-600" />
-          <StatCard title="Total no Dia"       value={resumoDia.total_presentes + resumoDia.total_visitantes} icon={CheckCircle2} description="Presentes + visitantes" valueClassName="text-primary" />
-          <StatCard title="Total Bíblias"      value={resumoDia.total_biblias}      icon={Book}          description="Trouxeram bíblia"        valueClassName="text-purple-600" />
-          <StatCard title="Total Revistas"     value={resumoDia.total_revistas}     icon={BookOpen}      description="Trouxeram revista"       valueClassName="text-orange-600" />
-          <StatCard title="Total Oferta"       value={`R$ ${resumoDia.total_oferta.toFixed(2)}`} icon={DollarSign} description="Arrecadado no dia" valueClassName="text-green-600" />
+        {/* Destaque presença */}
+        <div className="px-4 pt-3 pb-2">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl sm:text-3xl font-bold" style={{ color: corPresenca(presencaPct) }}>{presencaPct}%</span>
+              <div className="text-xs text-muted-foreground">
+                <div>de presença</div>
+                <div className="font-medium text-foreground">{resumoDia.total_presentes + resumoDia.total_visitantes} pessoas no total</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              {presencaPct >= 75 ? <TrendingUp className="h-4 w-4 text-green-500" /> : <TrendingDown className="h-4 w-4 text-red-500" />}
+              <span>{resumoDia.total_presentes}/{resumoDia.total_matriculados} matriculados</span>
+            </div>
+          </div>
+          <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${presencaPct}%`, backgroundColor: corPresenca(presencaPct) }}
+            />
+          </div>
+        </div>
+
+        {/* Numeros em grid */}
+        <div className="grid grid-cols-4 gap-0 border-t">
+          <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mb-0.5" />
+            <span className="text-base sm:text-lg font-bold text-green-600">{resumoDia.total_presentes}</span>
+            <span className="text-[9px] text-muted-foreground">Presentes</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
+            <XCircle className="h-3.5 w-3.5 text-red-500 mb-0.5" />
+            <span className="text-base sm:text-lg font-bold text-red-600">{resumoDia.total_faltas}</span>
+            <span className="text-[9px] text-muted-foreground">Ausentes</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2.5 px-1 border-r">
+            <UserPlus className="h-3.5 w-3.5 text-blue-500 mb-0.5" />
+            <span className="text-base sm:text-lg font-bold text-blue-600">{resumoDia.total_visitantes}</span>
+            <span className="text-[9px] text-muted-foreground">Visitantes</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2.5 px-1">
+            <Users className="h-3.5 w-3.5 text-muted-foreground mb-0.5" />
+            <span className="text-base sm:text-lg font-bold">{resumoDia.total_matriculados}</span>
+            <span className="text-[9px] text-muted-foreground">Matrículas</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-0 border-t bg-muted/30">
+          <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+            <Book className="h-3 w-3 text-purple-500 mb-0.5" />
+            <span className="text-sm font-semibold text-purple-600">{resumoDia.total_biblias}</span>
+            <span className="text-[9px] text-muted-foreground">Bíblias</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
+            <BookOpen className="h-3 w-3 text-orange-500 mb-0.5" />
+            <span className="text-sm font-semibold text-orange-600">{resumoDia.total_revistas}</span>
+            <span className="text-[9px] text-muted-foreground">Revistas</span>
+          </div>
+          <div className="flex flex-col items-center justify-center py-2 px-1">
+            <DollarSign className="h-3 w-3 text-green-500 mb-0.5" />
+            <span className="text-sm font-semibold text-green-600">R$ {resumoDia.total_oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-[9px] text-muted-foreground">Oferta</span>
+          </div>
         </div>
       </div>
 
       {/* Resumo Por Sala */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Resumo por Sala</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Turmas</h2>
+          <span className="text-xs text-muted-foreground">{turmasData.length} turmas ativas</span>
+        </div>
         {(authLoading || turmasLoading) ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="rounded-xl border bg-card overflow-hidden animate-pulse">
-                <div className="h-1.5 w-full bg-muted" />
-                <div className="px-5 pt-4 pb-3 space-y-2">
+                <div className="h-2 w-full bg-muted" />
+                <div className="px-4 pt-3 pb-2 space-y-2">
                   <div className="h-5 w-32 bg-muted rounded" />
                   <div className="h-4 w-24 bg-muted rounded" />
                 </div>
-                <div className="px-5 pb-3"><div className="h-2 w-full bg-muted rounded-full" /></div>
+                <div className="px-4 pb-2"><div className="h-2 w-full bg-muted rounded-full" /></div>
                 <div className="grid grid-cols-4 gap-0 border-t">
-                  {[...Array(4)].map((_, j) => <div key={j} className="py-3 flex flex-col items-center gap-1"><div className="h-4 w-4 bg-muted rounded" /><div className="h-5 w-6 bg-muted rounded" /></div>)}
+                  {[...Array(4)].map((_, j) => <div key={j} className="py-2.5 flex flex-col items-center gap-1"><div className="h-4 w-4 bg-muted rounded" /><div className="h-5 w-6 bg-muted rounded" /></div>)}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {turmasData.map((turma) => {
             const resumo = resumosPorTurma[turma.id] ?? { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 }
             const pct = calcularPct(resumo.presentes, turma.totalAlunos)
             const chamadaFeita = resumo.presentes > 0 || resumo.faltas > 0
+            const corHex = resolverCor(turma.cor, 0)
 
             return (
               <div key={turma.id} onClick={() => router.push(`/chamada/${turma.id}?data=${converterParaISO(dataSelecionada)}`)}
-                className="group relative overflow-hidden rounded-xl border bg-card cursor-pointer hover:shadow-xl hover:border-primary/40 transition-all duration-200">
-                <div className={`h-1.5 w-full ${turma.cor}`} />
-                <div className="flex items-start justify-between px-5 pt-4 pb-3">
-                  <div className="space-y-1">
-                    <h3 className="font-bold text-base leading-tight group-hover:text-primary transition-colors">{turma.nome}</h3>
+                className="group relative overflow-hidden rounded-xl border bg-card cursor-pointer hover:shadow-lg hover:border-primary/30 transition-all duration-200">
+                {/* Barra colorida no topo */}
+                <div className="h-2 w-full" style={{ backgroundColor: corHex }} />
+
+                {/* Header do card */}
+                <div className="flex items-start justify-between px-4 pt-3 pb-2">
+                  <div className="space-y-0.5 min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="text-xs px-2 py-0">{turma.sala}</Badge>
-                      <Badge variant="outline" className="text-xs px-2 py-0">{turma.faixaEtaria}</Badge>
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: corHex }} />
+                      <h3 className="font-bold text-sm leading-tight group-hover:text-primary transition-colors truncate">{turma.nome}</h3>
+                    </div>
+                    <div className="flex items-center gap-1.5 ml-4">
+                      <span className="text-[10px] text-muted-foreground">{turma.sala}</span>
+                      <span className="text-[10px] text-muted-foreground">·</span>
+                      <span className="text-[10px] text-muted-foreground">{turma.faixaEtaria}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
                     {chamadaFeita
-                      ? <Badge className="bg-green-500/20 text-green-600 border-green-500/30 text-xs"><CheckCircle2 className="h-3 w-3 mr-1" />Realizada</Badge>
-                      : <Badge variant="outline" className="text-xs text-muted-foreground"><ClipboardList className="h-3 w-3 mr-1" />Pendente</Badge>}
+                      ? <Badge className="bg-green-500/15 text-green-600 border-green-500/30 text-[10px] px-1.5 py-0"><CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />Feita</Badge>
+                      : <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground"><ClipboardList className="h-2.5 w-2.5 mr-0.5" />Pendente</Badge>}
                     <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
 
-                <div className="px-5 pb-3">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                    <span>Presença</span>
-                    <span className="font-semibold text-foreground">{pct}%</span>
+                {/* Barra de presença */}
+                <div className="px-4 pb-2">
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
+                    <span>{resumo.presentes}/{turma.totalAlunos} presentes</span>
+                    <span className="font-bold text-xs" style={{ color: chamadaFeita ? corPresenca(pct) : undefined }}>{chamadaFeita ? `${pct}%` : '—'}</span>
                   </div>
-                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-500 ${pct >= 75 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
+                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: corPresenca(pct) }} />
                   </div>
                 </div>
 
+                {/* Estatisticas */}
                 <div className="grid grid-cols-4 gap-0 border-t">
-                  <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
-                    <Users className="h-4 w-4 text-muted-foreground mb-1" />
-                    <span className="text-lg font-bold">{turma.totalAlunos}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Matrículas</span>
-                  </div>
-                  <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
-                    <XCircle className="h-4 w-4 text-red-500 mb-1" />
-                    <span className="text-lg font-bold text-red-600">{resumo.faltas}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Ausentes</span>
-                  </div>
-                  <div className="flex flex-col items-center justify-center py-3 px-2 border-r">
-                    <CheckCircle2 className="h-4 w-4 text-green-500 mb-1" />
-                    <span className="text-lg font-bold text-green-600">{resumo.presentes}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Presentes</span>
-                  </div>
-                  <div className="flex flex-col items-center justify-center py-3 px-2">
-                    <UserPlus className="h-4 w-4 text-blue-500 mb-1" />
-                    <span className="text-lg font-bold text-blue-600">{resumo.visitantes}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Visitantes</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-0 border-t bg-muted/30">
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-primary mb-0.5" />
-                    <span className="text-sm font-semibold text-primary">{resumo.presentes + resumo.visitantes}</span>
-                    <span className="text-[9px] text-muted-foreground">Total</span>
+                    <span className="text-sm font-bold text-green-600">{resumo.presentes}</span>
+                    <span className="text-[9px] text-muted-foreground">Pres.</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-                    <Book className="h-3.5 w-3.5 text-purple-500 mb-0.5" />
-                    <span className="text-sm font-semibold text-purple-600">{resumo.biblias}</span>
-                    <span className="text-[9px] text-muted-foreground">Bíblias</span>
+                    <span className="text-sm font-bold text-red-600">{resumo.faltas}</span>
+                    <span className="text-[9px] text-muted-foreground">Faltas</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1 border-r">
-                    <BookOpen className="h-3.5 w-3.5 text-orange-500 mb-0.5" />
-                    <span className="text-sm font-semibold text-orange-600">{resumo.revistas}</span>
-                    <span className="text-[9px] text-muted-foreground">Revistas</span>
+                    <span className="text-sm font-bold text-blue-600">{resumo.visitantes}</span>
+                    <span className="text-[9px] text-muted-foreground">Visit.</span>
                   </div>
                   <div className="flex flex-col items-center justify-center py-2 px-1">
-                    <DollarSign className="h-3.5 w-3.5 text-green-500 mb-0.5" />
-                    <span className="text-sm font-semibold text-green-600">{resumo.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    <span className="text-[9px] text-muted-foreground">Oferta R$</span>
+                    <span className="text-sm font-bold text-green-600">R$ {resumo.oferta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-[9px] text-muted-foreground">Oferta</span>
                   </div>
                 </div>
               </div>
