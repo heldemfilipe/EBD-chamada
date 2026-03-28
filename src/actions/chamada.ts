@@ -147,8 +147,15 @@ export async function buscarResumoDia(dataISO: string): Promise<{
 // ─── Chamada por turma — buscar dados iniciais ───────────────────────────────
 
 export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, trimestreInicio: string, trimestreFim: string) {
-  // 5 queries em paralelo via SQL direto — muito mais rapido que PostgREST
-  const [turmaRows, alunosRows, escalaRows, chamadaRows, visitanteRows] = await Promise.all([
+  // Validação básica para evitar erros de UUID inválido
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!uuidRegex.test(turmaId)) {
+    throw new Error(`turmaId inválido: ${turmaId}`)
+  }
+
+  let turmaRows, alunosRows, escalaRows, chamadaRows, visitanteRows
+  try {
+    ;[turmaRows, alunosRows, escalaRows, chamadaRows, visitanteRows] = await Promise.all([
     sql`SELECT id, nome, sala FROM turmas WHERE id = ${turmaId} LIMIT 1`,
 
     sql`SELECT id, nome, responsavel, cargo
@@ -183,7 +190,17 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
           AND hv.data >= ${trimestreInicio}
           AND hv.data <= ${trimestreFim}
         ORDER BY hv.data DESC`,
-  ])
+    ])
+  } catch (e: any) {
+    console.error('[chamada] Erro ao buscar dados da turma:', {
+      turmaId,
+      dataISO,
+      error: e?.message,
+      code: e?.code,
+      detail: e?.detail,
+    })
+    throw e
+  }
 
   const turma = turmaRows[0] ? {
     id: turmaRows[0].id,

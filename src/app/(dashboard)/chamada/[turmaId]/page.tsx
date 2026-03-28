@@ -393,6 +393,7 @@ export default function ChamadaTurmaPage() {
     faltas: totalAusentes,
     pendentes: totalPendentes,
     visitantes: visitantesPresentes.length,
+    total: totalPresentes + visitantesPresentes.length,
     biblias: alunos.filter(a => a.trouxe_biblia).length + visitantesPresentes.filter(v => v.trouxe_biblia).length,
     revistas: alunos.filter(a => a.trouxe_revista).length + visitantesPresentes.filter(v => v.trouxe_revista).length,
     percentual_presenca: alunos.length > 0
@@ -743,13 +744,20 @@ export default function ChamadaTurmaPage() {
                 </div>
               </div>
 
-              {/* Grid de stats */}
+              {/* Grid de stats — ordem: Matriculados, Ausentes, Presentes, Visitantes, Total, Bíblias, Revistas */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex items-center gap-2 p-2 rounded-lg border">
                   <Users className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <div className="text-sm font-bold">{resumo.matriculados}</div>
-                    <div className="text-[10px] text-muted-foreground">Matrículas</div>
+                    <div className="text-[10px] text-muted-foreground">Matriculados</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg border">
+                  <XCircle className="h-4 w-4 text-red-500" />
+                  <div>
+                    <div className="text-sm font-bold text-red-600">{resumo.faltas}</div>
+                    <div className="text-[10px] text-muted-foreground">Ausentes</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 p-2 rounded-lg border">
@@ -760,23 +768,19 @@ export default function ChamadaTurmaPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 p-2 rounded-lg border">
-                  <XCircle className="h-4 w-4 text-red-500" />
-                  <div>
-                    <div className="text-sm font-bold text-red-600">{resumo.faltas}</div>
-                    <div className="text-[10px] text-muted-foreground">Faltas</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 p-2 rounded-lg border">
                   <UserPlus className="h-4 w-4 text-blue-500" />
                   <div>
                     <div className="text-sm font-bold text-blue-600">{resumo.visitantes}</div>
                     <div className="text-[10px] text-muted-foreground">Visitantes</div>
                   </div>
                 </div>
-              </div>
-
-              {/* Bíblias e Revistas */}
-              <div className="grid grid-cols-2 gap-2">
+                <div className="col-span-2 flex items-center gap-2 p-2 rounded-lg bg-muted/40 border">
+                  <GraduationCap className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <div className="text-sm font-bold">{resumo.total}</div>
+                    <div className="text-[10px] text-muted-foreground">Total (presentes + visitantes)</div>
+                  </div>
+                </div>
                 <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-500/5 border border-purple-500/20">
                   <Book className="h-4 w-4 text-purple-500" />
                   <div>
