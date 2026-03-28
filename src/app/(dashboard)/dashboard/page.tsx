@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend,
 } from 'recharts'
 import { supabase } from '@/lib/supabase'
 import { MESES_CURTOS, TRIMESTRES, getCargo } from '@/lib/constants'
@@ -59,7 +59,7 @@ type PontoDado = { periodo: string; presentes: number; total: number; pct: numbe
 export default function DashboardPage() {
   const db = supabase as any
 
-  const [periodo, setPeriodo] = useState<Periodo>('mensal')
+  const [periodo, setPeriodo] = useState<Periodo>('trimestral')
   const [ano, setAno] = useState(new Date().getFullYear())
   const [trimestre, setTrimestre] = useState(Math.floor(new Date().getMonth() / 3))
   const [mes, setMes] = useState(new Date().getMonth())
@@ -334,29 +334,32 @@ export default function DashboardPage() {
             <p className="text-sm font-semibold mb-1">Evolução de Presença</p>
             <p className="text-xs text-muted-foreground mb-3">Total de presentes e % no período selecionado</p>
             {dadosGrafico.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
-                <AreaChart data={dadosGrafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gradPresentes" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gradPct" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} />
-                  <XAxis dataKey="periodo" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Area yAxisId="left" type="monotone" dataKey="presentes" name="Presentes" stroke="#6366f1" fill="url(#gradPresentes)" strokeWidth={2} dot={{ r: 3 }} />
-                  <Area yAxisId="right" type="monotone" dataKey="pct" name="Presença %" stroke="#22c55e" fill="url(#gradPct)" strokeWidth={2} dot={{ r: 3 }} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <div className="h-[200px] sm:h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dadosGrafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gradPresentes" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="gradPct" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} />
+                    <XAxis dataKey="periodo" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                    <Area yAxisId="left" type="monotone" dataKey="presentes" name="Presentes" stroke="#6366f1" fill="url(#gradPresentes)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5, strokeWidth: 2 }} animationDuration={800} />
+                    <Area yAxisId="right" type="monotone" dataKey="pct" name="Presença %" stroke="#22c55e" fill="url(#gradPct)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5, strokeWidth: 2 }} animationDuration={800} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             ) : (
-              <EmptyState message="Sem dados para o período selecionado" minHeight="h-[240px]" />
+              <EmptyState message="Sem dados para o período selecionado" minHeight="h-[200px] sm:h-[280px]" />
             )}
           </div>
         </PeriodSelector>
@@ -370,22 +373,24 @@ export default function DashboardPage() {
           <CardContent>
             {dadosPorSala.length > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={dadosPorSala} margin={{ top: 10, right: 20, left: 0, bottom: 0 }} barSize={30}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
-                    <XAxis dataKey="sala" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
-                      tickFormatter={(v) => {
-                        const s = (v as string).replace('Crianças - ', '').replace('Adultos - ', '')
-                        return s.length > 12 ? s.slice(0, 11) + '…' : s
-                      }}
-                    />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
-                    <Tooltip formatter={(v: any) => [`${v}%`, 'Presença média']} labelStyle={{ fontWeight: 600 }} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
-                    <Bar dataKey="presencaMedia" name="Presença %" radius={[6, 6, 0, 0]}>
-                      {dadosPorSala.map((entry, i) => <Cell key={i} fill={entry.cor} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="h-[200px] sm:h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dadosPorSala} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
+                      <XAxis dataKey="sala" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
+                        tickFormatter={(v) => {
+                          const s = (v as string).replace('Crianças - ', '').replace('Adultos - ', '')
+                          return s.length > 12 ? s.slice(0, 11) + '…' : s
+                        }}
+                      />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
+                      <Tooltip formatter={(v: any) => [`${v}%`, 'Presença média']} labelStyle={{ fontWeight: 600 }} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
+                      <Bar dataKey="presencaMedia" name="Presença %" radius={[8, 8, 0, 0]} animationDuration={600}>
+                        {dadosPorSala.map((entry, i) => <Cell key={i} fill={entry.cor} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
                 <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t">
                   {dadosPorSala.map((sala) => (
                     <div key={sala.sala} className="flex items-center gap-1.5">

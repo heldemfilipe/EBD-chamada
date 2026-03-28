@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts'
 import { corPresenca, badgePresenca, labelPresenca } from '@/lib/presence'
 import { cn } from '@/lib/utils'
 
@@ -30,17 +30,20 @@ export function SecaoSalas({ dados }: SecaoSalasProps) {
             <EmptyState message="Sem dados para o período selecionado" />
           ) : (
             <>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={dados} margin={{ top: 5, right: 20, left: 0, bottom: 0 }} barSize={28}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
-                  <XAxis dataKey="sala" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => v.replace('Crianças - ', '').replace('Adultos - ', '')} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
-                  <Tooltip formatter={(v: any) => [`${v}%`, 'Presença']} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
-                  <Bar dataKey="presencaMedia" radius={[6, 6, 0, 0]}>
-                    {dados.map((e, i) => <Cell key={i} fill={e.cor} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="h-[180px] sm:h-[240px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dados} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />
+                    <XAxis dataKey="sala" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => v.replace('Crianças - ', '').replace('Adultos - ', '')} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
+                    <Tooltip formatter={(v: any) => [`${v}%`, 'Presença']} contentStyle={{ borderRadius: 10, fontSize: 13 }} />
+                    <Bar dataKey="presencaMedia" radius={[8, 8, 0, 0]} animationDuration={600}>
+                      {dados.map((e, i) => <Cell key={i} fill={e.cor} />)}
+                      <LabelList dataKey="presencaMedia" position="top" fontSize={11} formatter={(v: number) => `${v}%`} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
 
               <div className="sm:hidden space-y-3">
                 {dados.map((s, i) => (

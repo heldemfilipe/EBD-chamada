@@ -99,7 +99,7 @@ function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
 export default function RelatoriosPage() {
   const db = supabase as any
 
-  const [granularidade, setGranularidade] = useState<Granularidade>('mes')
+  const [granularidade, setGranularidade] = useState<Granularidade>('trimestre')
   const [ano, setAno] = useState(new Date().getFullYear())
   const [mes, setMes] = useState(new Date().getMonth())
   const [trim, setTrim] = useState(Math.floor(new Date().getMonth() / 3))
@@ -738,17 +738,17 @@ export default function RelatoriosPage() {
           {/* KPIs */}
           <div id="section-resumo" className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 divide-x divide-y md:divide-y-0">
             {[
-              { label: 'Presença',   value: `${dados.pct}%`,                             sub: `${dados.presentes} presentes`, icon: <CheckCircle2 className="h-4 w-4 text-green-500" />,    color: 'text-green-600' },
+              { label: 'Presença',   value: `${dados.pct}%`,                             sub: `${dados.presentes} presentes`, icon: <CheckCircle2 className="h-4 w-4 text-green-500" />,    color: 'text-green-600', hero: true },
               { label: 'Faltas',     value: dados.faltas,                                 sub: 'ausências',                    icon: <XCircle      className="h-4 w-4 text-red-500" />,      color: 'text-red-600' },
               { label: 'Visitantes', value: dados.visitantes,                             sub: 'novos',                        icon: <UserPlus     className="h-4 w-4 text-blue-500" />,     color: 'text-blue-600' },
               { label: 'Bíblias',    value: dados.biblias,                                sub: 'trouxeram',                    icon: <Book         className="h-4 w-4 text-purple-500" />,   color: 'text-purple-600' },
               { label: 'Revistas',   value: dados.revistas,                               sub: 'trouxeram',                    icon: <BookOpen     className="h-4 w-4 text-orange-500" />,   color: 'text-orange-600' },
               { label: 'Oferta',     value: `R$ ${dados.oferta.toLocaleString('pt-BR')}`, sub: 'arrecadado',                   icon: <DollarSign   className="h-4 w-4 text-emerald-500" />,  color: 'text-emerald-600' },
               { label: 'Domingos',   value: dados.domingos,                               sub: 'aulas realizadas',             icon: <Calendar     className="h-4 w-4 text-muted-foreground" />, color: '' },
-            ].map((kpi, i) => (
-              <div key={i} className="flex flex-col items-center justify-center py-4 px-3 text-center">
+            ].map((kpi: any, i) => (
+              <div key={i} className={`flex flex-col items-center justify-center py-4 px-3 text-center ${kpi.hero ? 'col-span-2 sm:col-span-1 bg-green-500/5' : ''}`}>
                 <div className="mb-1">{kpi.icon}</div>
-                <span className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</span>
+                <span className={`${kpi.hero ? 'text-2xl sm:text-xl' : 'text-xl'} font-bold ${kpi.color}`}>{kpi.value}</span>
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">{kpi.label}</span>
                 <span className="text-[10px] text-muted-foreground">{kpi.sub}</span>
               </div>
@@ -765,30 +765,32 @@ export default function RelatoriosPage() {
             </CardHeader>
             <CardContent>
               {grafico.length === 0 ? (
-                <div className="flex items-center justify-center h-[230px] text-muted-foreground text-sm">Sem dados para o período selecionado</div>
+                <div className="flex items-center justify-center h-[200px] sm:h-[280px] text-muted-foreground text-sm">Sem dados para o periodo selecionado</div>
               ) : (
-                <ResponsiveContainer width="100%" height={230}>
-                  <AreaChart data={grafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="gPres" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="gPct" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} />
-                    <XAxis dataKey="periodo" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="l" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                    <Area yAxisId="l" type="monotone" dataKey="presentes" name="Presentes" stroke="#6366f1" fill="url(#gPres)" strokeWidth={2} dot={{ r: 3 }} />
-                    <Area yAxisId="r" type="monotone" dataKey="pct" name="Presença %" stroke="#22c55e" fill="url(#gPct)" strokeWidth={2} dot={{ r: 3 }} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="h-[200px] sm:h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={grafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="gPres" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gPct" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} />
+                      <XAxis dataKey="periodo" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis yAxisId="l" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                      <Area yAxisId="l" type="monotone" dataKey="presentes" name="Presentes" stroke="#6366f1" fill="url(#gPres)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5, strokeWidth: 2 }} animationDuration={800} />
+                      <Area yAxisId="r" type="monotone" dataKey="pct" name="Presença %" stroke="#22c55e" fill="url(#gPct)" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5, strokeWidth: 2 }} animationDuration={800} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               )}
             </CardContent>
           </Card>

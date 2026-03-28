@@ -55,6 +55,18 @@ export function resolverCor(cor: string | undefined | null, fallbackIdx: number)
 }
 
 /**
+ * Converte uma classe bg-* de turma para rgba CSS numa dada opacidade.
+ * Ex: turmaCorRgba('bg-blue-500', 0, 0.1) => 'rgba(59,130,246,0.1)'
+ */
+export function turmaCorRgba(cor: string | undefined | null, fallbackIdx: number, opacity: number): string {
+  const hex = resolverCor(cor, fallbackIdx)
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${opacity})`
+}
+
+/**
  * Agrega um array de presenças brutas num objeto { presentes, total, pct }.
  * Aceita o shape vindo do Supabase: `{ presente: boolean }[]`
  */

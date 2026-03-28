@@ -19,6 +19,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
+import { turmaCorRgba } from '@/lib/presence'
 import { NovaEscalaDialog } from './_NovaEscalaDialog'
 import { SugestaoDialog } from './_SugestaoDialog'
 
@@ -852,8 +853,8 @@ export default function EscalaPage() {
                     {tabelaView.turmas.map((t, colIdx) => {
                       const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
                       return (
-                        <th key={t.id} className={`px-3 py-0 text-left font-semibold ${colIdx % 2 === 1 ? 'bg-muted/20' : ''}`} style={{ minWidth: '140px' }}>
-                          <div className={`h-1.5 -mx-3 mb-2 ${t.cor}`} />
+                        <th key={t.id} className="px-3 py-0 text-left font-semibold" style={{ minWidth: '140px', backgroundColor: turmaCorRgba(t.cor, colIdx, 0.12) }}>
+                          <div className={`h-2.5 -mx-3 mb-2 ${t.cor}`} />
                           <div className="flex items-center gap-1 mb-0.5 group/col">
                             <span className="text-xs font-bold flex-1 truncate">{t.nome}</span>
                             <button
@@ -915,9 +916,9 @@ export default function EscalaPage() {
                         </td>
                         {linha.celulas.map((c, colIdx) => {
                           const temaLicao = getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
-                          const colBg = colIdx % 2 === 1 ? 'bg-muted/10' : ''
+                          const turmaObj = tabelaView.turmas[colIdx]
                           return (
-                          <td key={c.turmaId} className={`px-3 py-2 ${colBg}`}>
+                          <td key={c.turmaId} className="px-3 py-2" style={{ backgroundColor: turmaCorRgba(turmaObj?.cor, colIdx, 0.05) }}>
                             {c.isMerged ? (
                               c.professor ? (
                                 <div className="flex items-center justify-between gap-1 group">
