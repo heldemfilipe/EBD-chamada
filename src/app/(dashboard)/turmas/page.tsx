@@ -25,13 +25,13 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Plus, Users, GraduationCap, Edit, Trash2, Eye, UserPlus, Loader2 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { buscarTurmasDetalhadas, salvarTurma, excluirTurma, buscarDetalhesTurma, buscarAlunosSemTurma, matricularAluno } from '@/actions/turmas'
 import { StatCard } from '@/components/ui/stat-card'
 import { PresenceBar } from '@/components/ui/presence-bar'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { salvarCargo, calcularIdade } from '@/lib/utils'
+import { calcularIdade } from '@/lib/utils'
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
 interface Turma {
@@ -47,7 +47,7 @@ interface Turma {
 interface Professor {
   id: string
   nome: string
-  professor_turmas: { turma_id: string }[]
+  turma_ids: string[]
 }
 
 interface AlunoDetalhe {
@@ -83,8 +83,6 @@ const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', cargo: '
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function TurmasPage() {
-  const db = supabase as any
-
   // ── Estado principal ──
   const [turmasData, setTurmasData]         = useState<Turma[]>([])
   const [professoresMock, setProfessoresMock] = useState<Professor[]>([])
@@ -115,49 +113,31 @@ export default function TurmasPage() {
   // ─── Carga inicial ────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelado = false
-    async function fetchTurmas() {
+    async function fetchDados() {
       try {
-        // 1 query para turmas + 1 query para todos os alunos (em vez de N queries)
-        const [{ data }, { data: alunosData }] = await Promise.all([
-          db.from('turmas').select('id, nome, descricao, faixa_etaria, sala, cor').eq('ativa', true).order('nome'),
-          db.from('alunos').select('turma_id').eq('ativo', true),
-        ])
-        if (cancelado || !data) return
+        const { turmas, professores } = await buscarTurmasDetalhadas()
+        if (cancelado) return
 
-        // Conta alunos por turma client-side
-        const contagemPorTurma: Record<string, number> = {}
-        for (const a of alunosData ?? []) {
-          if (a.turma_id) contagemPorTurma[a.turma_id] = (contagemPorTurma[a.turma_id] ?? 0) + 1
-        }
-
-        setTurmasData(data.map((t: any) => ({
+        setTurmasData(turmas.map(t => ({
           id: t.id, nome: t.nome, descricao: t.descricao ?? '',
           faixaEtaria: t.faixa_etaria ?? '', sala: t.sala ?? '',
-          cor: t.cor ?? 'bg-blue-500', totalAlunos: contagemPorTurma[t.id] ?? 0,
+          cor: t.cor ?? 'bg-blue-500', totalAlunos: t.totalAlunos,
         })))
+        setProfessoresMock(professores)
       } catch (e: any) {
         if (!cancelado) toast('Erro ao carregar turmas: ' + (e?.message ?? 'erro inesperado'), 'error')
       } finally {
         if (!cancelado) setCarregando(false)
       }
     }
-    fetchTurmas()
+    fetchDados()
     return () => { cancelado = true }
-  }, [])
-
-  useEffect(() => {
-    async function fetchProfessores() {
-      const { data } = await db
-        .from('professores').select('id, nome, professor_turmas(turma_id)').eq('ativo', true) as { data: any[] | null }
-      setProfessoresMock(data ?? [])
-    }
-    fetchProfessores()
   }, [])
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const getProfessoresDaTurma = useCallback((turmaId: string): string[] =>
     professoresMock
-      .filter(p => p.professor_turmas.some(pt => pt.turma_id === turmaId))
+      .filter(p => p.turma_ids.includes(turmaId))
       .map(p => p.nome),
   [professoresMock])
 
@@ -183,12 +163,16 @@ export default function TurmasPage() {
 
   async function handleSaveTurma() {
     if (!formData.nome) { toast('Por favor, preencha o nome da turma.', 'error'); return }
+    const resultado = await salvarTurma({
+      id: editMode && selectedTurma ? selectedTurma.id : undefined,
+      nome: formData.nome, descricao: formData.descricao,
+      faixa_etaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor,
+    })
+    if (!resultado.success) {
+      toast(editMode ? 'Erro ao atualizar turma.' : 'Erro ao cadastrar turma.', 'error')
+      return
+    }
     if (editMode && selectedTurma) {
-      const { error } = await db.from('turmas').update({
-        nome: formData.nome, descricao: formData.descricao,
-        faixa_etaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor,
-      }).eq('id', selectedTurma.id)
-      if (error) { toast('Erro ao atualizar turma.', 'error'); return }
       setTurmasData(turmasData.map(t =>
         t.id === selectedTurma.id
           ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor }
@@ -196,13 +180,8 @@ export default function TurmasPage() {
       ))
       toast('Turma atualizada com sucesso!')
     } else {
-      const { data, error } = await db.from('turmas').insert({
-        nome: formData.nome, descricao: formData.descricao,
-        faixa_etaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor,
-      }).select('id').single()
-      if (error || !data) { toast('Erro ao cadastrar turma.', 'error'); return }
       setTurmasData([...turmasData, {
-        id: data.id, nome: formData.nome, descricao: formData.descricao,
+        id: resultado.id!, nome: formData.nome, descricao: formData.descricao,
         faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor, totalAlunos: 0,
       }])
       toast('Turma cadastrada com sucesso!')
@@ -212,8 +191,8 @@ export default function TurmasPage() {
 
   async function handleDeleteTurma() {
     if (!selectedTurma) return
-    const { error } = await db.from('turmas').delete().eq('id', selectedTurma.id)
-    if (error) { toast('Erro ao excluir turma.', 'error'); return }
+    const resultado = await excluirTurma(selectedTurma.id)
+    if (!resultado.success) { toast('Erro ao excluir turma.', 'error'); return }
     setTurmasData(turmasData.filter(t => t.id !== selectedTurma.id))
     toast('Turma excluída com sucesso!')
     setDeleteDialogOpen(false); setSelectedTurma(null)
@@ -227,25 +206,10 @@ export default function TurmasPage() {
     setDetailLoading(true)
 
     const anoAtual = new Date().getFullYear()
-    const [{ data: alunosData }, { data: chamadasData }] = await Promise.all([
-      db.from('alunos').select('id, nome, data_nascimento').eq('turma_id', turma.id).eq('ativo', true).order('nome'),
-      db.from('chamadas').select('id').eq('turma_id', turma.id).eq('ano', anoAtual),
-    ])
+    const { alunos, presencasMap } = await buscarDetalhesTurma(turma.id, anoAtual)
 
-    const presencaMap: Record<string, { presentes: number; total: number }> = {}
-    const chamadaIds = (chamadasData ?? []).map((c: any) => c.id)
-    if (chamadaIds.length > 0) {
-      const { data: presencas } = await db
-        .from('presencas').select('aluno_id, presente').in('chamada_id', chamadaIds)
-      for (const p of presencas ?? []) {
-        if (!presencaMap[p.aluno_id]) presencaMap[p.aluno_id] = { presentes: 0, total: 0 }
-        presencaMap[p.aluno_id].total++
-        if (p.presente) presencaMap[p.aluno_id].presentes++
-      }
-    }
-
-    setDetailAlunos((alunosData ?? []).map((a: any) => {
-      const pm = presencaMap[a.id]
+    setDetailAlunos(alunos.map(a => {
+      const pm = presencasMap[a.id]
       return {
         id: a.id,
         nome: a.nome,
@@ -261,29 +225,25 @@ export default function TurmasPage() {
     setEnrollForm(ENROLL_FORM_VAZIO)
     setEnrollSelectedId('')
     setEnrollTab('novo')
-    const { data } = await db
-      .from('alunos').select('id, nome').is('turma_id', null).eq('ativo', true).order('nome')
-    setAlunosSemTurma(data ?? [])
+    const dados = await buscarAlunosSemTurma()
+    setAlunosSemTurma(dados)
     setEnrollOpen(true)
   }
 
   async function handleEnrollNovo() {
     if (!enrollForm.nome || !selectedTurma) { toast('Preencha o nome do aluno.', 'error'); return }
     setEnrollLoading(true)
-    // Payload sem cargo para não quebrar se a coluna não existir
-    const { data, error } = await db.from('alunos').insert({
+    const resultado = await matricularAluno({
+      turma_id: selectedTurma.id,
       nome: enrollForm.nome,
       data_nascimento: enrollForm.dataNascimento || null,
       telefone: enrollForm.telefone || null,
-      turma_id: selectedTurma.id,
-      ativo: true,
-    }).select('id').single()
+    })
     setEnrollLoading(false)
-    if (error || !data) { toast('Erro ao matricular aluno.', 'error'); return }
-    if (enrollForm.cargo) await salvarCargo(db, 'alunos', data.id, enrollForm.cargo)
+    if (!resultado.success) { toast('Erro ao matricular aluno.', 'error'); return }
 
     const novoAluno: AlunoDetalhe = {
-      id: data.id, nome: enrollForm.nome,
+      id: resultado.id!, nome: enrollForm.nome,
       idade: enrollForm.dataNascimento ? (calcularIdade(enrollForm.dataNascimento) ?? 0) : 0,
       presenca: 0,
     }
@@ -296,9 +256,9 @@ export default function TurmasPage() {
   async function handleEnrollExistente() {
     if (!enrollSelectedId || !selectedTurma) { toast('Selecione um aluno.', 'error'); return }
     setEnrollLoading(true)
-    const { error } = await db.from('alunos').update({ turma_id: selectedTurma.id }).eq('id', enrollSelectedId)
+    const resultado = await matricularAluno({ id: enrollSelectedId, turma_id: selectedTurma.id })
     setEnrollLoading(false)
-    if (error) { toast('Erro ao matricular aluno.', 'error'); return }
+    if (!resultado.success) { toast('Erro ao matricular aluno.', 'error'); return }
 
     const alunoSelecionado = alunosSemTurma.find(a => a.id === enrollSelectedId)
     if (alunoSelecionado) {

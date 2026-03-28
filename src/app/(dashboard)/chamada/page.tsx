@@ -11,9 +11,9 @@ import {
   TrendingUp, TrendingDown,
 } from 'lucide-react'
 import { getDomingoAtual, getProximoDomingo, formatarDomingo, converterParaISO } from '@/lib/chamada-utils'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { calcularPct, corPresenca, resolverCor } from '@/lib/presence'
+import { buscarTurmasComContagem, buscarResumoDia } from '@/actions/chamada'
 import { format, addDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -64,8 +64,6 @@ function getOffsetInicial(): number {
 export default function ChamadaPage() {
   const router = useRouter()
   const { isAdmin, turmasPermitidas, loading: authLoading } = useAuth()
-  const db = supabase as any
-
   const [turmasData, setTurmasData] = useState<Turma[]>([])
   const [turmasLoading, setTurmasLoading] = useState(true)
   const [dataSelecionada, setDataSelecionada] = useState<Date>(getDataInicial)
@@ -95,80 +93,64 @@ export default function ChamadaPage() {
     setTempo(novo)
   }
 
-  // Carregar turmas
+  // Carregar turmas via server action (SQL direto)
   useEffect(() => {
     if (authLoading) return
     async function load() {
       setTurmasLoading(true)
-      const [{ data: turmasRaw }, { data: alunosRaw }] = await Promise.all([
-        db.from('turmas').select('id, nome, faixa_etaria, sala, cor').eq('ativa', true).order('nome'),
-        db.from('alunos').select('turma_id').eq('ativo', true),
-      ])
-      if (!turmasRaw) return
-
-      const contagemPorTurma: Record<string, number> = {}
-      for (const a of alunosRaw ?? []) {
-        contagemPorTurma[a.turma_id] = (contagemPorTurma[a.turma_id] ?? 0) + 1
+      try {
+        const turmasRaw = await buscarTurmasComContagem()
+        const comContagem: Turma[] = turmasRaw.map(t => ({
+          id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria,
+          totalAlunos: t.total_alunos, sala: t.sala, cor: t.cor,
+        }))
+        const sorted = [...comContagem].sort((a, b) => getSalaNum(a.sala) - getSalaNum(b.sala))
+        setTurmasData(isAdmin || turmasPermitidas.includes('*')
+          ? sorted
+          : sorted.filter(t => turmasPermitidas.includes(t.id)))
+      } catch (e) {
+        console.error('Erro ao buscar turmas:', e)
+      } finally {
+        setTurmasLoading(false)
       }
-
-      const comContagem: Turma[] = turmasRaw.map((t: any) => ({
-        id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '',
-        totalAlunos: contagemPorTurma[t.id] ?? 0, sala: t.sala ?? '', cor: t.cor ?? 'bg-blue-500',
-      }))
-
-      const sorted = [...comContagem].sort((a, b) => getSalaNum(a.sala) - getSalaNum(b.sala))
-      setTurmasData(isAdmin || turmasPermitidas.includes('*')
-        ? sorted
-        : sorted.filter(t => turmasPermitidas.includes(t.id)))
-      setTurmasLoading(false)
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, isAdmin, turmasPermitidas])
 
-  // Carregar resumo do dia
+  // Carregar resumo do dia via server action (SQL direto)
   useEffect(() => {
     async function load() {
       const dataISO = converterParaISO(dataSelecionada)
       const totalMatriculados = turmasData.reduce((a, t) => a + t.totalAlunos, 0)
 
-      const [{ data: chamadas }, { data: visitantesData }] = await Promise.all([
-        db.from('chamadas').select('id, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista)').eq('data', dataISO),
-        db.from('historico_visitantes').select('turma_id, trouxe_biblia, trouxe_revista').eq('data', dataISO).eq('presente', true),
-      ])
+      try {
+        const { porTurma } = await buscarResumoDia(dataISO)
 
-      const resumos: Record<string, ResumoTurma> = {}
-      turmasData.forEach(t => { resumos[t.id] = { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 } })
+        const resumos: Record<string, ResumoTurma> = {}
+        turmasData.forEach(t => { resumos[t.id] = { presentes: 0, faltas: 0, visitantes: 0, biblias: 0, revistas: 0, oferta: 0 } })
 
-      if (chamadas) {
-        for (const c of chamadas) {
-          const ps = c.presencas as any[]
-          resumos[c.turma_id] = {
-            presentes: ps.filter(p => p.presente).length, faltas: ps.filter(p => !p.presente).length,
-            biblias: ps.filter(p => p.trouxe_biblia).length, revistas: ps.filter(p => p.trouxe_revista).length,
-            oferta: Number(c.oferta) || 0, visitantes: 0,
+        for (const [turmaId, r] of Object.entries(porTurma)) {
+          resumos[turmaId] = {
+            presentes: r.presentes, faltas: r.faltas, visitantes: r.visitantes,
+            biblias: r.biblias, revistas: r.revistas, oferta: r.oferta,
           }
         }
-      }
-      visitantesData?.forEach((v: any) => {
-        if (resumos[v.turma_id]) {
-          resumos[v.turma_id].visitantes++
-          if (v.trouxe_biblia)  resumos[v.turma_id].biblias++
-          if (v.trouxe_revista) resumos[v.turma_id].revistas++
-        }
-      })
 
-      setResumosPorTurma(resumos)
-      const vals = Object.values(resumos)
-      setResumoDia({
-        total_matriculados: totalMatriculados,
-        total_presentes:  vals.reduce((a, r) => a + r.presentes, 0),
-        total_faltas:     vals.reduce((a, r) => a + r.faltas, 0),
-        total_visitantes: vals.reduce((a, r) => a + r.visitantes, 0),
-        total_biblias:    vals.reduce((a, r) => a + r.biblias, 0),
-        total_revistas:   vals.reduce((a, r) => a + r.revistas, 0),
-        total_oferta:     vals.reduce((a, r) => a + r.oferta, 0),
-      })
+        setResumosPorTurma(resumos)
+        const vals = Object.values(resumos)
+        setResumoDia({
+          total_matriculados: totalMatriculados,
+          total_presentes:  vals.reduce((a, r) => a + r.presentes, 0),
+          total_faltas:     vals.reduce((a, r) => a + r.faltas, 0),
+          total_visitantes: vals.reduce((a, r) => a + r.visitantes, 0),
+          total_biblias:    vals.reduce((a, r) => a + r.biblias, 0),
+          total_revistas:   vals.reduce((a, r) => a + r.revistas, 0),
+          total_oferta:     vals.reduce((a, r) => a + r.oferta, 0),
+        })
+      } catch (e) {
+        console.error('Erro ao buscar resumo do dia:', e)
+      }
     }
     load()
   }, [dataSelecionada, turmasData])

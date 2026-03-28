@@ -24,10 +24,10 @@ import {
   DollarSign,
 } from 'lucide-react'
 import { formatarDomingo, converterParaISO, getTrimestreRange } from '@/lib/chamada-utils'
-import { supabase } from '@/lib/supabase'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/lib/toast'
 import { corPresenca } from '@/lib/presence'
+import { buscarDadosChamadaTurma, salvarChamada, converterVisitanteEmAluno } from '@/actions/chamada'
 import { AlunoRow } from './_AlunoRow'
 import { AdicionarVisitanteDialog } from './_AdicionarVisitanteDialog'
 
@@ -110,63 +110,33 @@ export default function ChamadaTurmaPage() {
   const [qtdBiblias, setQtdBiblias] = useState<string>('')
   const [qtdRevistas, setQtdRevistas] = useState<string>('')
 
-  // ── Busca inicial ──────────────────────────────────────────────────────────
+  // ── Busca inicial via server action (SQL direto) ────────────────────────────
   useEffect(() => {
     let cancelado = false
 
     async function fetchDados() {
       setCarregando(true)
-
-      // Safety: garante que loading nunca fica infinito
-      const safetyTimer = setTimeout(() => {
-        if (!cancelado) {
-          setCarregando(false)
-          toast('Carregamento lento — alguns dados podem estar incompletos', 'error')
-        }
-      }, 12000)
-
       try {
-        const db = supabase as any
         const trimRange = getTrimestreRange(dataSelecionada)
-
-        const results = await Promise.allSettled([
-          db.from('turmas').select('id, nome, sala').eq('id', turmaId).single(),
-          db.from('alunos').select('id, nome, responsavel, cargo')
-            .eq('turma_id', turmaId).eq('ativo', true).order('nome'),
-          db.from('escalas').select('professor_id, turma_id, turmas(nome)').eq('data', dataSelecionada),
-          db.from('chamadas')
-            .select('id, oferta, anotacoes, presencas(aluno_id, presente, trouxe_biblia, trouxe_revista, justificativa)')
-            .eq('turma_id', turmaId).eq('data', dataSelecionada).maybeSingle(),
-          db.from('historico_visitantes')
-            .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, observacao)')
-            .eq('turma_id', turmaId)
-            .gte('data', trimRange.inicio)
-            .lte('data', trimRange.fim)
-            .order('data', { ascending: false }),
-        ])
-
-        clearTimeout(safetyTimer)
-
-        const turmaData = results[0].status === 'fulfilled' ? results[0].value.data : null
-        const alunosData = results[1].status === 'fulfilled' ? results[1].value.data : null
-        const escalaDia = results[2].status === 'fulfilled' ? results[2].value.data : null
-        const chamadaExistente = results[3].status === 'fulfilled' ? results[3].value.data : null
-        const todoHistorico = results[4].status === 'fulfilled' ? results[4].value.data : null
+        const dados = await buscarDadosChamadaTurma(turmaId, dataSelecionada, trimRange.inicio, trimRange.fim)
 
         if (cancelado) return
 
-        if (turmaData) setTurma({ id: turmaData.id, nome: turmaData.nome, sala: turmaData.sala ?? '', professor: '' })
+        // Turma
+        if (dados.turma) setTurma({ id: dados.turma.id, nome: dados.turma.nome, sala: dados.turma.sala, professor: '' })
 
+        // Escala
         const professorEscalaMap = new Map<string, { turmaId: string; turmaNome: string }>()
-        for (const e of (escalaDia ?? []) as any[]) {
+        for (const e of dados.escala) {
           if (e.professor_id) {
-            professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: e.turmas?.nome ?? '' })
+            professorEscalaMap.set(e.professor_id, { turmaId: e.turma_id, turmaNome: e.turma_nome })
           }
         }
 
-        const mapAluno = (a: any) => {
+        // Alunos + presenças
+        const mapAluno = (a: { id: string; nome: string; responsavel: string | null; cargo: string | null }) => {
           const profId = (a.responsavel ?? '').startsWith('professor:')
-            ? (a.responsavel as string).replace('professor:', '') : null
+            ? a.responsavel!.replace('professor:', '') : null
           return {
             aluno_id: a.id, nome: a.nome,
             trouxe_biblia: false, trouxe_revista: false, justificativa: '',
@@ -177,12 +147,12 @@ export default function ChamadaTurmaPage() {
           }
         }
 
-        if (chamadaExistente) {
-          setOfertaCents(Math.round((chamadaExistente.oferta || 0) * 100))
-          setAnotacoes(chamadaExistente.anotacoes ?? '')
-          const presencasMap = new Map((chamadaExistente.presencas as any[]).map(p => [p.aluno_id, p]))
+        if (dados.chamada) {
+          setOfertaCents(Math.round((dados.chamada.oferta || 0) * 100))
+          setAnotacoes(dados.chamada.anotacoes ?? '')
+          const presencasMap = new Map(dados.chamada.presencas.map(p => [p.aluno_id, p]))
           setAlunos(
-            (alunosData ?? []).map((a: any) => {
+            dados.alunos.map(a => {
               const p = presencasMap.get(a.id)
               return {
                 ...mapAluno(a),
@@ -190,40 +160,39 @@ export default function ChamadaTurmaPage() {
                 trouxe_biblia: p?.trouxe_biblia ?? false,
                 trouxe_revista: p?.trouxe_revista ?? false,
                 justificativa: p?.justificativa ?? '',
-              }
+              } as AlunoPresenca
             })
           )
         } else {
           setOfertaCents(0)
           setAnotacoes('')
-          setAlunos((alunosData ?? []).map((a: any) => ({ ...mapAluno(a), presente: 'pendente' as const })))
+          setAlunos(dados.alunos.map(a => ({ ...mapAluno(a), presente: 'pendente' as const })))
         }
 
         // Visitantes
-        if (todoHistorico && todoHistorico.length > 0) {
-          const porVisitante = new Map<string, typeof todoHistorico>()
-          for (const h of todoHistorico) {
+        if (dados.visitanteHist.length > 0) {
+          const porVisitante = new Map<string, typeof dados.visitanteHist>()
+          for (const h of dados.visitanteHist) {
             if (!porVisitante.has(h.visitante_id)) porVisitante.set(h.visitante_id, [])
             porVisitante.get(h.visitante_id)!.push(h)
           }
           const visitantesCarregados: Visitante[] = []
           for (const [visitanteId, registros] of porVisitante.entries()) {
-            const dadosVisitante = registros[0].visitantes
-            if (!dadosVisitante) continue
-            const registroDia = registros.find((r: any) => r.data === dataSelecionada)
+            const primeiro = registros[0]
+            const registroDia = registros.find(r => r.data === dataSelecionada)
             const historicoAnterior = registros
-              .filter((r: any) => r.data !== dataSelecionada)
+              .filter(r => r.data !== dataSelecionada)
               .slice(0, 3)
-              .map((r: any) => ({ data: r.data, presente: r.presente }))
+              .map(r => ({ data: r.data, presente: r.presente }))
             visitantesCarregados.push({
               id: visitanteId, isNovo: false,
-              nome: dadosVisitante.nome, telefone: dadosVisitante.telefone ?? '',
-              observacao: dadosVisitante.observacao ?? '',
+              nome: primeiro.visitante_nome, telefone: primeiro.visitante_telefone ?? '',
+              observacao: primeiro.visitante_observacao ?? '',
               presenteHoje: registroDia ? (registroDia.presente ? 'presente' : 'ausente') : 'pendente',
               trouxe_biblia: registroDia?.trouxe_biblia ?? false,
               trouxe_revista: registroDia?.trouxe_revista ?? false,
               historico: historicoAnterior,
-              totalVisitas: registros.filter((r: any) => r.presente).length,
+              totalVisitas: registros.filter(r => r.presente).length,
             })
           }
           setVisitantes(visitantesCarregados)
@@ -231,7 +200,7 @@ export default function ChamadaTurmaPage() {
           setVisitantes([])
         }
       } catch (e: any) {
-        if (!cancelado) toast('Erro ao carregar dados da chamada: ' + (e?.message ?? 'erro inesperado'), 'error')
+        if (!cancelado) toast('Erro ao carregar dados: ' + (e?.message ?? 'erro inesperado'), 'error')
       } finally {
         if (!cancelado) setCarregando(false)
       }
@@ -342,22 +311,18 @@ export default function ChamadaTurmaPage() {
     if (!visitante) return
     if (!confirm(`Converter ${visitante.nome} em aluno da turma "${turma.nome}"?\n\nUm registro de aluno será criado automaticamente.`)) return
 
-    const db = supabase as any
-    const { data: novoAluno, error } = await db
-      .from('alunos')
-      .insert({ nome: visitante.nome, telefone: visitante.telefone || null, turma_id: turmaId, ativo: true })
-      .select('id')
-      .single()
-    if (error || !novoAluno) { toast('Erro ao converter visitante em aluno.', 'error'); return }
-
-    if (!visitante.isNovo) {
-      await db.from('visitantes').update({ convertido_em_aluno: true, aluno_id: novoAluno.id }).eq('id', visitanteId)
-    }
+    const result = await converterVisitanteEmAluno(
+      visitante.isNovo ? null : visitante.id,
+      visitante.nome,
+      visitante.telefone || null,
+      turmaId,
+    )
+    if (!result.success || !result.alunoId) { toast('Erro ao converter visitante em aluno.', 'error'); return }
 
     toast(`${visitante.nome} convertido em aluno com sucesso!`)
     setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
     setAlunos(prev => [...prev, {
-      aluno_id: novoAluno.id,
+      aluno_id: result.alunoId!,
       nome: visitante.nome,
       presente: 'presente',
       trouxe_biblia: visitante.trouxe_biblia,
@@ -377,95 +342,32 @@ export default function ChamadaTurmaPage() {
   const handleSalvarChamada = async () => {
     setSalvando(true)
     try {
-      const db = supabase as any
+      const result = await salvarChamada({
+        turmaId,
+        data: dataSelecionada,
+        oferta: ofertaCents / 100,
+        anotacoes,
+        presencas: alunos.map(a => ({
+          aluno_id: a.aluno_id,
+          presente: a.presente === 'presente',
+          trouxe_biblia: a.presente === 'presente' ? a.trouxe_biblia : false,
+          trouxe_revista: a.presente === 'presente' ? a.trouxe_revista : false,
+          justificativa: a.justificativa || null,
+        })),
+        visitantes: visitantes.map(v => ({
+          id: v.isNovo ? null : v.id,
+          nome: v.nome,
+          telefone: v.telefone || null,
+          observacao: v.observacao || null,
+          presente: v.presenteHoje === 'presente',
+          trouxe_biblia: v.trouxe_biblia,
+          trouxe_revista: v.trouxe_revista,
+        })),
+      })
 
-      const { data: chamadaRow, error: errChamada } = await db
-        .from('chamadas')
-        .upsert(
-          { turma_id: turmaId, data: dataSelecionada, ano: parseInt(dataSelecionada.split('-')[0]), oferta: ofertaCents / 100, anotacoes },
-          { onConflict: 'turma_id,data' }
-        )
-        .select('id')
-        .single()
-
-      if (errChamada || !chamadaRow) {
-        toast('Erro ao salvar chamada: ' + (errChamada?.message ?? 'sem retorno'), 'error')
+      if (!result.success) {
+        toast('Erro ao salvar chamada: ' + (result.error ?? 'erro desconhecido'), 'error')
         return
-      }
-
-      const chamadaId: string = chamadaRow.id
-
-      const presencasPayload = alunos.map(a => ({
-        chamada_id: chamadaId,
-        aluno_id: a.aluno_id,
-        presente: a.presente === 'presente',
-        trouxe_biblia: a.presente === 'presente' ? a.trouxe_biblia : false,
-        trouxe_revista: a.presente === 'presente' ? a.trouxe_revista : false,
-        justificativa: a.justificativa || null,
-      }))
-
-      const promises: Promise<any>[] = []
-
-      if (presencasPayload.length > 0) {
-        promises.push(
-          db.from('presencas')
-            .upsert(presencasPayload, { onConflict: 'chamada_id,aluno_id' })
-            .then(({ error }: any) => { if (error) throw new Error('Erro ao salvar presenças: ' + error.message) })
-        )
-      }
-
-      promises.push(
-        db.from('historico_visitantes')
-          .delete()
-          .eq('turma_id', turmaId)
-          .eq('data', dataSelecionada)
-      )
-
-      await Promise.all(promises)
-
-      if (visitantes.length > 0) {
-        const novos = visitantes.filter(v => v.isNovo)
-        const existentes = visitantes.filter(v => !v.isNovo)
-
-        const novosIds = new Map<string, string>()
-        if (novos.length > 0) {
-          const { data: inseridos, error: errNovos } = await db
-            .from('visitantes')
-            .insert(novos.map(v => ({ nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null })))
-            .select('id')
-          if (errNovos) {
-            toast('Erro ao salvar visitantes novos: ' + errNovos.message, 'error')
-          } else if (inseridos) {
-            novos.forEach((v, i) => { if (inseridos[i]) novosIds.set(v.id, inseridos[i].id) })
-          }
-        }
-
-        if (existentes.length > 0) {
-          await db.from('visitantes').upsert(
-            existentes.map(v => ({ id: v.id, nome: v.nome, telefone: v.telefone || null, observacao: v.observacao || null }))
-          )
-        }
-
-        const historicoPayload = visitantes
-          .map(v => {
-            const realId = v.isNovo ? novosIds.get(v.id) : v.id
-            if (!realId) return null
-            return {
-              visitante_id: realId,
-              turma_id: turmaId,
-              chamada_id: chamadaId,
-              data: dataSelecionada,
-              presente: v.presenteHoje === 'presente',
-              trouxe_biblia: v.trouxe_biblia,
-              trouxe_revista: v.trouxe_revista,
-            }
-          })
-          .filter(Boolean)
-
-        if (historicoPayload.length > 0) {
-          const { error: errHist } = await db.from('historico_visitantes').insert(historicoPayload)
-          if (errHist) console.error('Erro ao salvar histórico visitantes:', errHist)
-        }
       }
 
       toast('Chamada salva com sucesso!')

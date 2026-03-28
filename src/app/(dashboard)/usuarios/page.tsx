@@ -19,7 +19,7 @@ import {
   CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key, AlertTriangle,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { buscarTurmasDisponiveis } from '@/actions/relatorios'
 import { toast } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -107,12 +107,12 @@ export default function UsuariosPage() {
   }
 
   async function fetchTurmas() {
-    const { data, error } = await (supabase as any)
-      .from('turmas')
-      .select('id, nome')
-      .order('nome')
-    if (error) console.error('Erro ao carregar turmas:', error)
-    setTurmasOpcoes(data ?? [])
+    try {
+      const turmas = await buscarTurmasDisponiveis()
+      setTurmasOpcoes(turmas)
+    } catch (e) {
+      console.error('Erro ao carregar turmas:', e)
+    }
   }
 
   function abrirCriar() {

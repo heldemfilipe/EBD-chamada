@@ -13,7 +13,10 @@ import {
   Download, Calendar, CheckCircle2, XCircle,
   FileText, BookOpen, Book, DollarSign, UserPlus, ChevronLeft, ChevronRight, BarChart3, Filter,
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import {
+  buscarTurmasDisponiveis, buscarChamadasPorAno, buscarDadosPorSala,
+  buscarRankingAlunos, buscarProfessoresRelatorio, buscarVisitantesPorChamadas, buscarAlunosTurmaDetalhado,
+} from '@/actions/relatorios'
 import { ANOS_DISPONIVEIS, MESES, MESES_CURTOS, TRIMESTRES } from '@/lib/constants'
 import { calcularPct, resolverCor } from '@/lib/presence'
 import { format, parseISO } from 'date-fns'
@@ -97,8 +100,6 @@ function agregarPorData(entries: DadosDomingo[]): DadosDomingo[] {
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function RelatoriosPage() {
-  const db = supabase as any
-
   const [granularidade, setGranularidade] = useState<Granularidade>('trimestre')
   const [ano, setAno] = useState(new Date().getFullYear())
   const [mes, setMes] = useState(new Date().getMonth())
@@ -124,6 +125,12 @@ export default function RelatoriosPage() {
   const [sortAlunosTurma, setSortAlunosTurma] = useState<'pct' | 'nome' | 'faltas'>('pct')
   const [visitantesRel, setVisitantesRel] = useState<VisitanteRelatorio[]>([])
   const [sortVisitantes, setSortVisitantes] = useState<'visitas' | 'nome' | 'pct'>('visitas')
+  const [chamadasRaw, setChamadasRaw] = useState<{ id: string; data: string; turma_id: string; oferta: number; presentes: number; ausentes: number; biblias: number; revistas: number; visitantes: number }[]>([])
+
+  const chamadaIdsFiltrados = useMemo(() => {
+    const filtradas = filtrarPorPeriodo(chamadasRaw, { granularidade, mes, trim })
+    return filtradas.map(c => c.id)
+  }, [chamadasRaw, granularidade, mes, trim])
 
   // ── useMemos para listas ordenadas ────────────────────────────────────────────
   const visitantesOrdenados = useMemo(() => {
@@ -143,18 +150,14 @@ export default function RelatoriosPage() {
   }, [alunosTurma, sortAlunosTurma])
 
   useEffect(() => {
-    db.from('turmas').select('id, nome').eq('ativa', true).order('nome')
-      .then(({ data }: any) => setTurmasDisponiveis(data ?? []))
+    buscarTurmasDisponiveis().then(setTurmasDisponiveis)
   }, [])
 
   useEffect(() => {
     async function load() {
-      let q = db.from('chamadas')
-        .select('id, data, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
-        .eq('ano', ano).order('data', { ascending: true })
-      if (turmaFiltro !== 'all') q = q.eq('turma_id', turmaFiltro)
-      const { data: chamadas } = await q
-      if (!chamadas?.length) { setDomingosPorMes({}); setResumoMensal([]); return }
+      const chamadas = await buscarChamadasPorAno(ano, turmaFiltro !== 'all' ? turmaFiltro : undefined)
+      setChamadasRaw(chamadas)
+      if (!chamadas.length) { setDomingosPorMes({}); setResumoMensal([]); return }
 
       const porMes: Record<number, DadosDomingo[]> = {}
       const mensal: DadosMes[] = Array.from({ length: 12 }, (_, i) => ({
@@ -166,22 +169,18 @@ export default function RelatoriosPage() {
         if (!c.data) continue
         const m = parseISO(c.data).getMonth()
         if (!porMes[m]) porMes[m] = []
-        const ps = c.presencas ?? []
-        const vs = c.historico_visitantes ?? []
-        const presentes = ps.filter((p: any) => p.presente).length
-        const faltas    = ps.filter((p: any) => !p.presente).length
-        const biblias   = ps.filter((p: any) => p.trouxe_biblia).length
-        const revistas  = ps.filter((p: any) => p.trouxe_revista).length
+        const total = c.presentes + c.ausentes
         porMes[m].push({
           data: format(parseISO(c.data), 'dd/MM', { locale: ptBR }),
-          presentes, faltas, visitantes: vs.length, biblias, revistas,
-          oferta: Number(c.oferta) || 0, total: ps.length,
+          presentes: c.presentes, faltas: c.ausentes, visitantes: c.visitantes,
+          biblias: c.biblias, revistas: c.revistas,
+          oferta: c.oferta, total,
         })
         mensal[m].domingos++
-        mensal[m].total += ps.length; mensal[m].presentes += presentes
-        mensal[m].faltas += faltas;   mensal[m].biblias   += biblias
-        mensal[m].revistas += revistas; mensal[m].visitantes += vs.length
-        mensal[m].oferta += Number(c.oferta) || 0
+        mensal[m].total += total; mensal[m].presentes += c.presentes
+        mensal[m].faltas += c.ausentes; mensal[m].biblias += c.biblias
+        mensal[m].revistas += c.revistas; mensal[m].visitantes += c.visitantes
+        mensal[m].oferta += c.oferta
       }
       setDomingosPorMes(porMes)
       setResumoMensal(mensal)
@@ -191,43 +190,25 @@ export default function RelatoriosPage() {
 
   useEffect(() => {
     async function load() {
-      const { data: turmas } = await db.from('turmas').select('id, nome, cor').eq('ativa', true)
-      if (!turmas?.length) { setDadosSala([]); return }
-      const turmasFiltradas = turmaFiltro !== 'all' ? turmas.filter((t: any) => t.id === turmaFiltro) : turmas
-      const ids = turmasFiltradas.map((t: any) => t.id)
+      const { turmas, chamadas } = await buscarDadosPorSala(ano)
+      if (!turmas.length) { setDadosSala([]); return }
+      const turmasFiltradas = turmaFiltro !== 'all' ? turmas.filter(t => t.id === turmaFiltro) : turmas
 
-      // 2 queries no total em vez de 2*N
-      const [{ data: alunosCount }, { data: chamadasRaw }] = await Promise.all([
-        db.from('alunos').select('turma_id').in('turma_id', ids).eq('ativo', true),
-        db.from('chamadas')
-          .select('id, data, turma_id, oferta, presencas(presente, trouxe_biblia, trouxe_revista), historico_visitantes(id)')
-          .in('turma_id', ids).eq('ano', ano),
-      ])
-
-      const matriculadosPorTurma: Record<string, number> = {}
-      for (const a of alunosCount ?? []) {
-        matriculadosPorTurma[a.turma_id] = (matriculadosPorTurma[a.turma_id] ?? 0) + 1
-      }
-
-      const resultado: DadosSala[] = turmasFiltradas.map((turma: any, idx: number) => {
-        const chamadas = filtrarPorPeriodo(
-          (chamadasRaw ?? []).filter((c: any) => c.turma_id === turma.id),
+      const resultado: DadosSala[] = turmasFiltradas.map((turma, idx) => {
+        const chamadasTurma = filtrarPorPeriodo(
+          chamadas.filter(c => c.turma_id === turma.id),
           { granularidade, mes, trim }
         )
         let presentes = 0, faltas = 0, biblias = 0, revistas = 0, visitantes = 0, oferta = 0, total = 0
-        for (const c of chamadas) {
-          const ps = c.presencas ?? []
-          total += ps.length
-          presentes += ps.filter((p: any) => p.presente).length
-          faltas    += ps.filter((p: any) => !p.presente).length
-          biblias   += ps.filter((p: any) => p.trouxe_biblia).length
-          revistas  += ps.filter((p: any) => p.trouxe_revista).length
-          visitantes += (c.historico_visitantes ?? []).length
-          oferta += Number(c.oferta) || 0
+        for (const c of chamadasTurma) {
+          total += c.presentes + c.ausentes
+          presentes += c.presentes; faltas += c.ausentes
+          biblias += c.biblias; revistas += c.revistas
+          visitantes += c.visitantes; oferta += c.oferta
         }
         return {
           sala: turma.nome, cor: resolverCor(turma.cor, idx),
-          matriculados: matriculadosPorTurma[turma.id] ?? 0,
+          matriculados: turma.totalAlunos,
           presencaMedia: calcularPct(presentes, total),
           presentes, faltas, visitantes, biblias, revistas, oferta,
         }
@@ -239,76 +220,72 @@ export default function RelatoriosPage() {
 
   useEffect(() => {
     async function load() {
-      let qCh = db.from('chamadas').select('id, data').eq('ano', ano)
-      if (turmaFiltro !== 'all') qCh = qCh.eq('turma_id', turmaFiltro)
-      const { data: chamadasRaw } = await qCh
-      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
-      if (!chamadas.length) { setTopAlunos([]); setAlunosAtencao([]); return }
+      if (!chamadaIdsFiltrados.length) { setTopAlunos([]); setAlunosAtencao([]); return }
+      const ranking = await buscarRankingAlunos(chamadaIdsFiltrados, turmaFiltro !== 'all' ? turmaFiltro : undefined)
+      if (!ranking.length) { setTopAlunos([]); setAlunosAtencao([]); return }
 
-      const { data: presencas } = await db.from('presencas').select('aluno_id, presente').in('chamada_id', chamadas.map((c: any) => c.id))
-      if (!presencas?.length) { setTopAlunos([]); setAlunosAtencao([]); return }
-
-      const ppa: Record<string, { presentes: number; total: number }> = {}
-      for (const p of presencas) {
-        if (!ppa[p.aluno_id]) ppa[p.aluno_id] = { presentes: 0, total: 0 }
-        ppa[p.aluno_id].total++
-        if (p.presente) ppa[p.aluno_id].presentes++
-      }
-      let qAlunos = db.from('alunos').select('id, nome, turmas(nome)').in('id', Object.keys(ppa)).eq('ativo', true)
-      if (turmaFiltro !== 'all') qAlunos = qAlunos.eq('turma_id', turmaFiltro)
-      const { data: alunos } = await qAlunos
-      if (!alunos) { setTopAlunos([]); setAlunosAtencao([]); return }
-
-      const lista: AlunoFrequente[] = alunos
-        .filter((a: any) => ppa[a.id]?.total > 0)
-        .map((a: any) => {
-          const d = ppa[a.id]
-          const pct = calcularPct(d.presentes, d.total)
-          return { nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma', presentes: d.presentes, total: d.total, pct, faltas: d.total - d.presentes }
-        })
+      const lista: AlunoFrequente[] = ranking.map(r => {
+        const pct = calcularPct(r.presentes, r.total)
+        return { nome: r.nome, sala: r.turma_nome, presentes: r.presentes, total: r.total, pct, faltas: r.total - r.presentes }
+      })
       setTopAlunos([...lista].sort((a, b) => b.pct - a.pct || b.presentes - a.presentes).slice(0, 10))
       setAlunosAtencao([...lista].filter(a => a.pct < 50).sort((a, b) => a.pct - b.pct))
     }
     load()
-  }, [ano, mes, trim, granularidade, turmaFiltro])
+  }, [chamadaIdsFiltrados, turmaFiltro])
 
   useEffect(() => {
     async function load() {
-      const { data: profsList } = await db.from('professores').select('id, nome, professor_turmas(turma_id, turmas(nome))').eq('ativo', true)
-      if (!profsList?.length) { setProfessores([]); return }
+      const data = await buscarProfessoresRelatorio(ano)
+      if (!data.professores.length) { setProfessores([]); return }
+
       const profsFiltered = turmaFiltro !== 'all'
-        ? profsList.filter((p: any) => (p.professor_turmas ?? []).some((pt: any) => pt.turma_id === turmaFiltro))
-        : profsList
-      const { data: profAlunos } = await db.from('alunos').select('id, responsavel, turma_id').like('responsavel', 'professor:%').eq('ativo', true)
+        ? data.professores.filter(p => p.turmas.some((t: any) => t.turma_id === turmaFiltro))
+        : data.professores
+
       const profIdToAluno = new Map<string, { alunoId: string; turmaId: string | null }>()
-      for (const a of profAlunos ?? []) {
-        const pid = (a.responsavel as string).replace('professor:', '')
-        if (pid) profIdToAluno.set(pid, { alunoId: a.id, turmaId: a.turma_id ?? null })
+      for (const a of data.profAlunos) {
+        const pid = a.responsavel.replace('professor:', '')
+        if (pid) profIdToAluno.set(pid, { alunoId: a.id, turmaId: a.turma_id })
       }
-      const resultado: ProfessorDesempenho[] = await Promise.all(profsFiltered.map(async (prof: any) => {
-        const turmaIds = (prof.professor_turmas ?? []).map((pt: any) => pt.turma_id).filter(Boolean)
-        const turmasNomes = (prof.professor_turmas ?? []).map((pt: any) => pt.turmas?.nome).filter(Boolean)
+
+      // Build presencas lookup: aluno_id -> chamada_id -> {presente, trouxe_biblia}
+      const presencasPorAluno = new Map<string, Map<string, { presente: boolean; trouxe_biblia: boolean }>>()
+      for (const p of data.presencas) {
+        if (!presencasPorAluno.has(p.aluno_id)) presencasPorAluno.set(p.aluno_id, new Map())
+        presencasPorAluno.get(p.aluno_id)!.set(p.chamada_id, { presente: p.presente, trouxe_biblia: p.trouxe_biblia })
+      }
+
+      const resultado: ProfessorDesempenho[] = profsFiltered.map(prof => {
+        const turmaIds = prof.turmas.map((t: any) => t.turma_id).filter(Boolean)
+        const turmasNomes = prof.turmas.map((t: any) => t.turma_nome).filter(Boolean)
         if (!turmaIds.length) return { nome: prof.nome, turmas: [], aulas: 0, presMedia: 0, biblias: 0 }
+
         const filteredTurmaIds = turmaFiltro !== 'all' ? turmaIds.filter((id: string) => id === turmaFiltro) : turmaIds
-        const { data: chamadasRaw } = await db.from('chamadas').select('id, data').in('turma_id', filteredTurmaIds).eq('ano', ano)
-        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
-        const aulas = chamadas.length
+        const chamadasProf = filtrarPorPeriodo(
+          data.chamadas.filter(c => filteredTurmaIds.includes(c.turma_id)),
+          { granularidade, mes, trim }
+        )
+        const aulas = chamadasProf.length
+
         const alunoInfo = profIdToAluno.get(prof.id) ?? null
         let presMedia = 0, biblias = 0
         if (alunoInfo?.turmaId) {
-          const { data: alunoChRaw } = await db.from('chamadas').select('id, data').eq('turma_id', alunoInfo.turmaId).eq('ano', ano)
-          const alunoChFilt = filtrarPorPeriodo(alunoChRaw ?? [], { granularidade, mes, trim })
-          if (alunoChFilt.length > 0) {
-            const { data: pPresencas } = await db.from('presencas').select('presente, trouxe_biblia')
-              .eq('aluno_id', alunoInfo.alunoId).in('chamada_id', alunoChFilt.map((c: any) => c.id))
-            const presentes = pPresencas?.filter((p: any) => p.presente).length ?? 0
-            const bibCount  = pPresencas?.filter((p: any) => p.trouxe_biblia).length ?? 0
-            presMedia = calcularPct(presentes, alunoChFilt.length)
-            biblias   = presentes > 0 ? calcularPct(bibCount, presentes) : 0
+          const chamadasAluno = filtrarPorPeriodo(
+            data.chamadas.filter(c => c.turma_id === alunoInfo.turmaId),
+            { granularidade, mes, trim }
+          )
+          if (chamadasAluno.length > 0) {
+            const alunoPresencas = presencasPorAluno.get(alunoInfo.alunoId)
+            const chamadasComPresenca = chamadasAluno.filter(c => alunoPresencas?.has(c.id))
+            const presentes = chamadasComPresenca.filter(c => alunoPresencas!.get(c.id)!.presente).length
+            const bibCount = chamadasComPresenca.filter(c => alunoPresencas!.get(c.id)!.trouxe_biblia).length
+            presMedia = calcularPct(presentes, chamadasAluno.length)
+            biblias = presentes > 0 ? calcularPct(bibCount, presentes) : 0
           }
         }
         return { nome: prof.nome, turmas: turmasNomes, aulas, presMedia, biblias }
-      }))
+      })
       setProfessores(resultado.sort((a, b) => b.presMedia - a.presMedia))
     }
     load()
@@ -316,36 +293,25 @@ export default function RelatoriosPage() {
 
   useEffect(() => {
     async function load() {
-      let qCh = db.from('chamadas').select('id, data').eq('ano', ano)
-      if (turmaFiltro !== 'all') qCh = qCh.eq('turma_id', turmaFiltro)
-      const { data: chamadasRaw } = await qCh
-      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
-      if (!chamadas.length) { setVisitantesRel([]); return }
-
-      const { data: hist } = await db
-        .from('historico_visitantes')
-        .select('visitante_id, data, presente, trouxe_biblia, trouxe_revista, visitantes(id, nome, telefone, convertido_em_aluno)')
-        .in('chamada_id', chamadas.map((c: any) => c.id))
-
-      if (!hist?.length) { setVisitantesRel([]); return }
+      if (!chamadaIdsFiltrados.length) { setVisitantesRel([]); return }
+      const hist = await buscarVisitantesPorChamadas(chamadaIdsFiltrados)
+      if (!hist.length) { setVisitantesRel([]); return }
 
       const mapa: Record<string, VisitanteRelatorio> = {}
       for (const h of hist) {
-        const v = h.visitantes as any
-        if (!v) continue
-        if (!mapa[v.id]) {
-          mapa[v.id] = {
-            id: v.id, nome: v.nome, telefone: v.telefone ?? '',
-            convertido: v.convertido_em_aluno ?? false,
+        if (!mapa[h.visitante_id]) {
+          mapa[h.visitante_id] = {
+            id: h.visitante_id, nome: h.nome, telefone: h.telefone,
+            convertido: h.convertido_em_aluno,
             visitas: [], presentes: 0, pct: 0, biblias: 0, revistas: 0,
           }
         }
         const dataFmt = h.data ? format(parseISO(h.data), 'dd/MM', { locale: ptBR }) : '—'
-        mapa[v.id].visitas.push({ data: dataFmt, presente: h.presente, trouxe_biblia: h.trouxe_biblia, trouxe_revista: h.trouxe_revista })
+        mapa[h.visitante_id].visitas.push({ data: dataFmt, presente: h.presente, trouxe_biblia: h.trouxe_biblia, trouxe_revista: h.trouxe_revista })
         if (h.presente) {
-          mapa[v.id].presentes++
-          if (h.trouxe_biblia) mapa[v.id].biblias++
-          if (h.trouxe_revista) mapa[v.id].revistas++
+          mapa[h.visitante_id].presentes++
+          if (h.trouxe_biblia) mapa[h.visitante_id].biblias++
+          if (h.trouxe_revista) mapa[h.visitante_id].revistas++
         }
       }
 
@@ -356,48 +322,28 @@ export default function RelatoriosPage() {
       setVisitantesRel(lista)
     }
     load()
-  }, [ano, mes, trim, granularidade, turmaFiltro])
+  }, [chamadaIdsFiltrados])
 
   useEffect(() => {
     async function load() {
       if (turmaFiltro === 'all') { setAlunosTurma([]); return }
 
-      const [{ data: alunosData }, { data: chamadasRaw }] = await Promise.all([
-        db.from('alunos').select('id, nome, cargo').eq('turma_id', turmaFiltro).eq('ativo', true).order('nome'),
-        db.from('chamadas').select('id, data').eq('turma_id', turmaFiltro).eq('ano', ano),
-      ])
-      if (!alunosData?.length) { setAlunosTurma([]); return }
+      // Filter chamadas for this turma from period-filtered IDs
+      const chamadaIdsTurma = filtrarPorPeriodo(
+        chamadasRaw.filter(c => c.turma_id === turmaFiltro),
+        { granularidade, mes, trim }
+      ).map(c => c.id)
 
-      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { granularidade, mes, trim })
-      const totalChamadas = chamadas.length
+      const data = await buscarAlunosTurmaDetalhado(turmaFiltro, chamadaIdsTurma)
+      if (!data.alunos.length) { setAlunosTurma([]); return }
 
-      const ppa: Record<string, { presentes: number; faltas: number; biblias: number; revistas: number }> = {}
-
-      if (chamadas.length > 0) {
-        const { data: presencas } = await db
-          .from('presencas')
-          .select('aluno_id, presente, trouxe_biblia, trouxe_revista')
-          .in('chamada_id', chamadas.map((c: any) => c.id))
-
-        for (const p of presencas ?? []) {
-          if (!ppa[p.aluno_id]) ppa[p.aluno_id] = { presentes: 0, faltas: 0, biblias: 0, revistas: 0 }
-          if (p.presente) {
-            ppa[p.aluno_id].presentes++
-            if (p.trouxe_biblia) ppa[p.aluno_id].biblias++
-            if (p.trouxe_revista) ppa[p.aluno_id].revistas++
-          } else {
-            ppa[p.aluno_id].faltas++
-          }
-        }
-      }
-
-      setAlunosTurma(alunosData.map((a: any) => {
-        const d = ppa[a.id] ?? { presentes: 0, faltas: 0, biblias: 0, revistas: 0 }
-        return { id: a.id, nome: a.nome, cargo: a.cargo ?? '', ...d, total: totalChamadas, pct: calcularPct(d.presentes, totalChamadas) }
+      setAlunosTurma(data.alunos.map(a => {
+        const d = data.presencas[a.id] ?? { presentes: 0, faltas: 0, biblias: 0, revistas: 0 }
+        return { id: a.id, nome: a.nome, cargo: a.cargo, ...d, total: data.totalChamadas, pct: calcularPct(d.presentes, data.totalChamadas) }
       }))
     }
     load()
-  }, [turmaFiltro, ano, mes, trim, granularidade])
+  }, [turmaFiltro, chamadasRaw, mes, trim, granularidade])
 
   // ── Cálculo do período ──
   const domingosList = agregarPorData(domingosPorMes[mes] ?? [])

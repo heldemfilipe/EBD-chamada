@@ -16,7 +16,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend,
 } from 'recharts'
-import { supabase } from '@/lib/supabase'
+import { buscarContadoresGerais, buscarTurmasComProfessores, buscarUltimasChamadas, buscarUltimosVisitantes, buscarDadosPeriodo } from '@/actions/dashboard'
 import { MESES_CURTOS, TRIMESTRES, getCargo } from '@/lib/constants'
 import { calcularPct, resolverCor } from '@/lib/presence'
 import { format, parseISO, isToday, isYesterday, differenceInCalendarDays } from 'date-fns'
@@ -57,8 +57,6 @@ type PontoDado = { periodo: string; presentes: number; total: number; pct: numbe
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const db = supabase as any
-
   const [periodo, setPeriodo] = useState<Periodo>('trimestral')
   const [ano, setAno] = useState(new Date().getFullYear())
   const [trimestre, setTrimestre] = useState(Math.floor(new Date().getMonth() / 3))
@@ -85,53 +83,40 @@ export default function DashboardPage() {
   // ─── Dados estaticos (nao dependem de filtros de periodo) ────────────────────
   useEffect(() => {
     async function load() {
-      const anoAtual = new Date().getFullYear()
-      // Todas as queries em paralelo — 0 sequenciais
-      const [
-        { count: totalAlunos },
-        { count: totalProfessores },
-        { data: turmasData },
-        { data: chamadasRecentes },
-        { data: visitantesData },
-      ] = await Promise.all([
-        db.from('alunos').select('id', { count: 'exact', head: true }).eq('ativo', true),
-        db.from('professores').select('id', { count: 'exact', head: true }).eq('ativo', true),
-        db.from('turmas').select('id, nome, cor, professor_turmas(professores(nome)), alunos(id)').eq('ativa', true),
-        db.from('chamadas').select('id, data, created_at, turmas(nome), presencas(presente)').order('created_at', { ascending: false }).limit(5),
-        db.from('historico_visitantes').select('id, data, created_at, presente, visitantes(nome), turmas(nome)').eq('presente', true).order('created_at', { ascending: false }).limit(8),
+      const [contadores, turmasData, chamadasData, visitantesData] = await Promise.all([
+        buscarContadoresGerais(),
+        buscarTurmasComProfessores(),
+        buscarUltimasChamadas(5),
+        buscarUltimosVisitantes(8),
       ])
 
       // Turmas ativas
-      setTurmasAtivas((turmasData ?? []).map((t: any) => ({
-        id: t.id, turma: t.nome, alunos: (t.alunos ?? []).length,
-        professor: (t.professor_turmas ?? []).map((pt: any) => pt.professores?.nome).filter(Boolean).join(', ') || 'Sem professor',
+      setTurmasAtivas(turmasData.map((t: any) => ({
+        id: t.id, turma: t.nome, alunos: t.totalAlunos,
+        professor: t.professores.length > 0 ? t.professores.join(', ') : 'Sem professor',
       })))
 
-      // Stats basicos (turmas count vem do turmasData)
+      // Stats basicos
       setStats(prev => ({
         ...prev,
-        totalAlunos: totalAlunos ?? 0,
-        totalProfessores: totalProfessores ?? 0,
-        totalTurmas: turmasData?.length ?? 0,
+        totalAlunos: contadores.totalAlunos,
+        totalProfessores: contadores.totalProfessores,
+        totalTurmas: turmasData.length,
       }))
 
       // Chamadas recentes
-      setChamadasRecentes((chamadasRecentes ?? []).map((c: any) => {
-        const presentes = (c.presencas ?? []).filter((p: any) => p.presente).length
-        const total = (c.presencas ?? []).length
-        return {
-          id: c.id,
-          description: `${c.turmas?.nome ?? 'Turma'} — ${presentes}/${total} presentes`,
-          ebdDate: c.data ? format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR }) : '—',
-          modificadoEm: tempoRelativo(c.created_at ?? c.data),
-        }
-      }))
+      setChamadasRecentes(chamadasData.map((c: any) => ({
+        id: c.id,
+        description: `${c.turma_nome ?? 'Turma'} — ${c.presentes}/${c.total} presentes`,
+        ebdDate: c.data ? format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR }) : '—',
+        modificadoEm: tempoRelativo(c.created_at ?? c.data),
+      })))
 
       // Visitantes recentes
-      setVisitantesRecentes((visitantesData ?? []).map((v: any) => ({
+      setVisitantesRecentes(visitantesData.map((v: any) => ({
         id: v.id,
-        nome: v.visitantes?.nome ?? 'Visitante',
-        turma: v.turmas?.nome ?? '—',
+        nome: v.visitante_nome ?? 'Visitante',
+        turma: v.turma_nome ?? '—',
         ebdDate: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
         modificadoEm: tempoRelativo(v.created_at ?? v.data),
       })))
@@ -143,15 +128,12 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelado = false
     async function load() {
-      // 1 query de chamadas + 1 de alunos + turmas do cache (ja carregadas acima)
-      const [{ data: chamadasAno }, { data: alunos }, { data: turmas }] = await Promise.all([
-        db.from('chamadas').select('id, data, turma_id, presencas(aluno_id, presente)').eq('ano', ano),
-        db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true),
-        db.from('turmas').select('id, nome, cor').eq('ativa', true),
-      ])
+      const dados = await buscarDadosPeriodo(ano)
       if (cancelado) return
 
-      const todasChamadas = chamadasAno ?? []
+      const todasChamadas = dados.chamadas ?? []
+      const alunos = dados.alunos ?? []
+      const turmas = dados.turmas ?? []
 
       // --- Presenca media do ano (stats) ---
       let totalPresentes = 0, totalPresencas = 0
@@ -217,7 +199,7 @@ export default function DashboardPage() {
         const lista = (alunos ?? [])
           .filter((a: any) => ppa[a.id]?.total > 0)
           .map((a: any) => ({
-            id: a.id, nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma',
+            id: a.id, nome: a.nome, sala: a.turma_nome ?? 'Sem turma',
             presenca: ppa[a.id]?.presentes ?? 0, total: ppa[a.id]?.total ?? 0,
             pct: calcularPct(ppa[a.id]?.presentes ?? 0, ppa[a.id]?.total ?? 0),
             cargo: a.cargo ?? '',

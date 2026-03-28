@@ -16,7 +16,7 @@ import {
   ChevronDown, ChevronUp, ListFilter, Users, Sparkles, Link2, Save,
   Settings2, Unlink,
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction } from '@/actions/escala'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { turmaCorRgba } from '@/lib/presence'
@@ -192,8 +192,6 @@ const FORM_VAZIO = {
 
 // ─── Componente ────────────────────────────────────────────────────────────────
 export default function EscalaPage() {
-  const db = supabase as any
-
   const [escalasData, setEscalasData]         = useState<Escala[]>([])
   const [professoresData, setProfessoresData]  = useState<Professor[]>([])
   const [turmasData, setTurmasData]            = useState<Turma[]>([])
@@ -278,6 +276,33 @@ export default function EscalaPage() {
     return uid ? getTurmaNome(uid) : ''
   }
 
+  // ── Função de carga reutilizável ──────────────────────────────────────────────
+  const carregarDados = useCallback(async () => {
+    try {
+      const { escalas, professores, turmas, professorTurmas } = await fetchEscala()
+
+      setEscalasData(escalas.map((e: any) => ({
+        id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
+        trimestre: e.trimestre ?? (Math.floor(new Date(e.data + 'T12:00:00').getMonth() / 3) + 1),
+        observacao: e.observacoes ?? '',
+      })))
+      setProfessoresData(professores)
+      setTurmasData(turmas)
+
+      // Monta mapa turmaId → professorId[]
+      const ptMap: Record<string, string[]> = {}
+      for (const pt of professorTurmas) {
+        if (!ptMap[pt.turma_id]) ptMap[pt.turma_id] = []
+        ptMap[pt.turma_id].push(pt.professor_id)
+      }
+      setProfTurmasMap(ptMap)
+    } catch (e: any) {
+      toast('Erro ao carregar escala: ' + (e?.message ?? 'erro'), 'error')
+    } finally {
+      setCarregando(false)
+    }
+  }, [])
+
   // ── Carga inicial ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelado = false
@@ -287,46 +312,9 @@ export default function EscalaPage() {
       if (!cancelado) setCarregando(false)
     }, 10000)
 
-    async function load() {
-      try {
-        const results = await Promise.allSettled([
-          db.from('escalas').select('id, data, turma_id, professor_id, trimestre, observacoes').order('data'),
-          db.from('professores').select('id, nome').eq('ativo', true).order('nome'),
-          db.from('turmas').select('id, nome, cor').eq('ativa', true).order('nome'),
-          db.from('professor_turmas').select('professor_id, turma_id'),
-        ])
-        if (cancelado) return
-
-        const escalas   = results[0].status === 'fulfilled' ? results[0].value.data : []
-        const profs     = results[1].status === 'fulfilled' ? results[1].value.data : []
-        const turmas    = results[2].status === 'fulfilled' ? results[2].value.data : []
-        const profTurms = results[3].status === 'fulfilled' ? results[3].value.data : []
-
-        setEscalasData((escalas ?? []).map((e: any) => ({
-          id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
-          trimestre: e.trimestre ?? (Math.floor(new Date(e.data + 'T12:00:00').getMonth() / 3) + 1),
-          observacao: e.observacoes ?? '',
-        })))
-        setProfessoresData(profs ?? [])
-        setTurmasData(turmas ?? [])
-
-        // Monta mapa turmaId → professorId[]
-        const ptMap: Record<string, string[]> = {}
-        for (const pt of (profTurms ?? [])) {
-          if (!ptMap[pt.turma_id]) ptMap[pt.turma_id] = []
-          ptMap[pt.turma_id].push(pt.professor_id)
-        }
-        setProfTurmasMap(ptMap)
-      } catch (e: any) {
-        if (!cancelado) toast('Erro ao carregar escala: ' + (e?.message ?? 'erro'), 'error')
-      } finally {
-        clearTimeout(safetyTimer)
-        setCarregando(false)
-      }
-    }
-    load()
+    carregarDados().finally(() => clearTimeout(safetyTimer))
     return () => { cancelado = true; clearTimeout(safetyTimer) }
-  }, [])
+  }, [carregarDados])
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
   const getProfNome  = (id: string | null) => id ? (professoresData.find(p => p.id === id)?.nome ?? '—') : null
@@ -460,67 +448,48 @@ export default function EscalaPage() {
     }
     if (isSaving) return
     setIsSaving(true)
-    const trimestre = parseInt(formData.trimestre)
     try {
-      if (editMode && selectedEscala) {
-        // trimestre é coluna GENERATED — não incluir no update
-        const { error } = await db.from('escalas').update({
-          data: dataComputada,
-          turma_id: formData.turmaId,
-          professor_id: formData.professorId,
-          observacoes: formData.observacao,
-        }).eq('id', selectedEscala.id)
-        if (error) { console.error('Erro ao atualizar escala:', error); toast('Erro ao atualizar: ' + (error.message ?? 'erro'), 'error'); return }
-        setEscalasData(prev => prev.map(e =>
-          e.id === selectedEscala.id
-            ? { ...e, data: dataComputada, turmaId: formData.turmaId, professorId: formData.professorId, trimestre, observacao: formData.observacao }
-            : e
-        ))
-        toast('Escala atualizada!')
-      } else {
-        // trimestre é coluna GENERATED — não incluir no insert
-        const { data, error } = await db.from('escalas').insert({
-          data: dataComputada,
-          turma_id: formData.turmaId,
-          professor_id: formData.professorId,
-          observacoes: formData.observacao,
-        }).select('id').single()
-        if (error || !data) { console.error('Erro ao cadastrar escala:', error); toast('Erro ao cadastrar: ' + (error?.message ?? 'erro'), 'error'); return }
-        setEscalasData(prev => [...prev, {
-          id: data.id, data: dataComputada, turmaId: formData.turmaId,
-          professorId: formData.professorId, trimestre, observacao: formData.observacao,
-        }])
-        toast('Escala cadastrada!')
+      const resultado = await salvarEscalaAction({
+        id: editMode && selectedEscala ? selectedEscala.id : undefined,
+        data: dataComputada,
+        turma_id: formData.turmaId,
+        professor_id: formData.professorId,
+        observacoes: formData.observacao || null,
+      })
+      if (!resultado.success) {
+        toast('Erro ao salvar: ' + (resultado.error ?? 'erro'), 'error')
+        return
       }
+      toast(editMode ? 'Escala atualizada!' : 'Escala cadastrada!')
       fecharDialog()
+      await carregarDados()
     } catch (e: any) {
       toast('Erro ao salvar: ' + (e?.message ?? 'erro'), 'error')
     } finally {
       setIsSaving(false)
     }
-  }, [dataComputada, formData, isSaving, editMode, selectedEscala, db, fecharDialog])
+  }, [dataComputada, formData, isSaving, editMode, selectedEscala, fecharDialog, carregarDados])
 
   const excluirEscala = useCallback(async () => {
     if (!selectedEscala || isDeleting) return
     setIsDeleting(true)
     try {
-      const { error } = await db.from('escalas').delete().eq('id', selectedEscala.id)
-      if (error) {
-        console.error('Erro ao excluir escala:', error)
-        toast('Erro ao excluir: ' + (error.message ?? 'erro desconhecido'), 'error')
+      const resultado = await excluirEscalaAction(selectedEscala.id)
+      if (!resultado.success) {
+        toast('Erro ao excluir: ' + (resultado.error ?? 'erro desconhecido'), 'error')
         return
       }
-      setEscalasData(prev => prev.filter(e => e.id !== selectedEscala.id))
       toast('Escala excluída.')
       setDeleteDialogOpen(false)
       setSelectedEscala(null)
+      await carregarDados()
     } catch (e: any) {
       console.error('Exceção ao excluir escala:', e)
       toast('Erro ao excluir: ' + (e?.message ?? 'erro'), 'error')
     } finally {
       setIsDeleting(false)
     }
-  }, [selectedEscala, isDeleting, db])
+  }, [selectedEscala, isDeleting, carregarDados])
 
   // ── Sugestão de escala ────────────────────────────────────────────────────────
   const abrirSugestao = useCallback(() => {
@@ -557,31 +526,29 @@ export default function EscalaPage() {
     if (isSalvandoSugestao || paraInserir.length === 0) return
     setIsSalvandoSugestao(true)
     try {
-      const payload = paraInserir.map(e => ({
-        data: e.data,
-        turma_id: e.turmaId,
-        professor_id: e.professorId,
-        observacoes: '',
-      }))
-      const { data: inserted, error } = await db
-        .from('escalas')
-        .insert(payload)
-        .select('id, data, turma_id, professor_id, observacoes')
-      if (error) { toast('Erro ao salvar sugestão: ' + error.message, 'error'); return }
-      const novos = (inserted ?? []).map((e: any) => ({
-        id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
-        trimestre: parseInt(filtroTrim), observacao: e.observacoes ?? '',
-      }))
-      setEscalasData(prev => [...prev, ...novos])
+      const resultados = await Promise.all(
+        paraInserir.map(e => salvarEscalaAction({
+          data: e.data,
+          turma_id: e.turmaId,
+          professor_id: e.professorId,
+          observacoes: '',
+        }))
+      )
+      const erros = resultados.filter(r => !r.success)
+      if (erros.length > 0) {
+        toast(`Erro ao salvar ${erros.length} escala(s): ${erros[0].error ?? 'erro'}`, 'error')
+        return
+      }
       setSugestaoOpen(false)
       setSugestaoEntradas([])
-      toast(`${novos.length} escalas salvas com sucesso!`)
+      toast(`${paraInserir.length} escalas salvas com sucesso!`)
+      await carregarDados()
     } catch (e: any) {
       toast('Erro ao salvar: ' + (e?.message ?? 'erro'), 'error')
     } finally {
       setIsSalvandoSugestao(false)
     }
-  }, [sugestaoEntradas, isSalvandoSugestao, db, filtroTrim])
+  }, [sugestaoEntradas, isSalvandoSugestao, carregarDados])
 
   // ── Remover toda a escala de uma turma no período ────────────────────────────
   async function excluirEscalasTurma() {
@@ -589,15 +556,21 @@ export default function EscalaPage() {
     setIsDeletingTurma(true)
     try {
       const datas = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno)).map(d => d.data)
-      const { error } = await db.from('escalas')
-        .delete()
-        .eq('turma_id', excluirTurmaId)
-        .in('data', datas)
-      if (error) { toast('Erro ao remover escalas: ' + error.message, 'error'); return }
-      setEscalasData(prev => prev.filter(e => !(e.turmaId === excluirTurmaId && datas.includes(e.data))))
+      const idsParaExcluir = escalasData
+        .filter(e => e.turmaId === excluirTurmaId && datas.includes(e.data))
+        .map(e => e.id)
+      const resultados = await Promise.all(
+        idsParaExcluir.map(id => excluirEscalaAction(id))
+      )
+      const erros = resultados.filter(r => !r.success)
+      if (erros.length > 0) {
+        toast('Erro ao remover escalas: ' + (erros[0].error ?? 'erro'), 'error')
+        return
+      }
       toast(`Escalas de "${getTurmaNome(excluirTurmaId)}" removidas.`)
       setExcluirTurmaDialogOpen(false)
       setExcluirTurmaId(null)
+      await carregarDados()
     } catch (e: any) {
       toast('Erro: ' + (e?.message ?? 'erro'), 'error')
     } finally {

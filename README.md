@@ -68,16 +68,18 @@ Sistema web completo para gestão de Escola Bíblica Dominical (EBD): chamada, a
 
 | Camada | Tecnologia |
 |---|---|
-| **Framework** | [Next.js 14](https://nextjs.org/) — App Router + Middleware (edge) |
+| **Framework** | [Next.js 14](https://nextjs.org/) — App Router + Server Actions + Middleware (edge) |
 | **Linguagem** | [TypeScript 5.3](https://www.typescriptlang.org/) |
 | **Estilização** | [Tailwind CSS 3.4](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/) |
 | **Banco de Dados** | [Supabase](https://supabase.com/) (PostgreSQL + Auth + Row Level Security) |
+| **Queries SQL** | [`postgres`](https://github.com/porsager/postgres) — conexão direta via connection string (Transaction Pooler) |
 | **Autenticação** | `@supabase/auth-helpers-nextjs` — sessão persistida em cookies |
-| **Formulários** | [React Hook Form](https://react-hook-form.com/) + [Zod](https://zod.dev/) |
 | **Gráficos** | [Recharts 2](https://recharts.org/) |
 | **Datas** | [date-fns](https://date-fns.org/) com locale `pt-BR` |
 | **Ícones** | [Lucide React](https://lucide.dev/) |
 | **Deploy** | [Vercel](https://vercel.com/) |
+
+> **Arquitetura de dados:** todas as queries SQL são executadas em Server Actions (`src/actions/`) via conexão direta com o PostgreSQL do Supabase (Transaction Pooler, porta 6543). O cliente Supabase JS é usado exclusivamente para autenticação (login, sessão, logout).
 
 ---
 
@@ -137,15 +139,23 @@ supabase/seed_turmas_alunos.sql
 cp .env.local.example .env.local
 ```
 
-Edite `.env.local` com suas credenciais (**Supabase → Project Settings → API**):
+Edite `.env.local` com suas credenciais:
 
 ```env
+# ── Supabase Auth (usado no login e sessão) ─────────────────────────────────
+# Supabase → Project Settings → API
 NEXT_PUBLIC_SUPABASE_URL=https://SEU_PROJECT_ID.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sua_anon_key
 SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
+
+# ── Conexão direta PostgreSQL (usado em todas as queries do app) ─────────────
+# Supabase → Project Settings → Database → Connection string → Transaction pooler
+DATABASE_URL=postgresql://postgres.SEU_PROJECT_REF:SUA_SENHA@aws-0-REGIAO.pooler.supabase.com:6543/postgres
 ```
 
-> **Atenção:** a `SERVICE_ROLE_KEY` nunca deve ser exposta no client-side. Ela é usada apenas pela rota `/api/usuarios`.
+> **Como obter o `DATABASE_URL`:** No painel Supabase, acesse **Project Settings → Database → Connection string**. Selecione a aba **Transaction pooler** (porta **6543**) e copie a URI. Substitua `[YOUR-PASSWORD]` pela senha do banco (definida em **Database → Database password**).
+
+> **Atenção:** `SUPABASE_SERVICE_ROLE_KEY` e `DATABASE_URL` nunca devem ser expostos no client-side. São usados apenas em Server Actions e rotas de API.
 
 ### 5. Crie o primeiro usuário admin
 
@@ -211,6 +221,7 @@ Na aba **Usuários** (admin), cada colaborador pode ter:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `DATABASE_URL`
 4. Clique em **Deploy**
 
 > O projeto está configurado para build automático a cada push na branch `main`.
@@ -238,9 +249,10 @@ auth.users  (Supabase Auth)
 
 | Tabela | Campo | Observação |
 |---|---|---|
-| `chamadas` | `ano` (int) | Filtro principal — use `.eq('ano', ano)` em vez de range de datas |
-| `chamadas` | `data` (date) | Data do domingo; pode ser nulo em registros antigos |
-| `chamadas` | `oferta` | Armazenado em centavos (int); formatar com `toLocaleString('pt-BR')` |
+| `chamadas` | `ano` (smallint) | Coluna **gerada automaticamente** a partir de `data` — não inserir manualmente |
+| `chamadas` | `trimestre` (smallint) | Coluna **gerada automaticamente** a partir de `data` — não inserir manualmente |
+| `chamadas` | `data` (date) | Data do domingo; filtro principal por ano usa `WHERE ano = $1` |
+| `chamadas` | `oferta` | `NUMERIC(10,2)` — armazenado como decimal; campo de entrada usa centavos (int) |
 | `presencas` | `presente`, `trouxe_biblia`, `trouxe_revista` | Booleanos por aluno por chamada |
 | `alunos` | `responsavel` | `professor:<uuid>` indica aluno sincronizado de professor |
 
@@ -250,6 +262,14 @@ auth.users  (Supabase Auth)
 
 ```
 src/
+├── actions/                            # Server Actions — queries SQL diretas ao PostgreSQL
+│   ├── chamada.ts                      # Buscar turmas, resumo do dia, dados por turma, salvar chamada
+│   ├── dashboard.ts                    # Contadores gerais, turmas com professores, histórico, período
+│   ├── alunos.ts                       # CRUD de alunos + presença anual
+│   ├── professores.ts                  # CRUD de professores + sincronização de aluno vinculado
+│   ├── turmas.ts                       # CRUD de turmas + matrícula + detalhes
+│   ├── escala.ts                       # CRUD de escalas
+│   └── relatorios.ts                   # Todos os dados de relatórios e rankings
 ├── app/
 │   ├── (dashboard)/
 │   │   ├── dashboard/page.tsx          # KPIs + gráficos + histórico recente + tempo relativo
@@ -271,7 +291,6 @@ src/
 │   │   ├── stat-card.tsx               # Card de KPI reutilizável (título, valor, ícone)
 │   │   ├── presence-bar.tsx            # Barra de presença com cor dinâmica
 │   │   ├── empty-state.tsx             # Estado vazio padronizado
-│   │   ├── period-selector.tsx         # Seletor de período (mensal/trimestral/anual)
 │   │   ├── chart-tooltip.tsx           # Tooltip reutilizável para Recharts
 │   │   ├── delete-confirm-dialog.tsx   # Dialog de confirmação de exclusão (reutilizável)
 │   │   └── ...                         # shadcn/ui components (button, dialog, etc.)
@@ -281,11 +300,12 @@ src/
 ├── contexts/
 │   └── AuthContext.tsx                 # Sessão, perfil e permissões do usuário
 ├── lib/
+│   ├── db.ts                           # Conexão PostgreSQL direta (postgres package, Transaction Pooler)
 │   ├── constants.ts                    # Constantes globais (anos, meses, trimestres, cores, cargos)
-│   ├── presence.ts                     # Utilitários de presença (calcularPct, corPresenca, etc.)
-│   ├── supabase.ts                     # Cliente Supabase (cookie-based SSR)
+│   ├── presence.ts                     # Utilitários de presença (calcularPct, corPresenca, resolverCor, etc.)
+│   ├── supabase.ts                     # Cliente Supabase (apenas para auth — login, sessão, logout)
 │   ├── logger.ts                       # Logger dual-mode (terminal colorido / JSON Vercel)
-│   ├── utils.ts                        # Utilitários gerais (cn, salvarCargo, etc.)
+│   ├── relatorio-utils.ts              # filtrarPorPeriodo() e tipos de granularidade
 │   └── chamada-utils.ts                # Utilitários de data para chamada
 └── middleware.ts                       # Proteção de rotas no edge
 
@@ -347,6 +367,8 @@ Todas as tabelas possuem **Row Level Security** habilitado no Supabase:
 | `turmas`, `alunos`, `chamadas`, etc. | `authenticated` | `authenticated` |
 | `perfis`, `permissoes_modulos`, `permissoes_turmas` | `authenticated` | `service_role` apenas |
 
+As queries SQL do aplicativo são executadas via **connection string direta** (server-side), portanto passam pelo RLS do PostgreSQL normalmente, com as permissões do role configurado na connection string.
+
 As permissões granulares por módulo e turma são verificadas:
 - No **cliente** via `AuthContext` (renderização condicional de menus e conteúdo)
 - No **edge** via `middleware.ts` (proteção de rota antes de qualquer renderização)
@@ -372,38 +394,6 @@ Os breakpoints Tailwind utilizados são: `sm` (≥640px), `md` (≥768px) e `lg`
 | **Relatórios — Top 10** | Lista compacta (rank, nome, sala, %) | Tabela |
 | **Relatórios — Desempenho Professores** | Cards com turmas badges + grid 3-cols (Aulas/Presença/Bíblias) + badge avaliação | Tabela |
 | **Relatórios — Visitantes** | Cards com badges de dias (verde/vermelho) + grid de stats | Tabela com dias visitados |
-
-### Histórico de correções mobile
-
-| Área | Problema | Solução |
-|---|---|---|
-| **Layout geral** | Botão hambúrguer sobrepunha o conteúdo no mobile | Adicionado `pt-16` no `<main>` para mobile (`DashboardLayout.tsx`) |
-| **Tabelas** | `overflow-hidden` causava corte de colunas em telas pequenas | Substituído por `overflow-x-auto` + `min-w-[Xpx]`; adicionados cards `sm:hidden` como alternativa |
-| **Grids de KPIs** | `md:grid-cols-2 lg:grid-cols-4` sem classe padrão causava overflow | Adicionado card 2×2 compacto `sm:hidden`; grid desktop em `hidden sm:grid` |
-| **Dashboard** | `col-span-4` / `col-span-3` transbordava no breakpoint `md` | Removido `md:grid-cols-2`, col-spans limitados a `lg:col-span-N` |
-| **Dashboard — BarChart** | Labels de sala longas se sobrepunham no mobile | Adicionado `tickFormatter` no `XAxis` para remover prefixos e truncar em 12 chars |
-| **Dashboard — Histórico** | Sem informação de quando o registro foi feito | Adicionado `tempoRelativo()` com `created_at` ("Hoje às 14:30", "Ontem às 09:15", "Há 3 dias") |
-| **Dashboard — Top 10** | Alunos-professores indistinguíveis | Adicionado badge "Prof" (azul) e pill de cargo eclesiástico inline com o nome |
-| **Chamada** | Botões "Presente / Ausente" saíam da tela em celulares estreitos | Adicionado `flex-wrap` no container dos botões |
-| **Chamada — Resumo** | Nenhuma visão compacta no mobile para o resumo geral | Adicionado card `sm:hidden` com presença bar + grid 2-linhas × 4 colunas |
-| **Alunos** | Todas as colunas visíveis no mobile causavam scroll horizontal | Adicionada lista `md:hidden` de cards com todas as informações; tabela em `hidden md:block` |
-| **Professores** | Tabela com scroll horizontal no mobile sem alternativa | Adicionados stats 2×2 `sm:hidden` e lista de cards `sm:hidden`; tabela em `hidden sm:block` |
-| **Relatórios — Evolução** | Datas repetidas no eixo X (múltiplas turmas por domingo) | Agrupamento por data única via `agregarPorData()` antes de renderizar o gráfico |
-| **Relatórios — Desempenho** | Presença do professor mostrava dados dos alunos da turma | Corrigido para buscar presença pessoal do professor como aluno (`profIdToAluno` map) |
-| **Títulos** | `text-3xl` em todas as páginas era grande demais no mobile | Padronizado para `text-2xl sm:text-3xl` em todas as páginas |
-| **Stat-card** | Valor `text-2xl font-bold` comprimia em cards pequenos | Ajustado para `text-xl sm:text-2xl font-bold` |
-| **Escala** | Cabeçalho de data com professor transbordava em mobile | Adicionado `flex-wrap gap-2` no grupo de data |
-| **Relatórios** | Botões de exportar lado a lado saíam da tela | Adicionado `flex-wrap` no container dos botões |
-| **Delete dialogs** | Código do dialog de confirmação duplicado em 3 páginas | Extraído para `DeleteConfirmDialog` reutilizável |
-| **Chamada** | Tela branca durante carregamento | Adicionado skeleton animado enquanto 5 queries rodam em paralelo |
-| **Chamada** | Múltiplos cliques em Salvar disparavam requisições duplicadas | Botão desabilitado e label "Salvando…" durante operação |
-| **Chamada** | Salvar falhava silenciosamente (campo `ano` ausente; `.select().single()` após upsert bloqueado por RLS) | Separado upsert de select; adicionado campo `ano` no payload; error handling explícito por etapa |
-| **Chamada** | Inserts de visitantes em loop sequencial — lento e perdia dados se falhava no meio | Convertido para `Promise.all` paralelo com tratamento individual de erros |
-| **Chamada** | Input de oferta travado no mobile (teclado virtual envia `key='Unidentified'` no `onKeyDown`) | Adicionado handler `onChange` como fallback para teclados virtuais |
-| **Alunos / Professores / Escala** | Duplo clique no botão salvar causava registros duplicados | Adicionado `isSaving` + `disabled` em todos os formulários |
-| **Alunos / Professores / Turmas / Escala** | Página abria mostrando conteúdo vazio até os dados carregarem | Adicionado estado `carregando` + skeleton animado em todas as páginas de listagem |
-| **Dashboard** | N+1: 1 query por turma para calcular presença por sala | Refatorado para 2 queries com agregação client-side |
-| **Turmas** | N+1: 1 query por turma para contar alunos | Refatorado para 2 queries com contagem client-side |
 
 ---
 

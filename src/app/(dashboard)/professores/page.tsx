@@ -14,7 +14,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { buscarProfessoresComTurmas, salvarProfessor, excluirProfessor, sincronizarAlunoVinculado, salvarCargoProfessor } from '@/actions/professores'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -31,8 +31,6 @@ const FORM_VAZIO = { nome: '', telefone: '', email: '', especialidade: '', turma
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function ProfessoresPage() {
-  const db = supabase as any
-
   const [professores, setProfessores] = useState<Professor[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
@@ -50,15 +48,12 @@ export default function ProfessoresPage() {
     let cancelado = false
     async function load() {
       try {
-        const [{ data: profsData }, { data: turmasData }] = await Promise.all([
-          db.from('professores').select('id, nome, especialidade, telefone, email, data_ingresso, turma_aluno_id, cargo, professor_turmas(turma_id)').eq('ativo', true).order('nome'),
-          db.from('turmas').select('id, nome').eq('ativa', true).order('nome'),
-        ])
+        const { professores: profsData, turmas: turmasData } = await buscarProfessoresComTurmas()
         if (cancelado) return
         setProfessores((profsData ?? []).map((p: any) => ({
           id: p.id, nome: p.nome, especialidade: p.especialidade ?? '', telefone: p.telefone ?? '',
           email: p.email ?? '', dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
-          turmaAluno: p.turma_aluno_id ?? null, turmas: (p.professor_turmas ?? []).map((pt: any) => pt.turma_id),
+          turmaAluno: p.turma_aluno_id ?? null, turmas: p.turma_ids ?? [],
           cargo: p.cargo ?? '',
         })))
         setTurmas(turmasData ?? [])
@@ -110,22 +105,12 @@ export default function ProfessoresPage() {
   function closeDialog() { setDialogOpen(false); setEditMode(false); setSelected(null); setForm(FORM_VAZIO) }
 
   async function sincronizarAluno(profId: string, nome: string, turmaAluno: string | null) {
-    const marcador = `professor:${profId}`
-    const { data: existente } = await db.from('alunos').select('id').eq('responsavel', marcador).maybeSingle()
-    if (turmaAluno) {
-      if (existente) await db.from('alunos').update({ nome, turma_id: turmaAluno, ativo: true }).eq('id', existente.id)
-      else           await db.from('alunos').insert({ nome, turma_id: turmaAluno, responsavel: marcador, ativo: true })
-    } else if (existente) {
-      await db.from('alunos').delete().eq('id', existente.id)
-    }
+    await sincronizarAlunoVinculado(profId, nome, turmaAluno)
   }
 
   // Salva cargo no professor e sincroniza com o aluno correspondente (se existir)
   async function salvarCargoProf(profId: string, cargo: string) {
-    await Promise.all([
-      db.from('professores').update({ cargo: cargo || null }).eq('id', profId),
-      db.from('alunos').update({ cargo: cargo || null }).eq('responsavel', `professor:${profId}`),
-    ])
+    await salvarCargoProfessor(profId, cargo)
   }
 
   async function handleSave() {
@@ -133,27 +118,18 @@ export default function ProfessoresPage() {
     if (isSaving) return
     setIsSaving(true)
     try {
-      const payloadBase = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno }
+      const dados = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, turmas: form.turmas, cargo: form.cargo, id: editMode && selected ? selected.id : undefined }
+      const result = await salvarProfessor(dados)
+      if (!result.success) { toast(result.error ?? 'Erro ao salvar professor.', 'error'); return }
+      const profId = result.id ?? selected?.id
+      if (profId) {
+        await sincronizarAluno(profId, form.nome, form.turmaAluno)
+      }
       if (editMode && selected) {
-        const { error } = await db.from('professores').update(payloadBase).eq('id', selected.id)
-        if (error) { toast('Erro ao atualizar professor.', 'error'); return }
-        await Promise.all([
-          salvarCargoProf(selected.id, form.cargo),
-          (async () => {
-            await db.from('professor_turmas').delete().eq('professor_id', selected.id)
-            if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: selected.id, turma_id: tid })))
-          })(),
-          sincronizarAluno(selected.id, form.nome, form.turmaAluno),
-        ])
-        setProfessores(professores.map(p => p.id === selected.id ? { ...p, ...payloadBase, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
+        setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
         toast('Professor atualizado com sucesso!')
       } else {
-        const { data, error } = await db.from('professores').insert({ ...payloadBase, data_ingresso: new Date().toISOString().split('T')[0] }).select('id').single()
-        if (error || !data) { toast('Erro ao cadastrar professor.', 'error'); return }
-        await salvarCargoProf(data.id, form.cargo)
-        if (form.turmas.length > 0) await db.from('professor_turmas').insert(form.turmas.map((tid: string) => ({ professor_id: data.id, turma_id: tid })))
-        await sincronizarAluno(data.id, form.nome, form.turmaAluno)
-        setProfessores([...professores, { id: data.id, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
+        setProfessores([...professores, { id: profId!, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
         toast('Professor cadastrado com sucesso!')
       }
       closeDialog()
@@ -166,9 +142,8 @@ export default function ProfessoresPage() {
 
   async function handleDelete() {
     if (!selected) return
-    await db.from('alunos').delete().eq('responsavel', `professor:${selected.id}`)
-    const { error } = await db.from('professores').delete().eq('id', selected.id)
-    if (error) { toast('Erro ao excluir professor.', 'error'); return }
+    const result = await excluirProfessor(selected.id)
+    if (!result.success) { toast(result.error ?? 'Erro ao excluir professor.', 'error'); return }
     setProfessores(professores.filter(p => p.id !== selected.id))
     toast('Professor excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)

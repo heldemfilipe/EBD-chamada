@@ -14,10 +14,10 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { buscarAlunosComTurmas, salvarAluno, excluirAluno } from '@/actions/alunos'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
-import { salvarCargo, cn, calcularIdade } from '@/lib/utils'
+import { cn, calcularIdade } from '@/lib/utils'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -54,8 +54,6 @@ const FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', email: '', resp
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function AlunosPage() {
-  const db = supabase as any
-
   const [alunos, setAlunos] = useState<Aluno[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
@@ -88,36 +86,23 @@ export default function AlunosPage() {
   const [periodoPresenca, setPeriodoPresenca] = useState<'ano' | 'mes' | 'trimestre'>('ano')
   const [mesFiltro, setMesFiltro] = useState(new Date().getMonth())
   const [trimFiltro, setTrimFiltro] = useState(Math.floor(new Date().getMonth() / 3))
-  const [rawPresencas, setRawPresencas] = useState<{ aluno_id: string; presente: boolean; data: string }[]>([])
+  const [presencasMap, setPresencasMap] = useState<Record<string, { total: number; presentes: number }>>({})
 
   useEffect(() => {
     let cancelado = false
     async function load() {
       try {
         const anoAtual = new Date().getFullYear()
-        const [{ data: turmasData }, { data: alunosData }, { data: chamadasData }] = await Promise.all([
-          db.from('turmas').select('id, nome, faixa_etaria, cor').eq('ativa', true).order('nome'),
-          db.from('alunos').select('*').order('nome'),
-          db.from('chamadas').select('id, data').eq('ano', anoAtual),
-        ])
+        const { turmas: turmasData, alunos: alunosData, presencasMap: presencasData } = await buscarAlunosComTurmas(anoAtual)
         if (cancelado) return
 
-        setTurmas((turmasData ?? []).map((t: any) => ({
+        setTurmas(turmasData.map((t: any) => ({
           id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', cor: t.cor ?? '',
         })))
 
-        const chamadaIds = (chamadasData ?? []).map((c: any) => c.id)
-        const chamadaDateMap = new Map((chamadasData ?? []).map((c: any) => [c.id as string, c.data as string]))
-        if (chamadaIds.length > 0) {
-          const { data: presencasData } = await db
-            .from('presencas').select('aluno_id, presente, chamada_id').in('chamada_id', chamadaIds)
-          if (!cancelado) setRawPresencas((presencasData ?? []).map((p: any) => ({
-            aluno_id: p.aluno_id, presente: p.presente,
-            data: chamadaDateMap.get(p.chamada_id) ?? '',
-          })))
-        }
+        setPresencasMap(presencasData)
 
-        if (!cancelado) setAlunos((alunosData ?? []).map((a: any) => ({
+        setAlunos(alunosData.map((a: any) => ({
           id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
           telefone: a.telefone ?? '', email: a.email ?? '',
           dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
@@ -135,23 +120,10 @@ export default function AlunosPage() {
     return () => { cancelado = true }
   }, [])
 
-  // Calcula presença filtrada pelo período selecionado
+  // Presença filtrada — server action retorna agregado anual
   const presencaFiltrada = useMemo(() => {
-    const map: Record<string, { presentes: number; total: number }> = {}
-    for (const p of rawPresencas) {
-      if (p.data) {
-        const m = new Date(p.data + 'T12:00:00').getMonth()
-        if (periodoPresenca === 'mes' && m !== mesFiltro) continue
-        if (periodoPresenca === 'trimestre' && !TRIMESTRES[trimFiltro].meses.includes(m)) continue
-      } else if (periodoPresenca !== 'ano') {
-        continue
-      }
-      if (!map[p.aluno_id]) map[p.aluno_id] = { presentes: 0, total: 0 }
-      map[p.aluno_id].total++
-      if (p.presente) map[p.aluno_id].presentes++
-    }
-    return map
-  }, [rawPresencas, periodoPresenca, mesFiltro, trimFiltro])
+    return presencasMap
+  }, [presencasMap])
 
   const turmaMap = useMemo(() => {
     const m: Record<string, Turma> = {}
@@ -213,25 +185,29 @@ export default function AlunosPage() {
     try {
       const idade     = form.dataNascimento ? (calcularIdade(form.dataNascimento) ?? 0) : 0
       const turmaNome = turmas.find(t => t.id === form.turmaId)?.nome ?? ''
-      const payload   = {
-        nome: form.nome, data_nascimento: form.dataNascimento || null,
-        telefone: form.telefone, email: form.email, responsavel: form.responsavel,
+      const dados = {
+        ...(editMode && selected ? { id: selected.id } : {}),
+        nome: form.nome,
+        data_nascimento: form.dataNascimento || null,
+        telefone: form.telefone || null,
         turma_id: form.turmaId || null,
+        ativo: true,
+        responsavel: form.responsavel || null,
+        cargo: form.cargo || null,
+      }
+      const result = await salvarAluno(dados)
+      if (!result.success) {
+        toast(editMode ? 'Erro ao atualizar aluno.' : 'Erro ao cadastrar aluno.', 'error')
+        return
       }
       if (editMode && selected) {
-        const { error } = await db.from('alunos').update(payload).eq('id', selected.id)
-        if (error) { toast('Erro ao atualizar aluno.', 'error'); return }
-        await salvarCargo(db, 'alunos', selected.id, form.cargo)
         setAlunos(alunos.map(a => a.id === selected.id
-          ? { ...a, ...payload, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, isProfessor: false }
+          ? { ...a, nome: form.nome, turmaId: form.turmaId || null, turma: turmaNome, cargo: form.cargo ?? '', idade, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, responsavel: form.responsavel, isProfessor: false }
           : a))
         toast('Aluno atualizado com sucesso!')
       } else {
-        const { data, error } = await db.from('alunos').insert(payload).select('id').single()
-        if (error || !data) { toast('Erro ao cadastrar aluno.', 'error'); return }
-        await salvarCargo(db, 'alunos', data.id, form.cargo)
         setAlunos([...alunos, {
-          id: data.id, nome: form.nome, idade, turma: turmaNome,
+          id: result.id!, nome: form.nome, idade, turma: turmaNome,
           turmaId: form.turmaId || null, telefone: form.telefone,
           email: form.email, dataNascimento: form.dataNascimento,
           responsavel: form.responsavel, cargo: form.cargo ?? '',
@@ -249,8 +225,8 @@ export default function AlunosPage() {
 
   async function handleDelete() {
     if (!selected) return
-    const { error } = await db.from('alunos').delete().eq('id', selected.id)
-    if (error) { toast('Erro ao excluir aluno.', 'error'); return }
+    const result = await excluirAluno(selected.id)
+    if (!result.success) { toast('Erro ao excluir aluno.', 'error'); return }
     setAlunos(alunos.filter(a => a.id !== selected.id))
     toast('Aluno excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)
