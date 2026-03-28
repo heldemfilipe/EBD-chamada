@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
+import { buscarPerfilUsuario } from '@/actions/auth'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 export interface Perfil {
@@ -60,30 +61,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadPerfil(userId: string) {
     logger.info('Carregando perfil do usuário', { module: 'auth', userId })
 
-    const db = supabase as any
-    const { data: perfilData, error: perfilErr } = await db
-      .from('perfis')
-      .select('id, nome, role, ativo')
-      .eq('id', userId)
-      .single()
-
-    // ─ Caso 1: tabela "perfis" não existe (setup_auth.sql não foi executado)
-    if (perfilErr) {
-      const msg = (perfilErr.message ?? '') as string
-      const tabelaNaoExiste =
-        perfilErr.code === '42P01' ||
-        msg.includes('does not exist') ||
-        msg.includes('relation') ||
-        perfilErr.code === 'PGRST200'
+    let perfilData: Awaited<ReturnType<typeof buscarPerfilUsuario>>
+    try {
+      perfilData = await buscarPerfilUsuario(userId)
+    } catch (err: any) {
+      const msg = (err?.message ?? '') as string
+      const tabelaNaoExiste = msg.includes('does not exist') || msg.includes('relation')
 
       if (tabelaNaoExiste) {
         logger.warn('Tabela "perfis" não encontrada — execute setup_auth.sql no Supabase', {
           module: 'auth',
           userId,
-          error: { message: perfilErr.message, code: perfilErr.code },
           hint: 'Execute supabase/setup_auth.sql no Supabase SQL Editor',
         })
-        // Setup pendente: mantém logado mas sinaliza configuração pendente
         setSetupPendente(true)
         setPerfil(null)
         setModulosPermitidos(TODOS_MODULOS)
@@ -91,30 +81,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      // ─ Caso 2: Usuário sem perfil cadastrado (PGRST116 = no rows returned)
-      if (perfilErr.code === 'PGRST116') {
-        logger.warn('Usuário autenticado sem perfil na tabela "perfis" — fazendo logout', {
-          module: 'auth',
-          userId,
-          error: { message: perfilErr.message, code: perfilErr.code },
-        })
-        await supabase.auth.signOut()
-        resetState()
-        return
-      }
-
-      // ─ Caso 3: Erro desconhecido
       logger.error('Erro inesperado ao carregar perfil — fazendo logout por segurança', {
         module: 'auth',
         userId,
-        error: perfilErr,
+        error: err,
       })
       await supabase.auth.signOut()
       resetState()
       return
     }
 
-    // ─ Caso 4: Perfil desativado
+    // ─ Caso 1: Usuário sem perfil cadastrado
+    if (!perfilData) {
+      logger.warn('Usuário autenticado sem perfil na tabela "perfis" — fazendo logout', {
+        module: 'auth',
+        userId,
+      })
+      await supabase.auth.signOut()
+      resetState()
+      return
+    }
+
+    // ─ Caso 2: Perfil desativado
     if (!perfilData.ativo) {
       logger.warn('Tentativa de acesso com perfil inativo — fazendo logout', {
         module: 'auth',
@@ -126,9 +114,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // ─ Caso 5: Perfil OK → carregar permissões
+    // ─ Caso 3: Perfil OK → aplicar permissões
     setSetupPendente(false)
-    setPerfil(perfilData)
+    setPerfil({ id: perfilData.id, nome: perfilData.nome, role: perfilData.role, ativo: perfilData.ativo })
 
     if (perfilData.role === 'admin') {
       setModulosPermitidos(TODOS_MODULOS)
@@ -143,30 +131,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: 'admin',
       })
     } else {
-      const [{ data: modulos, error: modErr }, { data: turmas, error: turErr }] = await Promise.all([
-        db.from('permissoes_modulos').select('modulo, nivel').eq('perfil_id', userId),
-        db.from('permissoes_turmas').select('turma_id').eq('perfil_id', userId),
-      ])
-
-      if (modErr) logger.warn('Erro ao carregar permissões de módulos', { module: 'auth', userId, error: modErr })
-      if (turErr) logger.warn('Erro ao carregar permissões de turmas',  { module: 'auth', userId, error: turErr })
-
       const permsMap: Record<string, NivelPermissao> = {}
-      for (const m of modulos ?? []) {
+      for (const m of perfilData.modulos) {
         permsMap[m.modulo] = (m.nivel ?? 'editar') as NivelPermissao
       }
       setPermissoesModulos(permsMap)
       setModulosPermitidos(Object.keys(permsMap))
-
-      const listaTurmas = (turmas ?? []).map((t: any) => t.turma_id)
-      setTurmasPermitidas(listaTurmas)
+      setTurmasPermitidas(perfilData.turmas)
 
       logger.info('Permissões de colaborador carregadas', {
         module: 'auth',
         userId,
         nome: perfilData.nome,
         modulos: Object.keys(permsMap),
-        totalTurmas: listaTurmas.length,
+        totalTurmas: perfilData.turmas.length,
       })
     }
   }
