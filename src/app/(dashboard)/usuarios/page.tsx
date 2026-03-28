@@ -14,9 +14,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  Plus, Shield, Users, UserCheck, Edit, Power,
+  Plus, Shield, Users, UserCheck, Edit, Power, Trash2,
   LayoutDashboard, GraduationCap, BookOpen, ClipboardCheck,
-  CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key,
+  CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key, AlertTriangle,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
@@ -74,6 +74,8 @@ export default function UsuariosPage() {
   const [editMode, setEditMode] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UsuarioDB | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [deleteDialog, setDeleteDialog] = useState<UsuarioDB | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Form state — modulos agora e Record<modulo, nivel>
   const [form, setForm] = useState({
@@ -255,6 +257,21 @@ export default function UsuariosPage() {
     if (res.ok) fetchUsuarios()
   }
 
+  async function handleApagar() {
+    if (!deleteDialog) return
+    setDeleting(true)
+    const res = await fetch(`/api/usuarios?id=${deleteDialog.id}`, { method: 'DELETE' })
+    if (res.ok) {
+      toast(`Usuário "${deleteDialog.nome}" apagado com sucesso.`, 'success')
+      await fetchUsuarios()
+    } else {
+      const err = await res.json()
+      toast(err.error || 'Erro ao apagar usuário.', 'error')
+    }
+    setDeleteDialog(null)
+    setDeleting(false)
+  }
+
   // Stats
   const totalAtivos  = usuarios.filter(u => u.ativo).length
   const totalAdmins  = usuarios.filter(u => u.role === 'admin' && u.ativo).length
@@ -418,6 +435,15 @@ export default function UsuariosPage() {
                             >
                               <Power className="h-4 w-4" />
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeleteDialog(u)}
+                              title="Apagar usuário"
+                              className="hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -429,6 +455,46 @@ export default function UsuariosPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ─── Dialog Confirmar Exclusão ─── */}
+      <Dialog open={!!deleteDialog} onOpenChange={open => { if (!open) setDeleteDialog(null) }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Apagar Usuário
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              Esta ação é permanente e não pode ser desfeita. O usuário perderá acesso imediatamente.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteDialog && (
+            <div className="py-2">
+              <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/40">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                  deleteDialog.role === 'admin'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground'
+                }`}>
+                  {getInitials(deleteDialog.nome)}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">{deleteDialog.nome}</p>
+                  <p className="text-xs text-muted-foreground truncate">{deleteDialog.email}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialog(null)} disabled={deleting}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleApagar} disabled={deleting}>
+              {deleting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Apagando...</> : 'Apagar Permanentemente'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Dialog Criar / Editar ─── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

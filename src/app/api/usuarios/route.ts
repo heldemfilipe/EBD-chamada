@@ -316,7 +316,7 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json({ success: true })
 }
 
-// ─── DELETE — Desativar usuário ───────────────────────────────────────────────
+// ─── DELETE — Apagar usuário permanentemente ─────────────────────────────────
 export async function DELETE(req: NextRequest) {
   const session = await verificarAdmin(req)
   if (!session) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
@@ -329,21 +329,30 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
   }
 
-  // Não deixar admin desativar a si mesmo
   if (id === session.user.id) {
-    logger.warn('Tentativa de auto-desativação bloqueada', { module: MOD, userId: session.user.id })
-    return NextResponse.json({ error: 'Você não pode desativar sua própria conta' }, { status: 400 })
+    logger.warn('Tentativa de auto-exclusão bloqueada', { module: MOD, userId: session.user.id })
+    return NextResponse.json({ error: 'Você não pode apagar sua própria conta' }, { status: 400 })
   }
 
   const db = createServiceClient() as any
-  const { error: deactivateErr } = await db.from('perfis').update({ ativo: false }).eq('id', id)
 
-  if (deactivateErr) {
-    logger.error('Falha ao desativar usuário', { module: MOD, userId: session.user.id, targetId: id, error: deactivateErr })
-    return NextResponse.json({ error: 'Falha ao desativar usuário' }, { status: 500 })
+  // Apagar permissões, perfil e usuario do auth em sequencia
+  await db.from('permissoes_modulos').delete().eq('perfil_id', id)
+  await db.from('permissoes_turmas').delete().eq('perfil_id', id)
+
+  const { error: perfilErr } = await db.from('perfis').delete().eq('id', id)
+  if (perfilErr) {
+    logger.error('Falha ao apagar perfil', { module: MOD, userId: session.user.id, targetId: id, error: perfilErr })
+    return NextResponse.json({ error: 'Falha ao apagar usuário' }, { status: 500 })
   }
 
-  logger.info(`Usuário desativado: ${id}`, {
+  const { error: authErr } = await db.auth.admin.deleteUser(id)
+  if (authErr) {
+    logger.error('Falha ao apagar auth user (perfil ja removido)', { module: MOD, userId: session.user.id, targetId: id, error: authErr })
+    // Nao retorna erro — perfil ja foi removido, auth pode ter sido removido em outro momento
+  }
+
+  logger.info(`Usuário apagado permanentemente: ${id}`, {
     module: MOD,
     userId: session.user.id,
     targetId: id,
