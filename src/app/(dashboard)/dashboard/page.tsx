@@ -82,43 +82,92 @@ export default function DashboardPage() {
     id: string; nome: string; turma: string; ebdDate: string; modificadoEm: string
   }[]>([])
 
-  // Stats gerais
+  // ─── Dados estaticos (nao dependem de filtros de periodo) ────────────────────
   useEffect(() => {
     async function load() {
       const anoAtual = new Date().getFullYear()
-      const [{ count: totalAlunos }, { count: totalProfessores }, { count: totalTurmas }, { data: chamadas }] = await Promise.all([
+      // Todas as queries em paralelo — 0 sequenciais
+      const [
+        { count: totalAlunos },
+        { count: totalProfessores },
+        { data: turmasData },
+        { data: chamadasRecentes },
+        { data: visitantesData },
+      ] = await Promise.all([
         db.from('alunos').select('id', { count: 'exact', head: true }).eq('ativo', true),
         db.from('professores').select('id', { count: 'exact', head: true }).eq('ativo', true),
-        db.from('turmas').select('id', { count: 'exact', head: true }).eq('ativa', true),
-        db.from('chamadas').select('id').eq('ano', anoAtual),
+        db.from('turmas').select('id, nome, cor, professor_turmas(professores(nome)), alunos(id)').eq('ativa', true),
+        db.from('chamadas').select('id, data, created_at, turmas(nome), presencas(presente)').order('created_at', { ascending: false }).limit(5),
+        db.from('historico_visitantes').select('id, data, created_at, presente, visitantes(nome), turmas(nome)').eq('presente', true).order('created_at', { ascending: false }).limit(8),
       ])
 
-      let presencaMedia = 0
-      if (chamadas?.length) {
-        const { data: ps } = await db.from('presencas').select('presente').in('chamada_id', chamadas.map((c: any) => c.id))
-        if (ps?.length) presencaMedia = calcularPct(ps.filter((p: any) => p.presente).length, ps.length)
-      }
+      // Turmas ativas
+      setTurmasAtivas((turmasData ?? []).map((t: any) => ({
+        id: t.id, turma: t.nome, alunos: (t.alunos ?? []).length,
+        professor: (t.professor_turmas ?? []).map((pt: any) => pt.professores?.nome).filter(Boolean).join(', ') || 'Sem professor',
+      })))
 
-      setStats({ totalAlunos: totalAlunos ?? 0, totalProfessores: totalProfessores ?? 0, totalTurmas: totalTurmas ?? 0, presencaMedia })
+      // Stats basicos (turmas count vem do turmasData)
+      setStats(prev => ({
+        ...prev,
+        totalAlunos: totalAlunos ?? 0,
+        totalProfessores: totalProfessores ?? 0,
+        totalTurmas: turmasData?.length ?? 0,
+      }))
+
+      // Chamadas recentes
+      setChamadasRecentes((chamadasRecentes ?? []).map((c: any) => {
+        const presentes = (c.presencas ?? []).filter((p: any) => p.presente).length
+        const total = (c.presencas ?? []).length
+        return {
+          id: c.id,
+          description: `${c.turmas?.nome ?? 'Turma'} — ${presentes}/${total} presentes`,
+          ebdDate: c.data ? format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR }) : '—',
+          modificadoEm: tempoRelativo(c.created_at ?? c.data),
+        }
+      }))
+
+      // Visitantes recentes
+      setVisitantesRecentes((visitantesData ?? []).map((v: any) => ({
+        id: v.id,
+        nome: v.visitantes?.nome ?? 'Visitante',
+        turma: v.turmas?.nome ?? '—',
+        ebdDate: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
+        modificadoEm: tempoRelativo(v.created_at ?? v.data),
+      })))
     }
     load()
   }, [])
 
-  // Gráfico anual + domingos — uma única query por ano, filtragem por mês client-side
+  // ─── Dados por periodo (graficos, presenca por sala, top alunos) ────────────
   useEffect(() => {
+    let cancelado = false
     async function load() {
-      const { data: chamadas } = await db.from('chamadas').select('id, data, presencas(presente)').eq('ano', ano)
-      if (!chamadas?.length) {
-        setDadosAnual([])
-        setDadosDomingos(prev => ({ ...prev, [ano]: {} }))
-        return
-      }
+      // 1 query de chamadas + 1 de alunos + turmas do cache (ja carregadas acima)
+      const [{ data: chamadasAno }, { data: alunos }, { data: turmas }] = await Promise.all([
+        db.from('chamadas').select('id, data, turma_id, presencas(aluno_id, presente)').eq('ano', ano),
+        db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true),
+        db.from('turmas').select('id, nome, cor').eq('ativa', true),
+      ])
+      if (cancelado) return
 
+      const todasChamadas = chamadasAno ?? []
+
+      // --- Presenca media do ano (stats) ---
+      let totalPresentes = 0, totalPresencas = 0
+      for (const c of todasChamadas) {
+        const ps = c.presencas ?? []
+        totalPresencas += ps.length
+        totalPresentes += ps.filter((p: any) => p.presente).length
+      }
+      setStats(prev => ({ ...prev, presencaMedia: calcularPct(totalPresentes, totalPresencas) }))
+
+      // --- Grafico anual + domingos ---
       const porMes: Record<number, { presentes: number; total: number }> = {}
       const porMesDomingos: Record<number, PontoDado[]> = {}
       for (let i = 0; i < 12; i++) porMes[i] = { presentes: 0, total: 0 }
 
-      for (const c of chamadas) {
+      for (const c of todasChamadas) {
         if (!c.data) continue
         const m = parseISO(c.data).getMonth()
         const ps = c.presencas ?? []
@@ -137,144 +186,65 @@ export default function DashboardPage() {
         pct: calcularPct(porMes[i].presentes, porMes[i].total),
       })))
       setDadosDomingos(prev => ({ ...prev, [ano]: porMesDomingos }))
-    }
-    load()
-  }, [ano])
 
-  // Presença por sala (1 query em vez de N queries)
-  useEffect(() => {
-    let cancelado = false
-    async function load() {
-      try {
-        const [{ data: turmas }, { data: chamadasRaw }] = await Promise.all([
-          db.from('turmas').select('id, nome, cor').eq('ativa', true),
-          db.from('chamadas').select('id, turma_id, data, presencas(presente)').eq('ano', ano),
-        ])
-        if (cancelado) return
-        if (!turmas?.length) { setDadosPorSala([]); return }
-
-        const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
-        // Agrupa chamadas por turma_id para calcular presença de cada sala
+      // --- Presenca por sala (filtrada por periodo) ---
+      if (turmas?.length) {
+        const chamadasFiltradas = filtrarPorPeriodo(todasChamadas, { periodo, mes, trimestre })
         const porTurma: Record<string, { presentes: number; total: number }> = {}
-        for (const c of chamadas) {
+        for (const c of chamadasFiltradas) {
           if (!porTurma[c.turma_id]) porTurma[c.turma_id] = { presentes: 0, total: 0 }
           const ps = c.presencas ?? []
           porTurma[c.turma_id].total += ps.length
           porTurma[c.turma_id].presentes += ps.filter((p: any) => p.presente).length
         }
-
         setDadosPorSala(turmas.map((turma: any, idx: number) => ({
           sala: turma.nome,
           cor: resolverCor(turma.cor, idx),
           presencaMedia: calcularPct(porTurma[turma.id]?.presentes ?? 0, porTurma[turma.id]?.total ?? 0),
         })))
-      } catch (e: any) {
-        if (!cancelado) console.error('Erro ao carregar presença por sala:', e)
+
+        // --- Top alunos (ja temos presencas inline, sem query extra) ---
+        const chamadasIds = new Set(chamadasFiltradas.map((c: any) => c.id))
+        const ppa: Record<string, { presentes: number; total: number }> = {}
+        for (const c of chamadasFiltradas) {
+          for (const p of (c.presencas ?? [])) {
+            if (!ppa[p.aluno_id]) ppa[p.aluno_id] = { presentes: 0, total: 0 }
+            ppa[p.aluno_id].total++
+            if (p.presente) ppa[p.aluno_id].presentes++
+          }
+        }
+
+        const lista = (alunos ?? [])
+          .filter((a: any) => ppa[a.id]?.total > 0)
+          .map((a: any) => ({
+            id: a.id, nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma',
+            presenca: ppa[a.id]?.presentes ?? 0, total: ppa[a.id]?.total ?? 0,
+            pct: calcularPct(ppa[a.id]?.presentes ?? 0, ppa[a.id]?.total ?? 0),
+            cargo: a.cargo ?? '',
+            isProfessor: (a.responsavel ?? '').startsWith('professor:'),
+          }))
+          .sort((a: any, b: any) => b.pct - a.pct || b.presenca - a.presenca)
+
+        setTop10(lista.slice(0, 10))
+
+        const porSala: Record<string, typeof lista> = {}
+        for (const a of lista) {
+          if (!porSala[a.sala]) porSala[a.sala] = []
+          porSala[a.sala].push(a)
+        }
+        const topS: Record<string, { nome: string; presenca: number; total: number }[]> = {}
+        for (const sala in porSala) topS[sala] = porSala[sala].slice(0, 5).map((a: any) => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
+        setTopPorSala(topS)
+        if (!salaSelecionada && Object.keys(topS).length > 0) setSalaSelecionada(Object.keys(topS)[0])
+      } else {
+        setDadosPorSala([])
+        setTopPorSala({})
+        setTop10([])
       }
     }
     load()
     return () => { cancelado = true }
   }, [ano, periodo, trimestre, mes])
-
-  // Top alunos (com cargo e isProfessor)
-  useEffect(() => {
-    async function load() {
-      const [{ data: chamadasRaw }, { data: alunos }] = await Promise.all([
-        db.from('chamadas').select('id, turma_id, data').eq('ano', ano),
-        db.from('alunos').select('id, nome, turma_id, turmas(nome), responsavel, cargo').eq('ativo', true),
-      ])
-      const chamadas = filtrarPorPeriodo(chamadasRaw ?? [], { periodo, mes, trimestre })
-      if (!chamadas?.length || !alunos?.length) { setTopPorSala({}); setTop10([]); return }
-
-      const { data: presencas } = await db.from('presencas').select('aluno_id, presente').in('chamada_id', chamadas.map((c: any) => c.id))
-      if (!presencas) { setTopPorSala({}); setTop10([]); return }
-
-      const ppa: Record<string, { presentes: number; total: number }> = {}
-      for (const p of presencas) {
-        if (!ppa[p.aluno_id]) ppa[p.aluno_id] = { presentes: 0, total: 0 }
-        ppa[p.aluno_id].total++
-        if (p.presente) ppa[p.aluno_id].presentes++
-      }
-
-      const lista = alunos
-        .filter((a: any) => ppa[a.id]?.total > 0)
-        .map((a: any) => ({
-          id: a.id, nome: a.nome, sala: a.turmas?.nome ?? 'Sem turma',
-          presenca: ppa[a.id]?.presentes ?? 0, total: ppa[a.id]?.total ?? 0,
-          pct: calcularPct(ppa[a.id]?.presentes ?? 0, ppa[a.id]?.total ?? 0),
-          cargo: a.cargo ?? '',
-          isProfessor: (a.responsavel ?? '').startsWith('professor:'),
-        }))
-        .sort((a: any, b: any) => b.pct - a.pct || b.presenca - a.presenca)
-
-      setTop10(lista.slice(0, 10))
-
-      const porSala: Record<string, typeof lista> = {}
-      for (const a of lista) {
-        if (!porSala[a.sala]) porSala[a.sala] = []
-        porSala[a.sala].push(a)
-      }
-      const topS: Record<string, { nome: string; presenca: number; total: number }[]> = {}
-      for (const sala in porSala) topS[sala] = porSala[sala].slice(0, 5).map((a: any) => ({ nome: a.nome, presenca: a.presenca, total: a.total }))
-      setTopPorSala(topS)
-      if (!salaSelecionada && Object.keys(topS).length > 0) setSalaSelecionada(Object.keys(topS)[0])
-    }
-    load()
-  }, [ano, periodo, mes, trimestre])
-
-  // Turmas ativas
-  useEffect(() => {
-    async function load() {
-      const { data: turmas } = await db.from('turmas').select('id, nome, professor_turmas(professores(nome)), alunos(id)').eq('ativa', true)
-      setTurmasAtivas((turmas ?? []).map((t: any) => ({
-        id: t.id, turma: t.nome, alunos: (t.alunos ?? []).length,
-        professor: (t.professor_turmas ?? []).map((pt: any) => pt.professores?.nome).filter(Boolean).join(', ') || 'Sem professor',
-      })))
-    }
-    load()
-  }, [])
-
-  // Chamadas recentes — ordena por created_at (quando foi registrada), fallback para data
-  useEffect(() => {
-    async function load() {
-      const { data: chamadas } = await db
-        .from('chamadas')
-        .select('id, data, created_at, turmas(nome), presencas(presente)')
-        .order('created_at', { ascending: false })
-        .limit(5)
-      setChamadasRecentes((chamadas ?? []).map((c: any) => {
-        const presentes = (c.presencas ?? []).filter((p: any) => p.presente).length
-        const total = (c.presencas ?? []).length
-        return {
-          id: c.id,
-          description: `${c.turmas?.nome ?? 'Turma'} — ${presentes}/${total} presentes`,
-          ebdDate: c.data ? format(parseISO(c.data), "dd/MM/yyyy", { locale: ptBR }) : '—',
-          modificadoEm: tempoRelativo(c.created_at ?? c.data),
-        }
-      }))
-    }
-    load()
-  }, [])
-
-  // Visitantes recentes — ordena por created_at
-  useEffect(() => {
-    async function load() {
-      const { data } = await db
-        .from('historico_visitantes')
-        .select('id, data, created_at, presente, visitantes(nome), turmas(nome)')
-        .eq('presente', true)
-        .order('created_at', { ascending: false })
-        .limit(8)
-      setVisitantesRecentes((data ?? []).map((v: any) => ({
-        id: v.id,
-        nome: v.visitantes?.nome ?? 'Visitante',
-        turma: v.turmas?.nome ?? '—',
-        ebdDate: v.data ? format(parseISO(v.data), 'dd/MM/yyyy', { locale: ptBR }) : '—',
-        modificadoEm: tempoRelativo(v.created_at ?? v.data),
-      })))
-    }
-    load()
-  }, [])
 
   const dadosGrafico: PontoDado[] = useMemo(() => {
     if (periodo === 'anual') return dadosAnual
