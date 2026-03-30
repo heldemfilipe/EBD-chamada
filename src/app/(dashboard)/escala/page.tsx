@@ -826,7 +826,7 @@ export default function EscalaPage() {
                     {tabelaView.turmas.map((t, colIdx) => {
                       const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
                       return (
-                        <th key={t.id} className="px-3 py-0 text-left font-semibold" style={{ minWidth: '140px', backgroundColor: turmaCorRgba(t.cor, colIdx, 0.12) }}>
+                        <th key={t.id} className="px-3 py-0 text-left font-semibold" style={{ minWidth: '160px', maxWidth: '220px', backgroundColor: turmaCorRgba(t.cor, colIdx, 0.12) }}>
                           <div className={`h-2.5 -mx-3 mb-2 ${t.cor}`} />
                           <div className="flex items-center gap-1 mb-0.5 group/col">
                             <span className="text-xs font-bold flex-1 truncate">{t.nome}</span>
@@ -839,7 +839,7 @@ export default function EscalaPage() {
                             </button>
                           </div>
                           {tema && (
-                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2 line-clamp-2">
+                            <p className="text-[10px] text-muted-foreground font-normal leading-snug pb-2">
                               {tema}
                             </p>
                           )}
