@@ -239,15 +239,18 @@ export default function RelatoriosPage() {
       const data = await buscarProfessoresRelatorio(ano)
       if (!data.professores.length) { setProfessores([]); return }
 
-      const profsFiltered = turmaFiltro !== 'all'
-        ? data.professores.filter(p => p.turmas.some((t: any) => t.turma_id === turmaFiltro))
-        : data.professores
-
       const profIdToAluno = new Map<string, { alunoId: string; turmaId: string | null }>()
       for (const a of data.profAlunos) {
         const pid = a.responsavel.replace('professor:', '')
         if (pid) profIdToAluno.set(pid, { alunoId: a.id, turmaId: a.turma_id })
       }
+
+      const profsFiltered = turmaFiltro !== 'all'
+        ? data.professores.filter(p =>
+            p.turmas.some((t: any) => t.turma_id === turmaFiltro) ||
+            profIdToAluno.get(p.id)?.turmaId === turmaFiltro
+          )
+        : data.professores
 
       // Build presencas lookup: aluno_id -> chamada_id -> {presente, trouxe_biblia}
       const presencasPorAluno = new Map<string, Map<string, { presente: boolean; trouxe_biblia: boolean }>>()

@@ -97,3 +97,20 @@ export async function buscarDadosPeriodo(ano: number) {
     turmas: turmas.map(t => ({ id: t.id, nome: t.nome, cor: t.cor ?? 'bg-blue-500' })),
   }
 }
+
+export async function buscarAniversariantes() {
+  const rows = await sql`
+    SELECT a.id, a.nome, a.data_nascimento, a.responsavel,
+      t.nome AS turma_nome
+    FROM alunos a
+    LEFT JOIN turmas t ON t.id = a.turma_id
+    WHERE a.ativo = true AND a.data_nascimento IS NOT NULL
+  `
+  return rows.map(r => ({
+    id: r.id as string,
+    nome: r.nome as string,
+    data_nascimento: r.data_nascimento as string,
+    turma_nome: (r.turma_nome ?? '') as string,
+    isProfessor: typeof r.responsavel === 'string' && (r.responsavel as string).startsWith('professor:'),
+  }))
+}
