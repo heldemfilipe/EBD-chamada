@@ -62,6 +62,7 @@ export interface Database {
           foto_url: string | null
           especialidade: string | null
           turma_aluno_id: string | null   // turma em que o professor também é aluno
+          data_nascimento: string | null
           data_ingresso: string | null
           ativo: boolean
           created_at: string
@@ -75,6 +76,7 @@ export interface Database {
           foto_url?: string | null
           especialidade?: string | null
           turma_aluno_id?: string | null
+          data_nascimento?: string | null
           data_ingresso?: string | null
           ativo?: boolean
           created_at?: string
@@ -88,6 +90,7 @@ export interface Database {
           foto_url?: string | null
           especialidade?: string | null
           turma_aluno_id?: string | null
+          data_nascimento?: string | null
           data_ingresso?: string | null
           ativo?: boolean
           created_at?: string

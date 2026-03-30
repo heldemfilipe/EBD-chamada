@@ -99,18 +99,40 @@ export async function buscarDadosPeriodo(ano: number) {
 }
 
 export async function buscarAniversariantes() {
-  const rows = await sql`
-    SELECT a.id, a.nome, a.data_nascimento, a.responsavel,
-      t.nome AS turma_nome
-    FROM alunos a
-    LEFT JOIN turmas t ON t.id = a.turma_id
-    WHERE a.ativo = true AND a.data_nascimento IS NOT NULL
-  `
-  return rows.map(r => ({
+  const [alunos, professores] = await Promise.all([
+    sql`
+      SELECT a.id, a.nome, a.data_nascimento, a.responsavel,
+        t.nome AS turma_nome
+      FROM alunos a
+      LEFT JOIN turmas t ON t.id = a.turma_id
+      WHERE a.ativo = true AND a.data_nascimento IS NOT NULL
+    `,
+    sql`
+      SELECT p.id, p.nome, p.data_nascimento
+      FROM professores p
+      WHERE p.ativo = true AND p.data_nascimento IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM alunos a WHERE a.responsavel = 'professor:' || p.id::text AND a.ativo = true)
+    `,
+  ])
+
+  const resultado = alunos.map(r => ({
     id: r.id as string,
     nome: r.nome as string,
     data_nascimento: r.data_nascimento as string,
     turma_nome: (r.turma_nome ?? '') as string,
     isProfessor: typeof r.responsavel === 'string' && (r.responsavel as string).startsWith('professor:'),
   }))
+
+  // Adicionar professores que nao estao vinculados como alunos
+  for (const p of professores) {
+    resultado.push({
+      id: p.id as string,
+      nome: p.nome as string,
+      data_nascimento: p.data_nascimento as string,
+      turma_nome: '',
+      isProfessor: true,
+    })
+  }
+
+  return resultado
 }

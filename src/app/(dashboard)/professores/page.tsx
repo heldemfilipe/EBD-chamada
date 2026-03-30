@@ -23,11 +23,11 @@ import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Professor {
   id: string; nome: string; especialidade: string; turmas: string[]
-  turmaAluno: string | null; telefone: string; email: string; dataIngresso: string; cargo: string
+  turmaAluno: string | null; telefone: string; email: string; dataNascimento: string; dataIngresso: string; cargo: string
 }
 interface Turma { id: string; nome: string }
 
-const FORM_VAZIO = { nome: '', telefone: '', email: '', especialidade: '', turmas: [] as string[], turmaAluno: null as string | null, cargo: '' }
+const FORM_VAZIO = { nome: '', telefone: '', email: '', dataNascimento: '', especialidade: '', turmas: [] as string[], turmaAluno: null as string | null, cargo: '' }
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 export default function ProfessoresPage() {
@@ -52,7 +52,8 @@ export default function ProfessoresPage() {
         if (cancelado) return
         setProfessores((profsData ?? []).map((p: any) => ({
           id: p.id, nome: p.nome, especialidade: p.especialidade ?? '', telefone: p.telefone ?? '',
-          email: p.email ?? '', dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
+          email: p.email ?? '', dataNascimento: p.data_nascimento ?? '',
+          dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
           turmaAluno: p.turma_aluno_id ?? null, turmas: p.turma_ids ?? [],
           cargo: p.cargo ?? '',
         })))
@@ -95,7 +96,7 @@ export default function ProfessoresPage() {
   function openDialog(professor?: Professor) {
     if (professor) {
       setEditMode(true); setSelected(professor)
-      setForm({ nome: professor.nome, telefone: professor.telefone, email: professor.email, especialidade: professor.especialidade, turmas: professor.turmas, turmaAluno: professor.turmaAluno, cargo: professor.cargo ?? '' })
+      setForm({ nome: professor.nome, telefone: professor.telefone, email: professor.email, dataNascimento: professor.dataNascimento ?? '', especialidade: professor.especialidade, turmas: professor.turmas, turmaAluno: professor.turmaAluno, cargo: professor.cargo ?? '' })
     } else {
       setEditMode(false); setSelected(null); setForm(FORM_VAZIO)
     }
@@ -104,8 +105,8 @@ export default function ProfessoresPage() {
 
   function closeDialog() { setDialogOpen(false); setEditMode(false); setSelected(null); setForm(FORM_VAZIO) }
 
-  async function sincronizarAluno(profId: string, nome: string, turmaAluno: string | null) {
-    await sincronizarAlunoVinculado(profId, nome, turmaAluno)
+  async function sincronizarAluno(profId: string, nome: string, turmaAluno: string | null, dataNascimento?: string | null) {
+    await sincronizarAlunoVinculado(profId, nome, turmaAluno, dataNascimento)
   }
 
   // Salva cargo no professor e sincroniza com o aluno correspondente (se existir)
@@ -118,18 +119,18 @@ export default function ProfessoresPage() {
     if (isSaving) return
     setIsSaving(true)
     try {
-      const dados = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, turmas: form.turmas, cargo: form.cargo, id: editMode && selected ? selected.id : undefined }
+      const dados = { nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turma_aluno_id: form.turmaAluno, data_nascimento: form.dataNascimento || null, turmas: form.turmas, cargo: form.cargo, id: editMode && selected ? selected.id : undefined }
       const result = await salvarProfessor(dados)
       if (!result.success) { toast(result.error ?? 'Erro ao salvar professor.', 'error'); return }
       const profId = result.id ?? selected?.id
       if (profId) {
-        await sincronizarAluno(profId, form.nome, form.turmaAluno)
+        await sincronizarAluno(profId, form.nome, form.turmaAluno, form.dataNascimento || null)
       }
       if (editMode && selected) {
-        setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
+        setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, especialidade: form.especialidade, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
         toast('Professor atualizado com sucesso!')
       } else {
-        setProfessores([...professores, { id: profId!, nome: form.nome, telefone: form.telefone, email: form.email, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
+        setProfessores([...professores, { id: profId!, nome: form.nome, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
         toast('Professor cadastrado com sucesso!')
       }
       closeDialog()
@@ -419,6 +420,10 @@ export default function ProfessoresPage() {
             <div className="grid gap-2">
               <Label htmlFor="email">E-mail</Label>
               <Input id="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="dataNascimento" className="flex items-center gap-2"><Calendar className="h-4 w-4" />Data de Nascimento</Label>
+              <Input id="dataNascimento" type="date" value={form.dataNascimento} onChange={(e) => setForm({ ...form, dataNascimento: e.target.value })} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="especialidade">Especialidade</Label>
