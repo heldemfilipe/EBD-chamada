@@ -565,7 +565,7 @@ export default function ChamadaTurmaPage() {
                     <Button size="sm" className="h-6 px-2 text-[10px]" onClick={handleAplicarQuantidades}>
                       Aplicar
                     </Button>
-                    <div className="hidden sm:flex items-center gap-1">
+                    <div className="flex items-center gap-1">
                       <span className="text-muted-foreground text-[10px]">todos:</span>
                       <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={handleMarcarTodosBiblia}>
                         <Book className="h-2.5 w-2.5 mr-0.5" /> Bíblia
