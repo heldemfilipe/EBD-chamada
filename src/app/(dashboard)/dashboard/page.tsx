@@ -55,14 +55,22 @@ function filtrarPorPeriodo(
 
 type PontoDado = { periodo: string; presentes: number; total: number; pct: number }
 
+/** Parseia data no formato YYYY-MM-DD de forma segura */
+function parseDateSafe(dataNasc: string): Date | null {
+  if (!dataNasc) return null
+  // Tratar formato YYYY-MM-DD diretamente para evitar problemas de timezone
+  const parts = dataNasc.split('T')[0].split('-')
+  if (parts.length !== 3) return null
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+  return isNaN(d.getTime()) ? null : d
+}
+
 /** Verifica se a data de nascimento cai dentro de um intervalo, comparando apenas mes/dia */
 function aniversarioNaSemana(dataNasc: string, inicio: Date, fim: Date): boolean {
-  const nasc = parseISO(dataNasc)
-  if (isNaN(nasc.getTime())) return false
-  // Cria data ficticia no ano do inicio para comparar mes/dia
+  const nasc = parseDateSafe(dataNasc)
+  if (!nasc) return false
   const anoRef = inicio.getFullYear()
   const anivEsteAno = new Date(anoRef, nasc.getMonth(), nasc.getDate())
-  // Se o intervalo cruza virada de ano, testar tambem no ano seguinte
   const anivProxAno = new Date(anoRef + 1, nasc.getMonth(), nasc.getDate())
   const inicioMs = startOfDay(inicio).getTime()
   const fimMs = startOfDay(fim).getTime()
@@ -72,7 +80,8 @@ function aniversarioNaSemana(dataNasc: string, inicio: Date, fim: Date): boolean
 }
 
 function calcularIdadeEm(dataNasc: string, dataRef: Date): number {
-  const nasc = parseISO(dataNasc)
+  const nasc = parseDateSafe(dataNasc)
+  if (!nasc) return 0
   let idade = dataRef.getFullYear() - nasc.getFullYear()
   const m = dataRef.getMonth() - nasc.getMonth()
   if (m < 0 || (m === 0 && dataRef.getDate() < nasc.getDate())) idade--
@@ -113,12 +122,13 @@ export default function DashboardPage() {
   const aniversariantesFiltrados = useMemo(() => {
     if (!todosAniversariantes.length) return []
     const hoje = startOfDay(new Date())
-    const inicio = semanaAniv === 'passada' ? addDays(hoje, -7) : addDays(hoje, 1)
-    const fim = semanaAniv === 'passada' ? addDays(hoje, -1) : addDays(hoje, 7)
+    const inicio = semanaAniv === 'passada' ? addDays(hoje, -7) : hoje
+    const fim = semanaAniv === 'passada' ? hoje : addDays(hoje, 7)
     return todosAniversariantes
       .filter(a => aniversarioNaSemana(a.data_nascimento, inicio, fim))
       .sort((a, b) => {
-        const dA = parseISO(a.data_nascimento), dB = parseISO(b.data_nascimento)
+        const dA = parseDateSafe(a.data_nascimento), dB = parseDateSafe(b.data_nascimento)
+        if (!dA || !dB) return 0
         return (dA.getMonth() * 31 + dA.getDate()) - (dB.getMonth() * 31 + dB.getDate())
       })
   }, [todosAniversariantes, semanaAniv])
@@ -126,12 +136,13 @@ export default function DashboardPage() {
   const aniversariantesProf = useMemo(() => {
     if (!todosAniversariantes.length) return []
     const hoje = startOfDay(new Date())
-    const inicio = semanaAnivProf === 'passada' ? addDays(hoje, -7) : addDays(hoje, 1)
-    const fim = semanaAnivProf === 'passada' ? addDays(hoje, -1) : addDays(hoje, 7)
+    const inicio = semanaAnivProf === 'passada' ? addDays(hoje, -7) : hoje
+    const fim = semanaAnivProf === 'passada' ? hoje : addDays(hoje, 7)
     return todosAniversariantes
       .filter(a => a.isProfessor && aniversarioNaSemana(a.data_nascimento, inicio, fim))
       .sort((a, b) => {
-        const dA = parseISO(a.data_nascimento), dB = parseISO(b.data_nascimento)
+        const dA = parseDateSafe(a.data_nascimento), dB = parseDateSafe(b.data_nascimento)
+        if (!dA || !dB) return 0
         return (dA.getMonth() * 31 + dA.getDate()) - (dB.getMonth() * 31 + dB.getDate())
       })
   }, [todosAniversariantes, semanaAnivProf])
@@ -364,6 +375,139 @@ export default function DashboardPage() {
         <StatCard title="Presença Média"   value={stats.presencaMedia > 0 ? `${stats.presencaMedia}%` : '—'} icon={TrendingUp} description="No período atual" />
       </div>
 
+      {/* Aniversariantes */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Aniversariantes — Alunos */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Cake className="h-4 w-4 text-pink-500" />
+                Aniversariantes
+              </CardTitle>
+            </div>
+            <div className="flex gap-1.5 pt-1">
+              {(['passada', 'proxima'] as const).map(s => (
+                <button key={s} onClick={() => setSemanaAniv(s)}
+                  className={cn('px-2.5 py-1 rounded-full text-xs font-medium transition-all border',
+                    semanaAniv === s ? 'bg-pink-600 text-white border-pink-600' : 'border-border text-muted-foreground hover:border-pink-500/50 hover:text-foreground')}>
+                  {s === 'passada' ? 'Semana passada' : 'Esta e proxima semana'}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {aniversariantesFiltrados.length > 0 ? (
+              <div className="space-y-2">
+                {aniversariantesFiltrados.map((a) => {
+                  const nasc = parseDateSafe(a.data_nascimento)
+                  if (!nasc) return null
+                  const hoje = new Date()
+                  const anivEsteAno = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate())
+                  const idade = calcularIdadeEm(a.data_nascimento, anivEsteAno)
+                  const isHoje = nasc.getMonth() === hoje.getMonth() && nasc.getDate() === hoje.getDate()
+                  return (
+                    <div key={a.id} className={cn(
+                      'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
+                      isHoje ? 'bg-pink-500/15 ring-1 ring-pink-500/30' : 'bg-muted/40'
+                    )}>
+                      <div className={cn(
+                        'flex items-center justify-center w-10 h-10 rounded-full flex-shrink-0',
+                        isHoje ? 'bg-pink-500 text-white' : 'bg-pink-500/10 text-pink-500'
+                      )}>
+                        <span className="text-sm font-bold">{String(nasc.getDate()).padStart(2, '0')}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn('text-sm font-medium truncate', isHoje && 'font-bold')}>{a.nome}</span>
+                          {isHoje && <span className="text-[9px] font-bold text-pink-500 uppercase tracking-wide flex-shrink-0">Hoje!</span>}
+                          {a.isProfessor && (
+                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500 text-amber-500 bg-amber-500/10 flex-shrink-0">Prof</Badge>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">{a.turma_nome || 'Sem turma'}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={cn('text-xs font-semibold', isHoje ? 'text-pink-400' : 'text-muted-foreground')}>
+                          {String(nasc.getDate()).padStart(2, '0')}/{String(nasc.getMonth() + 1).padStart(2, '0')}
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">{idade} anos</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <EmptyState message={semanaAniv === 'passada' ? 'Nenhum aniversariante na semana passada' : 'Nenhum aniversariante nesta e na proxima semana'} minHeight="h-[80px]" />
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Aniversariantes — Professores */}
+        <Card className="border-amber-500/20 bg-gradient-to-br from-amber-500/[0.03] to-transparent">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <GraduationCap className="h-4 w-4 text-amber-500" />
+                Aniversariantes — Professores
+              </CardTitle>
+              <Badge className="bg-amber-500/15 text-amber-500 border-amber-500/30 text-[10px]">Destaque</Badge>
+            </div>
+            <div className="flex gap-1.5 pt-1">
+              {(['passada', 'proxima'] as const).map(s => (
+                <button key={s} onClick={() => setSemanaAnivProf(s)}
+                  className={cn('px-2.5 py-1 rounded-full text-xs font-medium transition-all border',
+                    semanaAnivProf === s ? 'bg-amber-600 text-white border-amber-600' : 'border-border text-muted-foreground hover:border-amber-500/50 hover:text-foreground')}>
+                  {s === 'passada' ? 'Semana passada' : 'Esta e proxima semana'}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {aniversariantesProf.length > 0 ? (
+              <div className="space-y-2">
+                {aniversariantesProf.map((a) => {
+                  const nasc = parseDateSafe(a.data_nascimento)
+                  if (!nasc) return null
+                  const hoje = new Date()
+                  const anivEsteAno = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate())
+                  const idade = calcularIdadeEm(a.data_nascimento, anivEsteAno)
+                  const isHoje = nasc.getMonth() === hoje.getMonth() && nasc.getDate() === hoje.getDate()
+                  return (
+                    <div key={a.id} className={cn(
+                      'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
+                      isHoje ? 'bg-amber-500/15 ring-1 ring-amber-500/30' : 'bg-amber-500/5'
+                    )}>
+                      <div className={cn(
+                        'flex items-center justify-center w-10 h-10 rounded-full flex-shrink-0',
+                        isHoje ? 'bg-amber-500 text-white' : 'bg-amber-500/10 text-amber-500'
+                      )}>
+                        <span className="text-sm font-bold">{String(nasc.getDate()).padStart(2, '0')}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn('text-sm font-medium truncate', isHoje && 'font-bold')}>{a.nome}</span>
+                          {isHoje && <span className="text-[9px] font-bold text-amber-500 uppercase tracking-wide flex-shrink-0">Hoje!</span>}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">{a.turma_nome || 'Professor'}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={cn('text-xs font-semibold', isHoje ? 'text-amber-400' : 'text-amber-500')}>
+                          {String(nasc.getDate()).padStart(2, '0')}/{String(nasc.getMonth() + 1).padStart(2, '0')}
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">{idade} anos</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <EmptyState message={semanaAnivProf === 'passada' ? 'Nenhum professor aniversariante na semana passada' : 'Nenhum professor aniversariante nesta e na proxima semana'} minHeight="h-[80px]" />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Seção de análise */}
       <div className="space-y-5">
         {/* Seletor de período + gráfico evolução */}
@@ -550,108 +694,6 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
-      </div>
-
-      {/* Aniversariantes */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Aniversariantes — Geral */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Cake className="h-4 w-4 text-pink-500" />
-              Aniversariantes
-            </CardTitle>
-            <div className="flex gap-1.5 pt-1">
-              {(['passada', 'proxima'] as const).map(s => (
-                <button key={s} onClick={() => setSemanaAniv(s)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${semanaAniv === s ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'}`}>
-                  {s === 'passada' ? 'Semana passada' : 'Proxima semana'}
-                </button>
-              ))}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {aniversariantesFiltrados.length > 0 ? (
-              <div className="space-y-2">
-                {aniversariantesFiltrados.map((a) => {
-                  const nasc = parseISO(a.data_nascimento)
-                  const hoje = new Date()
-                  const anivEsteAno = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate())
-                  const idade = calcularIdadeEm(a.data_nascimento, anivEsteAno)
-                  return (
-                    <div key={a.id} className="flex items-center gap-3 py-1.5 px-3 rounded-lg bg-muted/40">
-                      <div className="flex items-center justify-center w-10 h-10 rounded-full bg-pink-500/10 text-pink-500 flex-shrink-0">
-                        <span className="text-sm font-bold">{format(nasc, 'dd')}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium truncate">{a.nome}</span>
-                          {a.isProfessor && (
-                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-blue-400 text-blue-400">Prof</Badge>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">{a.turma_nome || 'Sem turma'}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className="text-xs font-semibold text-pink-500">{format(nasc, 'dd/MM')}</span>
-                        <p className="text-[10px] text-muted-foreground">{idade} anos</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <EmptyState message={semanaAniv === 'passada' ? 'Nenhum aniversariante na semana passada' : 'Nenhum aniversariante na proxima semana'} minHeight="h-[80px]" />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Aniversariantes — Professores */}
-        <Card className="border-blue-500/20">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <GraduationCap className="h-4 w-4 text-blue-500" />
-              Aniversariantes — Professores
-            </CardTitle>
-            <div className="flex gap-1.5 pt-1">
-              {(['passada', 'proxima'] as const).map(s => (
-                <button key={s} onClick={() => setSemanaAnivProf(s)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${semanaAnivProf === s ? 'bg-blue-600 text-white border-blue-600' : 'border-border text-muted-foreground hover:border-blue-500/50 hover:text-foreground'}`}>
-                  {s === 'passada' ? 'Semana passada' : 'Proxima semana'}
-                </button>
-              ))}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {aniversariantesProf.length > 0 ? (
-              <div className="space-y-2">
-                {aniversariantesProf.map((a) => {
-                  const nasc = parseISO(a.data_nascimento)
-                  const hoje = new Date()
-                  const anivEsteAno = new Date(hoje.getFullYear(), nasc.getMonth(), nasc.getDate())
-                  const idade = calcularIdadeEm(a.data_nascimento, anivEsteAno)
-                  return (
-                    <div key={a.id} className="flex items-center gap-3 py-1.5 px-3 rounded-lg bg-blue-500/5">
-                      <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500/10 text-blue-500 flex-shrink-0">
-                        <span className="text-sm font-bold">{format(nasc, 'dd')}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium truncate block">{a.nome}</span>
-                        <p className="text-[10px] text-muted-foreground">{a.turma_nome || 'Sem turma'}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className="text-xs font-semibold text-blue-500">{format(nasc, 'dd/MM')}</span>
-                        <p className="text-[10px] text-muted-foreground">{idade} anos</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <EmptyState message={semanaAnivProf === 'passada' ? 'Nenhum professor aniversariante na semana passada' : 'Nenhum professor aniversariante na proxima semana'} minHeight="h-[80px]" />
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {/* Turmas + Histórico */}

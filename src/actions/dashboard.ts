@@ -115,20 +115,31 @@ export async function buscarAniversariantes() {
     `,
   ])
 
+  function normalizarData(v: unknown): string {
+    if (!v) return ''
+    if (v instanceof Date) return v.toISOString().split('T')[0]
+    const s = String(v)
+    // Se ja esta no formato YYYY-MM-DD, retornar direto
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.split('T')[0]
+    return s
+  }
+
   const resultado = alunos.map(r => ({
     id: r.id as string,
     nome: r.nome as string,
-    data_nascimento: r.data_nascimento as string,
+    data_nascimento: normalizarData(r.data_nascimento),
     turma_nome: (r.turma_nome ?? '') as string,
     isProfessor: typeof r.responsavel === 'string' && (r.responsavel as string).startsWith('professor:'),
-  }))
+  })).filter(r => r.data_nascimento !== '')
 
   // Adicionar professores que nao estao vinculados como alunos
   for (const p of professores) {
+    const dn = normalizarData(p.data_nascimento)
+    if (!dn) continue
     resultado.push({
       id: p.id as string,
       nome: p.nome as string,
-      data_nascimento: p.data_nascimento as string,
+      data_nascimento: dn,
       turma_nome: '',
       isProfessor: true,
     })
