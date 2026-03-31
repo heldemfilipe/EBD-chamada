@@ -19,6 +19,7 @@ import {
 import { buscarContadoresGerais, buscarTurmasComProfessores, buscarUltimasChamadas, buscarUltimosVisitantes, buscarDadosPeriodo, buscarAniversariantes } from '@/actions/dashboard'
 import { MESES_CURTOS, TRIMESTRES, getCargo } from '@/lib/constants'
 import { calcularPct, resolverCor } from '@/lib/presence'
+import { cn } from '@/lib/utils'
 import { format, parseISO, isToday, isYesterday, differenceInCalendarDays, addDays, startOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
