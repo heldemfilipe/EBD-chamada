@@ -189,6 +189,7 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
         WHERE hv.turma_id = ${turmaId}
           AND hv.data >= ${trimestreInicio}
           AND hv.data <= ${trimestreFim}
+          AND v.convertido_em_aluno = false
         ORDER BY hv.data DESC`,
     ])
   } catch (e: any) {
@@ -373,8 +374,17 @@ export async function salvarChamada(params: {
 
 // ─── Converter visitante em aluno ────────────────────────────────────────────
 
-export async function converterVisitanteEmAluno(visitanteId: string | null, nome: string, telefone: string | null, turmaId: string): Promise<{ success: boolean; alunoId?: string; error?: string }> {
+export async function converterVisitanteEmAluno(visitanteId: string | null, nome: string, telefone: string | null, turmaId: string): Promise<{ success: boolean; alunoId?: string; error?: string; duplicado?: boolean }> {
   try {
+    const [existente] = await sql`
+      SELECT id FROM alunos
+      WHERE turma_id = ${turmaId} AND ativo = true AND lower(trim(nome)) = lower(trim(${nome}))
+      LIMIT 1
+    `
+    if (existente) {
+      return { success: false, duplicado: true, error: `Já existe um aluno com o nome "${nome}" nesta turma.` }
+    }
+
     const [novoAluno] = await sql`
       INSERT INTO alunos (nome, telefone, turma_id, ativo)
       VALUES (${nome}, ${telefone}, ${turmaId}, true)

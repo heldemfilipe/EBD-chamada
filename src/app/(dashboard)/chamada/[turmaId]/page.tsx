@@ -285,14 +285,24 @@ export default function ChamadaTurmaPage() {
   }, [])
 
   const handleAdicionarVisitante = useCallback(() => {
-    if (!novoVisitante.nome.trim()) {
+    const nomeTrim = novoVisitante.nome.trim()
+    if (!nomeTrim) {
       toast('Por favor, preencha o nome do visitante.', 'error')
+      return
+    }
+    const nomeNorm = nomeTrim.toLowerCase()
+    if (visitantes.some(v => v.nome.trim().toLowerCase() === nomeNorm)) {
+      toast(`Já existe um visitante com o nome "${nomeTrim}" nesta chamada.`, 'error')
+      return
+    }
+    if (alunos.some(a => a.nome.trim().toLowerCase() === nomeNorm)) {
+      toast(`"${nomeTrim}" já está cadastrado como aluno nesta turma.`, 'error')
       return
     }
     const visitante: Visitante = {
       id: `new_${Date.now()}`,
       isNovo: true,
-      nome: novoVisitante.nome.trim(),
+      nome: nomeTrim,
       telefone: novoVisitante.telefone,
       observacao: novoVisitante.observacao,
       presenteHoje: 'presente',
@@ -304,7 +314,7 @@ export default function ChamadaTurmaPage() {
     setVisitantes(prev => [...prev, visitante])
     setNovoVisitante({ nome: '', telefone: '', observacao: '' })
     setDialogVisitanteOpen(false)
-  }, [novoVisitante])
+  }, [novoVisitante, visitantes, alunos])
 
   const handleConverterEmAluno = async (visitanteId: string) => {
     const visitante = visitantes.find(v => v.id === visitanteId)
@@ -317,7 +327,11 @@ export default function ChamadaTurmaPage() {
       visitante.telefone || null,
       turmaId,
     )
-    if (!result.success || !result.alunoId) { toast('Erro ao converter visitante em aluno.', 'error'); return }
+    if (!result.success) {
+      toast(result.error ?? 'Erro ao converter visitante em aluno.', 'error')
+      return
+    }
+    if (!result.alunoId) { toast('Erro ao converter visitante em aluno.', 'error'); return }
 
     toast(`${visitante.nome} convertido em aluno com sucesso!`)
     setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
