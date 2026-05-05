@@ -5,8 +5,9 @@ import postgres from 'postgres'
 const connectionString = process.env.DATABASE_URL!
 
 const sql = postgres(connectionString, {
-  max: 10,                     // max connections no pool
-  idle_timeout: 20,            // fecha conexões ociosas após 20s
+  max: 3,                      // serverless: cada instância usa no máximo 3 conexões
+  idle_timeout: 10,            // fecha conexões ociosas mais rápido (serverless)
+  max_lifetime: 60,            // recicla conexões a cada 60s para evitar stale
   connect_timeout: 10,         // timeout de conexão 10s
   prepare: false,              // necessário para Supabase Transaction Pooler
 
