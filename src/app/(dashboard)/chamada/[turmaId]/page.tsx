@@ -180,8 +180,17 @@ export default function ChamadaTurmaPage() {
           for (const [visitanteId, registros] of porVisitante.entries()) {
             const primeiro = registros[0]
             const registroDia = registros.find(r => r.data === dataSelecionada)
-            const historicoAnterior = registros
-              .filter(r => r.data !== dataSelecionada)
+            const registrosAnteriores = registros.filter(r => r.data !== dataSelecionada)
+
+            // Remover visitante com 5+ faltas consecutivas (registros já vêm DESC por data)
+            let faltasConsecutivas = 0
+            for (const r of registrosAnteriores) {
+              if (!r.presente) faltasConsecutivas++
+              else break
+            }
+            if (faltasConsecutivas >= 5) continue
+
+            const historicoAnterior = registrosAnteriores
               .slice(0, 3)
               .map(r => ({ data: r.data, presente: r.presente }))
             visitantesCarregados.push({
