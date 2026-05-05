@@ -3,12 +3,10 @@
 import sql from '@/lib/db'
 
 export async function buscarDadosEscala() {
-  const [escalas, professores, turmas, professorTurmas] = await Promise.all([
-    sql`SELECT id, data, turma_id, professor_id, trimestre, observacoes FROM escalas ORDER BY data`,
-    sql`SELECT id, nome FROM professores WHERE ativo = true ORDER BY nome`,
-    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true ORDER BY nome`,
-    sql`SELECT professor_id, turma_id FROM professor_turmas`,
-  ])
+  const escalas        = await sql`SELECT id, data, turma_id, professor_id, trimestre, observacoes FROM escalas ORDER BY data`
+  const professores    = await sql`SELECT id, nome FROM professores WHERE ativo = true ORDER BY nome`
+  const turmas         = await sql`SELECT id, nome, cor FROM turmas WHERE ativa = true ORDER BY nome`
+  const professorTurmas = await sql`SELECT professor_id, turma_id FROM professor_turmas`
 
   return {
     escalas: escalas.map(e => ({

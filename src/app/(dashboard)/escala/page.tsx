@@ -297,7 +297,9 @@ export default function EscalaPage() {
       }
       setProfTurmasMap(ptMap)
     } catch (e: any) {
-      toast('Erro ao carregar escala: ' + (e?.message ?? 'erro'), 'error')
+      const msg = e?.message ?? 'erro desconhecido'
+      const ehPool = msg.includes('EMAXCONN') || msg.includes('max clients') || msg.includes('Server Components')
+      toast(ehPool ? 'Serviço temporariamente sobrecarregado. Recarregue a página.' : 'Erro ao carregar escala: ' + msg, 'error')
     } finally {
       setCarregando(false)
     }
@@ -330,7 +332,7 @@ export default function EscalaPage() {
   // ── Filtros base ──────────────────────────────────────────────────────────────
   const escalasPeriodo = useMemo(() =>
     escalasData
-      .filter(e => e.data.startsWith(filtroAno) && e.trimestre === parseInt(filtroTrim))
+      .filter(e => e.data.startsWith(filtroAno) && Number(e.trimestre) === parseInt(filtroTrim))
       .sort((a, b) => a.data.localeCompare(b.data)),
     [escalasData, filtroAno, filtroTrim]
   )
