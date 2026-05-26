@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    // Safety timeout: se em 8s o loading ainda não terminou, libera de qualquer forma
+    // Safety timeout: se em 5s o loading ainda não terminou, libera de qualquer forma
     const safetyTimer = setTimeout(() => {
       if (mounted) {
         logger.warn('Timeout no carregamento do perfil — liberando tela', { module: 'auth' })

@@ -134,6 +134,7 @@ export default function DashboardPage() {
 
   // ─── Dados estaticos (nao dependem de filtros de periodo) ────────────────────
   useEffect(() => {
+    let cancelado = false
     async function load() {
       const [contadores, turmasData, chamadasData, visitantesData, aniversariantesData] = await Promise.all([
         buscarContadoresGerais(),
@@ -142,14 +143,13 @@ export default function DashboardPage() {
         buscarUltimosVisitantes(8),
         buscarAniversariantes(),
       ])
+      if (cancelado) return
 
-      // Turmas ativas
       setTurmasAtivas(turmasData.map((t: any) => ({
         id: t.id, turma: t.nome, alunos: t.totalAlunos,
         professor: t.professores.length > 0 ? t.professores.join(', ') : 'Sem professor',
       })))
 
-      // Stats basicos
       setStats(prev => ({
         ...prev,
         totalAlunos: contadores.totalAlunos,
@@ -157,7 +157,6 @@ export default function DashboardPage() {
         totalTurmas: turmasData.length,
       }))
 
-      // Chamadas recentes
       setChamadasRecentes(chamadasData.map((c: any) => ({
         id: c.id,
         description: `${c.turma_nome ?? 'Turma'} — ${c.presentes}/${c.total} presentes`,
@@ -165,7 +164,6 @@ export default function DashboardPage() {
         modificadoEm: tempoRelativo(c.created_at ?? c.data),
       })))
 
-      // Visitantes recentes
       setVisitantesRecentes(visitantesData.map((v: any) => ({
         id: v.id,
         nome: v.visitante_nome ?? 'Visitante',
@@ -174,10 +172,10 @@ export default function DashboardPage() {
         modificadoEm: tempoRelativo(v.created_at ?? v.data),
       })))
 
-      // Aniversariantes
       setTodosAniversariantes(aniversariantesData)
     }
     load()
+    return () => { cancelado = true }
   }, [])
 
   // ─── Dados por periodo (graficos, presenca por sala, top alunos) ────────────
@@ -377,7 +375,7 @@ export default function DashboardPage() {
               <button key={s} onClick={() => setSemanaAniv(s)}
                 className={cn('px-2.5 py-1 rounded-full text-xs font-medium transition-all border',
                   semanaAniv === s ? 'bg-pink-600 text-white border-pink-600' : 'border-border text-muted-foreground hover:border-pink-500/50 hover:text-foreground')}>
-                {s === 'passada' ? 'Semana passada' : 'Esta e proxima semana'}
+                {s === 'passada' ? 'Semana passada' : 'Esta e próxima semana'}
               </button>
             ))}
           </div>
@@ -424,7 +422,7 @@ export default function DashboardPage() {
               })}
             </div>
           ) : (
-            <EmptyState message={semanaAniv === 'passada' ? 'Nenhum aniversariante na semana passada' : 'Nenhum aniversariante nesta e na proxima semana'} minHeight="h-[80px]" />
+            <EmptyState message={semanaAniv === 'passada' ? 'Nenhum aniversariante na semana passada' : 'Nenhum aniversariante nesta e na próxima semana'} minHeight="h-[80px]" />
           )}
         </CardContent>
       </Card>

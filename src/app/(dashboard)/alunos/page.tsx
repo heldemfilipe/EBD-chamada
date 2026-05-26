@@ -120,11 +120,6 @@ export default function AlunosPage() {
     return () => { cancelado = true }
   }, [])
 
-  // Presença filtrada — server action retorna agregado anual
-  const presencaFiltrada = useMemo(() => {
-    return presencasMap
-  }, [presencasMap])
-
   const turmaMap = useMemo(() => {
     const m: Record<string, Turma> = {}
     for (const t of turmas) m[t.id] = t
@@ -139,7 +134,7 @@ export default function AlunosPage() {
         return matchSearch && matchTurma
       })
       .map(a => {
-        const pm = presencaFiltrada[a.id]
+        const pm = presencasMap[a.id]
         return { ...a, presenca: pm && pm.total > 0 ? Math.round((pm.presentes / pm.total) * 100) : 0 }
       })
       .sort((a, b) => {
@@ -154,10 +149,13 @@ export default function AlunosPage() {
         }
         return sortDir === 'asc' ? cmp : -cmp
       })
-  }, [alunos, search, turmaFilter, presencaFiltrada, sortKey, sortDir, turmaMap])
+  }, [alunos, search, turmaFilter, presencasMap, sortKey, sortDir, turmaMap])
 
-  const faixaPorTurma: Record<string, string> = {}
-  for (const t of turmas) faixaPorTurma[t.id] = t.faixaEtaria
+  const faixaPorTurma = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const t of turmas) m[t.id] = t.faixaEtaria
+    return m
+  }, [turmas])
 
   function openDialog(aluno?: Aluno) {
     if (aluno) {

@@ -154,8 +154,10 @@ export default function RelatoriosPage() {
   }, [])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       const chamadas = await buscarChamadasPorAno(ano, turmaFiltro !== 'all' ? turmaFiltro : undefined)
+      if (cancelado) return
       setChamadasRaw(chamadas)
       if (!chamadas.length) { setDomingosPorMes({}); setResumoMensal([]); return }
 
@@ -186,11 +188,14 @@ export default function RelatoriosPage() {
       setResumoMensal(mensal)
     }
     load()
+    return () => { cancelado = true }
   }, [ano, turmaFiltro])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       const { turmas, chamadas } = await buscarDadosPorSala(ano)
+      if (cancelado) return
       if (!turmas.length) { setDadosSala([]); return }
       const turmasFiltradas = turmaFiltro !== 'all' ? turmas.filter(t => t.id === turmaFiltro) : turmas
 
@@ -216,12 +221,15 @@ export default function RelatoriosPage() {
       setDadosSala(resultado)
     }
     load()
+    return () => { cancelado = true }
   }, [ano, mes, trim, granularidade, turmaFiltro])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       if (!chamadaIdsFiltrados.length) { setTopAlunos([]); setAlunosAtencao([]); return }
       const ranking = await buscarRankingAlunos(chamadaIdsFiltrados, turmaFiltro !== 'all' ? turmaFiltro : undefined)
+      if (cancelado) return
       if (!ranking.length) { setTopAlunos([]); setAlunosAtencao([]); return }
 
       const lista: AlunoFrequente[] = ranking.map(r => {
@@ -232,11 +240,14 @@ export default function RelatoriosPage() {
       setAlunosAtencao([...lista].filter(a => a.pct < 50).sort((a, b) => a.pct - b.pct))
     }
     load()
+    return () => { cancelado = true }
   }, [chamadaIdsFiltrados, turmaFiltro])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       const data = await buscarProfessoresRelatorio(ano)
+      if (cancelado) return
       if (!data.professores.length) { setProfessores([]); return }
 
       const profIdToAluno = new Map<string, { alunoId: string; turmaId: string | null }>()
@@ -252,7 +263,6 @@ export default function RelatoriosPage() {
           )
         : data.professores
 
-      // Build presencas lookup: aluno_id -> chamada_id -> {presente, trouxe_biblia}
       const presencasPorAluno = new Map<string, Map<string, { presente: boolean; trouxe_biblia: boolean }>>()
       for (const p of data.presencas) {
         if (!presencasPorAluno.has(p.aluno_id)) presencasPorAluno.set(p.aluno_id, new Map())
@@ -292,12 +302,15 @@ export default function RelatoriosPage() {
       setProfessores(resultado.sort((a, b) => b.presMedia - a.presMedia))
     }
     load()
+    return () => { cancelado = true }
   }, [ano, mes, trim, granularidade, turmaFiltro])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       if (!chamadaIdsFiltrados.length) { setVisitantesRel([]); return }
       const hist = await buscarVisitantesPorChamadas(chamadaIdsFiltrados)
+      if (cancelado) return
       if (!hist.length) { setVisitantesRel([]); return }
 
       const mapa: Record<string, VisitanteRelatorio> = {}
@@ -325,19 +338,21 @@ export default function RelatoriosPage() {
       setVisitantesRel(lista)
     }
     load()
+    return () => { cancelado = true }
   }, [chamadaIdsFiltrados])
 
   useEffect(() => {
+    let cancelado = false
     async function load() {
       if (turmaFiltro === 'all') { setAlunosTurma([]); return }
 
-      // Filter chamadas for this turma from period-filtered IDs
       const chamadaIdsTurma = filtrarPorPeriodo(
         chamadasRaw.filter(c => c.turma_id === turmaFiltro),
         { granularidade, mes, trim }
       ).map(c => c.id)
 
       const data = await buscarAlunosTurmaDetalhado(turmaFiltro, chamadaIdsTurma)
+      if (cancelado) return
       if (!data.alunos.length) { setAlunosTurma([]); return }
 
       setAlunosTurma(data.alunos.map(a => {
@@ -346,6 +361,7 @@ export default function RelatoriosPage() {
       }))
     }
     load()
+    return () => { cancelado = true }
   }, [turmaFiltro, chamadasRaw, mes, trim, granularidade])
 
   // ── Cálculo do período ──
@@ -714,7 +730,7 @@ export default function RelatoriosPage() {
             </CardHeader>
             <CardContent>
               {grafico.length === 0 ? (
-                <div className="flex items-center justify-center h-[200px] sm:h-[280px] text-muted-foreground text-sm">Sem dados para o periodo selecionado</div>
+                <div className="flex items-center justify-center h-[200px] sm:h-[280px] text-muted-foreground text-sm">Sem dados para o período selecionado</div>
               ) : (
                 <div className="h-[200px] sm:h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
