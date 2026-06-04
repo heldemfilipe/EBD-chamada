@@ -72,8 +72,8 @@ const coresDisponiveis = [
 ]
 
 const faixasEtarias = [
-  { value: 'Até 5 anos',          label: 'Cordeirinhos — Até 5 anos' },
-  { value: '6 a 10 anos',         label: 'Guerreiros — 6 a 10 anos' },
+  { value: 'Até 7 anos',          label: 'Crianças — Até 7 anos' },
+  { value: '8 a 10 anos',         label: 'Juniores — 8 a 10 anos' },
   { value: '11 a 13 anos',        label: 'Pré-Adolescentes — 11 a 13 anos' },
   { value: '14 a 16 anos',        label: 'Adolescentes — 14 a 16 anos' },
   { value: '17 a 25 anos',        label: 'Jovens — 17 a 25 anos' },

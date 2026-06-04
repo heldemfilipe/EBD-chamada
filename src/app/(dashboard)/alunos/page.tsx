@@ -42,8 +42,8 @@ interface Turma { id: string; nome: string; faixaEtaria: string; cor: string }
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const FAIXAS = [
-  { label: 'Cordeirinhos', desc: 'Até 5 anos',          faixa: 'Até 5 anos',          color: 'text-purple-500' },
-  { label: 'Guerreiros',   desc: '6 a 10 anos',         faixa: '6 a 10 anos',         color: 'text-orange-500' },
+  { label: 'Crianças',     desc: 'Até 7 anos',           faixa: 'Até 7 anos',          color: 'text-purple-500' },
+  { label: 'Juniores',     desc: '8 a 10 anos',          faixa: '8 a 10 anos',         color: 'text-orange-500' },
   { label: 'Pré-Adol.',    desc: '11 a 13 anos',        faixa: '11 a 13 anos',        color: 'text-pink-500'   },
   { label: 'Adolescentes', desc: '14 a 16 anos',        faixa: '14 a 16 anos',        color: 'text-yellow-500' },
   { label: 'Jovens',       desc: '17 a 25 anos',        faixa: '17 a 25 anos',        color: 'text-green-500'  },
