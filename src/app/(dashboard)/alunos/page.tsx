@@ -42,11 +42,12 @@ interface Turma { id: string; nome: string; faixaEtaria: string; cor: string }
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const FAIXAS = [
-  { label: 'Cordeirinhos', desc: 'Até 5 anos',          faixa: 'Até 5 anos',           color: 'text-purple-500' },
-  { label: 'Guerreiros',   desc: '6 a 11 anos',         faixa: '6 a 11 anos',           color: 'text-orange-500' },
-  { label: 'Adolescentes', desc: '11 a 15 anos',        faixa: '11 a 15 anos',          color: 'text-yellow-500' },
-  { label: 'Jovens',       desc: 'A partir de 16 anos', faixa: 'A partir de 16 anos',   color: 'text-green-500' },
-  { label: 'Adultos',      desc: 'A partir de 18 anos', faixa: 'A partir de 18 anos',   color: 'text-blue-500' },
+  { label: 'Cordeirinhos', desc: 'Até 5 anos',          faixa: 'Até 5 anos',          color: 'text-purple-500' },
+  { label: 'Guerreiros',   desc: '6 a 10 anos',         faixa: '6 a 10 anos',         color: 'text-orange-500' },
+  { label: 'Pré-Adol.',    desc: '11 a 13 anos',        faixa: '11 a 13 anos',        color: 'text-pink-500'   },
+  { label: 'Adolescentes', desc: '14 a 16 anos',        faixa: '14 a 16 anos',        color: 'text-yellow-500' },
+  { label: 'Jovens',       desc: '17 a 25 anos',        faixa: '17 a 25 anos',        color: 'text-green-500'  },
+  { label: 'Adultos',      desc: 'A partir de 26 anos', faixa: 'A partir de 26 anos', color: 'text-blue-500'   },
 ]
 
 

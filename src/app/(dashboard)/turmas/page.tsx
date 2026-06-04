@@ -72,11 +72,12 @@ const coresDisponiveis = [
 ]
 
 const faixasEtarias = [
-  { value: 'Até 5 anos',           label: 'Cordeirinhos de Cristo — Até 5 anos' },
-  { value: '6 a 11 anos',          label: 'Guerreiros de Cristo — 6 a 11 anos' },
-  { value: '11 a 15 anos',         label: 'Adolescentes — 11 a 15 anos' },
-  { value: 'A partir de 16 anos',  label: 'Jovens — A partir de 16 anos' },
-  { value: 'A partir de 18 anos',  label: 'Adultos — A partir de 18 anos' },
+  { value: 'Até 5 anos',          label: 'Cordeirinhos — Até 5 anos' },
+  { value: '6 a 10 anos',         label: 'Guerreiros — 6 a 10 anos' },
+  { value: '11 a 13 anos',        label: 'Pré-Adolescentes — 11 a 13 anos' },
+  { value: '14 a 16 anos',        label: 'Adolescentes — 14 a 16 anos' },
+  { value: '17 a 25 anos',        label: 'Jovens — 17 a 25 anos' },
+  { value: 'A partir de 26 anos', label: 'Adultos — A partir de 26 anos' },
 ]
 
 const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', cargo: '' }
