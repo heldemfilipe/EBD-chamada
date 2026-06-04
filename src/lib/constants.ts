@@ -62,18 +62,25 @@ export function getCargo(cargo: string) {
 export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>>> = {
   '2026': {
     2: {
-      adultos:      'Homens dos quais o Mundo não Era Digno — O Legado de Abraão, Isaque e Jacó',
-      jovens:       'Entre a Verdade e o Engano — Combatendo Ideologias e Ensinos que se Opõem à Palavra de Deus',
-      adolescentes: 'As Parábolas de Jesus são Vivas',
-      juniores:     'Israel e a Terra Prometida',
-      primarios:    'Os Ensinamentos de Deus',
+      adultos:          'Homens dos quais o Mundo não Era Digno — O Legado de Abraão, Isaque e Jacó',
+      jovens:           'Entre a Verdade e o Engano — Combatendo Ideologias e Ensinos que se Opõem à Palavra de Deus',
+      adolescentes:     'As Parábolas de Jesus são Vivas',
+      juniores:         'Israel e a Terra Prometida',
+      primarios:        'Os Ensinamentos de Deus',
+    },
+    3: {
+      adultos:          'A Igreja dos Gentios: Da Chamada Missionária à Consolidação do Evangelho entre os Povos',
+      jovens:           'Fidelidade às Escrituras em Oposição à Apostasia: Lições Espirituais no Livro de Juízes',
+      adolescentes:     'Conhecendo os Fundamentos da Fé Cristã nas Epístolas Gerais',
+      pre_adolescentes: 'Servindo A Deus Com Meus Talentos',
+      juniores:         'Tempo dos Juízes',
+      primarios:        'As Crianças da Bíblia',
     },
   },
 }
 
 // ─── Temas individuais das aulas (títulos por lição) ──────────────────────────
 // Estrutura: ano → trimestre → categoria → número da aula → título
-// Preencher com os títulos reais das revistas CPAD de cada trimestre.
 export const LICOES_REVISTA: Record<string, Record<number, Record<string, Record<number, string>>>> = {
   '2026': {
     2: {
@@ -153,6 +160,98 @@ export const LICOES_REVISTA: Record<string, Record<number, Record<string, Record
         13: 'Jesus Me Ensina a Me Preparar para a Sua Volta',
       },
     },
+    3: {
+      primarios: {
+        1:  'As Crianças Que Receberam Uma Grande Promessa',
+        2:  'A Criança Que Ajudou A Salvar O Irmão',
+        3:  'Uma Criança Profeta',
+        4:  'O Menino Rei',
+        5:  'De Criança Órfã À Rainha',
+        6:  'A Menina Que Salvou Um Guerreiro',
+        7:  'Um Menino Pastor',
+        8:  'O Deus Menino',
+        9:  'As Crianças Que Foram Abençoadas Por Jesus',
+        10: 'A Criança Que Virou Um Exemplo',
+        11: 'A Criança Que Ressuscitou',
+        12: 'A Criança Que Ajudou Jesus',
+        13: 'Você É Uma Criança Escolhida Por Deus!',
+      },
+      juniores: {
+        1:  'A Desobediência Do Povo De Deus',
+        2:  'Deus Escolhe Libertadores',
+        3:  'Otoniel e os Mesopotâmios',
+        4:  'Eúde e os Moabitas',
+        5:  'Sangar e os Filisteus',
+        6:  'Débora E Baraque na Batalha Contra os Cananeus',
+        7:  'Gideão Enfrenta os Midianitas',
+        8:  'Abimeleque Lidera Israel',
+        9:  'Jefté Livra Israel dos Amonitas',
+        10: 'Jefté Batalha Contra os Efraimitas',
+        11: 'O Nascimento E Vida De Sansão',
+        12: 'Sansão Livra Israel dos Filisteus',
+        13: 'Mica e o Levita em Sua Casa',
+      },
+      pre_adolescentes: {
+        1:  'Dons Ministeriais para a Igreja',
+        2:  'Dons Espirituais, o que Significam?',
+        3:  'A Unidade da Igreja',
+        4:  'O Fruto do Amor',
+        5:  'Manifestações do Espírito Santo nos Crentes',
+        6:  'O Papel do Talento Musical',
+        7:  'Quem é o Pastor',
+        8:  'Quem é o Presbítero?',
+        9:  'Quem são os Obreiros e Diáconos?',
+        10: 'O Funcionamento da Igreja',
+        11: 'Cuidando dos Novos Convertidos',
+        12: 'A Importância do Evangelismo',
+        13: 'Trabalhando Com Missões',
+      },
+      adolescentes: {
+        1:  'A Superioridade de Cristo',
+        2:  'Cristo Entende Você',
+        3:  'A Fé E O Nosso Relacionamento Com Deus',
+        4:  'Mais Que Vencedor: Provas E Tentações',
+        5:  'Fé E Obras',
+        6:  'Uma Arma Poderosamente Mortal',
+        7:  'A Santificação Necessária',
+        8:  'O Propósito Do Sofrimento',
+        9:  'Inimigo Íntimo',
+        10: 'Uma Carta Para Você',
+        11: 'Saiba Dizer "Não"!',
+        12: 'Cuidado Com O Ego E Suas Ambições',
+        13: 'Lute Por Sua Fé',
+      },
+      jovens: {
+        1:  'O Livro de Juízes: Quando Cada um Fazia o que Parecia Certo',
+        2:  'Fidelidade a Deus: Uma Questão de Escolha',
+        3:  'Clamor e Libertação: A Liderança de Otniel',
+        4:  'Eúde e Sangar: Deus Usa os Improváveis',
+        5:  'Débora e Baraque: União para Fazer a Obra de Deus',
+        6:  'Gideão: Deus Transforma a Insegurança em Coragem',
+        7:  'O Fim da Liderança de Gideão e o Governo de Abimeleque',
+        8:  'Jefté: De Rejeitado a Libertador',
+        9:  'Sansão: A Força e a Fraqueza de um Jovem',
+        10: 'Sansão: Entre Vitórias e Derrotas',
+        11: 'Crise Espiritual e Falsa Religiosidade',
+        12: 'Tempos de Decadência Moral e Maldade',
+        13: 'Esperança em Meio ao Caos: Aguardando a Vinda do Rei',
+      },
+      adultos: {
+        1:  'O Chamado para os Gentios',
+        2:  'A Porta da Fé se Abre entre os Gentios',
+        3:  'A Graça que Alcança todas as Nações',
+        4:  'O Espírito que nos Guia para além das Fronteiras',
+        5:  'Cristo entre os Filósofos: o Deus desconhecido se Revela',
+        6:  'A Suficiência da Graça na Cidade de Corinto',
+        7:  'Quando o Espírito Sopra em Éfeso',
+        8:  'Despedida em Éfeso: entre Lágrimas e Alertas',
+        9:  'Coragem para Testemunhar: Paulo diante da Multidão',
+        10: 'Uma Esperança Inabalável perante os Poderosos',
+        11: 'Entre Tempestades e Promessas',
+        12: 'O Evangelho Chega ao Coração do Império',
+        13: 'A Missão Continua em Nós',
+      },
+    },
   },
 }
 
@@ -168,6 +267,7 @@ export function getTurmaCategoria(nome: string): string | null {
   const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   if (n.includes('adulto') || n.includes('heroi') || n.includes('herois') || n.includes('filha')) return 'adultos'
   if (n.includes('shekinah') || n.includes('jovem')) return 'jovens'
+  if (n.includes('pre') && n.includes('dynamo')) return 'pre_adolescentes'
   if (n.includes('adolesc') || n.includes('dynamo')) return 'adolescentes'
   if (n.includes('junior') || n.includes('guerreiro')) return 'juniores'
   if (n.includes('primar') || n.includes('cordeirinho')) return 'primarios'
@@ -183,9 +283,10 @@ export function getTemaRevista(turmaNome: string, ano: string | number, trimestr
 
 /** Faixas etárias padrão da EBD */
 export const FAIXAS_ETARIAS = [
-  { label: 'Crianças (0–7)',   min: 0,  max: 7  },
-  { label: 'Juniores (8–11)', min: 8,  max: 11 },
-  { label: 'Adolescentes (12–17)', min: 12, max: 17 },
-  { label: 'Jovens (18–25)', min: 18, max: 25 },
-  { label: 'Adultos (26+)',  min: 26, max: 999 },
+  { label: 'Cordeirinhos (0–5)',       min: 0,  max: 5   },
+  { label: 'Guerreiros (6–10)',        min: 6,  max: 10  },
+  { label: 'Pré-Adolescentes (11–13)', min: 11, max: 13  },
+  { label: 'Adolescentes (14–16)',     min: 14, max: 16  },
+  { label: 'Jovens (17–25)',           min: 17, max: 25  },
+  { label: 'Adultos (26+)',            min: 26, max: 999 },
 ]

@@ -38,12 +38,13 @@ interface Turma { id: string; nome: string; cor: string }
 // ─── Ordenação canônica das turmas ─────────────────────────────────────────────
 function ordemTurma(nome: string): number {
   const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (n.includes('cordeirinho')) return 0
-  if (n.includes('guerreiro'))   return 1
-  if (n.includes('dynamo'))      return 2
-  if (n.includes('shekinah'))    return 3
-  if (n.includes('filha'))       return 4
-  if (n.includes('hero') || n.includes('heroi')) return 5
+  if (n.includes('cordeirinho'))              return 0
+  if (n.includes('guerreiro'))               return 1
+  if (n.includes('pre') && n.includes('dynamo')) return 2
+  if (n.includes('dynamo'))                  return 3
+  if (n.includes('shekinah'))                return 4
+  if (n.includes('filha'))                   return 5
+  if (n.includes('hero') || n.includes('heroi')) return 6
   return 99
 }
 
@@ -113,7 +114,10 @@ function gerarEscalaSugerida(
     norm(professoresData.find(p => p.id === id)?.nome ?? '')
 
   const isFilhas  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('filha')
-  const isDynamo  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('dynamo')
+  const isDynamo  = (id: string) => {
+    const n = norm(turmasData.find(t => t.id === id)?.nome ?? '')
+    return n.includes('dynamo') && !n.includes('pre')
+  }
 
   const domingos = getDomingosTrimestre(trimestre, ano)
   const resultado: Array<{ data: string; turmaId: string; professorId: string }> = []

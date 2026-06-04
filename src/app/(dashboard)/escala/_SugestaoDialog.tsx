@@ -42,12 +42,13 @@ function fmtDataCurta(dateStr: string): string {
 
 function ordemTurma(nome: string): number {
   const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (n.includes('cordeirinho')) return 0
-  if (n.includes('guerreiro'))   return 1
-  if (n.includes('dynamo'))      return 2
-  if (n.includes('shekinah'))    return 3
-  if (n.includes('filha'))       return 4
-  if (n.includes('hero') || n.includes('heroi')) return 5
+  if (n.includes('cordeirinho'))              return 0
+  if (n.includes('guerreiro'))               return 1
+  if (n.includes('pre') && n.includes('dynamo')) return 2
+  if (n.includes('dynamo'))                  return 3
+  if (n.includes('shekinah'))                return 4
+  if (n.includes('filha'))                   return 5
+  if (n.includes('hero') || n.includes('heroi')) return 6
   return 99
 }
 
