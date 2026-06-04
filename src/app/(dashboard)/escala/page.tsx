@@ -31,6 +31,7 @@ interface Escala {
   professorId: string | null
   trimestre: number
   observacao: string
+  tituloAula: string
 }
 interface Professor { id: string; nome: string }
 interface Turma { id: string; nome: string; cor: string }
@@ -192,6 +193,7 @@ const FORM_VAZIO = {
   turmaId:     '',
   professorId: '',
   observacao:  '',
+  tituloAula:  '',
 }
 
 // ─── Componente ────────────────────────────────────────────────────────────────
@@ -289,6 +291,7 @@ export default function EscalaPage() {
         id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
         trimestre: e.trimestre ?? (Math.floor(new Date(e.data + 'T12:00:00').getMonth() / 3) + 1),
         observacao: e.observacoes ?? '',
+        tituloAula: e.titulo_aula ?? '',
       })))
       setProfessoresData(professores)
       setTurmasData(turmas)
@@ -360,7 +363,7 @@ export default function EscalaPage() {
       temaRevista,
       linhas: domingos.map(dom => {
         const escala = escalasPeriodo.find(e => e.data === dom.data && e.turmaId === filtroTurma)
-        const temaLicao = getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula)
+        const temaLicao = escala?.tituloAula || getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula)
         return {
           aula: dom.aula,
           data: dom.data,
@@ -441,6 +444,7 @@ export default function EscalaPage() {
         turmaId:     escala.turmaId,
         professorId: escala.professorId ?? '',
         observacao:  escala.observacao,
+        tituloAula:  escala.tituloAula,
       })
     } else {
       setEditMode(false); setSelectedEscala(null); setFormData(FORM_VAZIO)
@@ -461,6 +465,7 @@ export default function EscalaPage() {
         turma_id: formData.turmaId,
         professor_id: formData.professorId,
         observacoes: formData.observacao || null,
+        titulo_aula: formData.tituloAula || null,
       })
       if (!resultado.success) {
         toast('Erro ao salvar: ' + (resultado.error ?? 'erro'), 'error')
@@ -796,7 +801,7 @@ export default function EscalaPage() {
                           ano: info ? String(info.ano) : filtroAno,
                           trimestre: info ? String(info.trimestre) : filtroTrim,
                           aulaIdx: info ? String(info.aula) : '1',
-                          turmaId: turmaView?.turma.id ?? '', professorId: '', observacao: '',
+                          turmaId: turmaView?.turma.id ?? '', professorId: '', observacao: '', tituloAula: '',
                         })
                         setDialogOpen(true)
                       }}
@@ -894,7 +899,7 @@ export default function EscalaPage() {
                           </div>
                         </td>
                         {linha.celulas.map((c, colIdx) => {
-                          const temaLicao = getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
+                          const temaLicao = c.escala?.tituloAula || getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
                           const turmaObj = tabelaView.turmas[colIdx]
                           return (
                           <td key={c.turmaId} className="px-3 py-2" style={{ backgroundColor: turmaCorRgba(turmaObj?.cor, colIdx, 0.05) }}>
@@ -943,7 +948,7 @@ export default function EscalaPage() {
                                         ano: info ? String(info.ano) : filtroAno,
                                         trimestre: info ? String(info.trimestre) : filtroTrim,
                                         aulaIdx: info ? String(info.aula) : '1',
-                                        turmaId: c.turmaId, professorId: '', observacao: '',
+                                        turmaId: c.turmaId, professorId: '', observacao: '', tituloAula: '',
                                       })
                                       setDialogOpen(true)
                                     }}
@@ -990,7 +995,7 @@ export default function EscalaPage() {
                                     ano: info ? String(info.ano) : filtroAno,
                                     trimestre: info ? String(info.trimestre) : filtroTrim,
                                     aulaIdx: info ? String(info.aula) : '1',
-                                    turmaId: c.turmaId, professorId: '', observacao: '',
+                                    turmaId: c.turmaId, professorId: '', observacao: '', tituloAula: '',
                                   })
                                   setDialogOpen(true)
                                 }}
@@ -1093,7 +1098,8 @@ export default function EscalaPage() {
                         const aulaNum       = aulaInfo?.aula ?? 0
                         const turmaNome     = getTurmaNome(escala.turmaId)
                         const turmaCor      = getTurmaCor(escala.turmaId)
-                        const temaLicao     = getLicaoTema(turmaNome, filtroAno, parseInt(filtroTrim), aulaNum)
+                        const temaLicaoBase = getLicaoTema(turmaNome, filtroAno, parseInt(filtroTrim), aulaNum)
+                        const temaLicao     = escala.tituloAula || temaLicaoBase
                         const temaRev       = getTemaRevista(turmaNome, filtroAno, parseInt(filtroTrim))
                         const isProfDestac  = filtroProf !== 'todos' && escala.professorId === filtroProf
                         return (
@@ -1104,7 +1110,7 @@ export default function EscalaPage() {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold truncate">{turmaNome}</p>
                               {temaLicao ? (
-                                <p className="text-[11px] text-muted-foreground truncate">
+                                <p className={`text-[11px] truncate ${escala.tituloAula ? 'text-foreground/70 font-medium' : 'text-muted-foreground'}`}>
                                   Lição {aulaNum}: {temaLicao}
                                 </p>
                               ) : temaRev ? (

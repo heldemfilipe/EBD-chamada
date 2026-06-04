@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -9,7 +10,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Calendar, BookOpen, Link2 } from 'lucide-react'
+import { Calendar, BookOpen, Link2, RotateCcw } from 'lucide-react'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 
 interface Professor { id: string; nome: string }
@@ -30,6 +31,7 @@ interface FormData {
   turmaId: string
   professorId: string
   observacao: string
+  tituloAula: string
 }
 
 interface NovaEscalaDialogProps {
@@ -74,8 +76,23 @@ export function NovaEscalaDialog({
 }: NovaEscalaDialogProps) {
   const turmasOrdenadas = [...turmas].sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
   const getTurmaNome = (id: string) => turmas.find(t => t.id === id)?.nome ?? '—'
-
   const unidaChave = (turmaId: string, data: string) => `${turmaId}::${data}`
+
+  // Sugestão de título da revista para a combinação turma+aula atual
+  const turmaNomeAtual  = formData.turmaId ? getTurmaNome(formData.turmaId) : ''
+  const tituloSugerido  = turmaNomeAtual
+    ? getLicaoTema(turmaNomeAtual, formData.ano, parseInt(formData.trimestre), parseInt(formData.aulaIdx))
+    : null
+
+  // Auto-preenche o título quando o usuário seleciona turma ou aula, mas apenas se o campo estiver vazio
+  const prevKey = useRef('')
+  useEffect(() => {
+    const key = `${formData.turmaId}::${formData.aulaIdx}::${formData.trimestre}::${formData.ano}`
+    if (key !== prevKey.current && !formData.tituloAula && tituloSugerido) {
+      onChange({ ...formData, tituloAula: tituloSugerido })
+    }
+    prevKey.current = key
+  }, [formData.turmaId, formData.aulaIdx, formData.trimestre, formData.ano]) // eslint-disable-line
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
@@ -245,6 +262,36 @@ export function NovaEscalaDialog({
                 ).map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Título da Aula */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm">Título da Aula</Label>
+              {tituloSugerido && formData.tituloAula !== tituloSugerido && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...formData, tituloAula: tituloSugerido })}
+                  className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  title="Usar título da revista CPAD"
+                >
+                  <RotateCcw className="h-2.5 w-2.5" />
+                  usar título da revista
+                </button>
+              )}
+            </div>
+            <Input
+              value={formData.tituloAula}
+              onChange={e => onChange({ ...formData, tituloAula: e.target.value })}
+              placeholder={tituloSugerido ?? 'Título personalizado da aula...'}
+              className="h-9"
+            />
+            {tituloSugerido && formData.tituloAula && formData.tituloAula !== tituloSugerido && (
+              <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <BookOpen className="h-3 w-3 flex-shrink-0" />
+                Revista: {tituloSugerido}
+              </p>
+            )}
           </div>
 
           {/* Observações */}
