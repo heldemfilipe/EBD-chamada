@@ -283,8 +283,8 @@ export function getTemaRevista(turmaNome: string, ano: string | number, trimestr
 
 /** Faixas etárias padrão da EBD */
 export const FAIXAS_ETARIAS = [
-  { label: 'Cordeirinhos (0–5)',       min: 0,  max: 5   },
-  { label: 'Guerreiros (6–10)',        min: 6,  max: 10  },
+  { label: 'Crianças (0–7)',       min: 0,  max: 7   },
+  { label: 'Juniores (8–10)',        min: 8,  max: 10  },
   { label: 'Pré-Adolescentes (11–13)', min: 11, max: 13  },
   { label: 'Adolescentes (14–16)',     min: 14, max: 16  },
   { label: 'Jovens (17–25)',           min: 17, max: 25  },
