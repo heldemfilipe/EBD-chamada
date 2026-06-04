@@ -46,6 +46,7 @@ interface NovaEscalaDialogProps {
   dataComputada: string
   salasUnidasConfig: Record<string, string>
   onSalvarSalasUnidas: (config: Record<string, string>) => void
+  profTurmasMap: Record<string, string[]>
 }
 
 function fmtDataLonga(dateStr: string): string {
@@ -68,6 +69,7 @@ function ordemTurma(nome: string): number {
 export function NovaEscalaDialog({
   open, onClose, formData, onChange, onSave, professores, turmas,
   isSaving, editMode, domingosTrimForm, dataComputada, salasUnidasConfig, onSalvarSalasUnidas,
+  profTurmasMap,
 }: NovaEscalaDialogProps) {
   const turmasOrdenadas = [...turmas].sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
   const getTurmaNome = (id: string) => turmas.find(t => t.id === id)?.nome ?? '—'
@@ -236,7 +238,10 @@ export function NovaEscalaDialog({
             <Select value={formData.professorId} onValueChange={v => onChange({ ...formData, professorId: v })}>
               <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o professor" /></SelectTrigger>
               <SelectContent>
-                {professores.map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
+                {(formData.turmaId && profTurmasMap[formData.turmaId]?.length
+                  ? professores.filter(p => profTurmasMap[formData.turmaId].includes(p.id))
+                  : professores
+                ).map(p => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

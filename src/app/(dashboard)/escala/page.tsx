@@ -1165,6 +1165,7 @@ export default function EscalaPage() {
         dataComputada={dataComputada}
         salasUnidasConfig={salasUnidasConfig}
         onSalvarSalasUnidas={salvarSalasUnidas}
+        profTurmasMap={profTurmasMap}
       />
 
       {/* ── Dialog Confirmar Exclusão ──────────────────────────────────────── */}
