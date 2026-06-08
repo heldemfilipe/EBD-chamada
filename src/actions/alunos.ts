@@ -9,26 +9,35 @@ export async function buscarAlunosComTurmas(anoAtual: number) {
     sql`SELECT id, data FROM chamadas WHERE ano = ${anoAtual}`,
   ])
 
-  let presencasMap: Record<string, { total: number; presentes: number }> = {}
+  const chamadasComMes = chamadas.map(c => {
+    let mes: number | null = null
+    if (c.data) {
+      const d = c.data instanceof Date ? c.data : new Date(String(c.data) + 'T12:00:00')
+      if (!isNaN(d.getTime())) mes = d.getMonth()
+    }
+    return { id: String(c.id), mes }
+  })
+
+  let presencasDetalhe: { alunoId: string; chamadaId: string; presente: boolean }[] = []
   if (chamadas.length > 0) {
     const chamadaIds = chamadas.map(c => c.id)
     const presencas = await sql`
-      SELECT aluno_id,
-        COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE presente = true)::int AS presentes
+      SELECT aluno_id, chamada_id, presente
       FROM presencas
       WHERE chamada_id = ANY(${chamadaIds})
-      GROUP BY aluno_id
     `
-    for (const p of presencas) {
-      presencasMap[p.aluno_id] = { total: p.total, presentes: p.presentes }
-    }
+    presencasDetalhe = presencas.map(p => ({
+      alunoId: String(p.aluno_id),
+      chamadaId: String(p.chamada_id),
+      presente: Boolean(p.presente),
+    }))
   }
 
   return {
     turmas: turmas.map(t => ({ id: t.id, nome: t.nome, faixa_etaria: t.faixa_etaria, cor: t.cor })),
     alunos: alunos.map(a => ({ ...a })),
-    presencasMap,
+    chamadas: chamadasComMes,
+    presencasDetalhe,
   }
 }
 

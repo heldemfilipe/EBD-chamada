@@ -87,21 +87,23 @@ export default function AlunosPage() {
   const [periodoPresenca, setPeriodoPresenca] = useState<'ano' | 'mes' | 'trimestre'>('ano')
   const [mesFiltro, setMesFiltro] = useState(new Date().getMonth())
   const [trimFiltro, setTrimFiltro] = useState(Math.floor(new Date().getMonth() / 3))
-  const [presencasMap, setPresencasMap] = useState<Record<string, { total: number; presentes: number }>>({})
+  const [chamadas, setChamadas] = useState<{ id: string; mes: number | null }[]>([])
+  const [presencasDetalhe, setPresencasDetalhe] = useState<{ alunoId: string; chamadaId: string; presente: boolean }[]>([])
 
   useEffect(() => {
     let cancelado = false
     async function load() {
       try {
         const anoAtual = new Date().getFullYear()
-        const { turmas: turmasData, alunos: alunosData, presencasMap: presencasData } = await buscarAlunosComTurmas(anoAtual)
+        const { turmas: turmasData, alunos: alunosData, chamadas: chamadasData, presencasDetalhe: presencasDetData } = await buscarAlunosComTurmas(anoAtual)
         if (cancelado) return
 
         setTurmas(turmasData.map((t: any) => ({
           id: t.id, nome: t.nome, faixaEtaria: t.faixa_etaria ?? '', cor: t.cor ?? '',
         })))
 
-        setPresencasMap(presencasData)
+        setChamadas(chamadasData)
+        setPresencasDetalhe(presencasDetData)
 
         setAlunos(alunosData.map((a: any) => ({
           id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
@@ -127,6 +129,30 @@ export default function AlunosPage() {
     return m
   }, [turmas])
 
+  // aluno_id -> (chamada_id -> presente)
+  const alunoPresencasMap = useMemo(() => {
+    const m: Record<string, Record<string, boolean>> = {}
+    for (const p of presencasDetalhe) {
+      if (!m[p.alunoId]) m[p.alunoId] = {}
+      m[p.alunoId][p.chamadaId] = p.presente
+    }
+    return m
+  }, [presencasDetalhe])
+
+  // IDs das chamadas válidas para o período selecionado
+  const chamadaIdsAtivos = useMemo(() => {
+    const ids = new Set<string>()
+    for (const c of chamadas) {
+      if (periodoPresenca === 'ano') {
+        ids.add(c.id)
+      } else if (c.mes !== null) {
+        if (periodoPresenca === 'mes' && c.mes === mesFiltro) ids.add(c.id)
+        if (periodoPresenca === 'trimestre' && TRIMESTRES[trimFiltro].meses.includes(c.mes)) ids.add(c.id)
+      }
+    }
+    return ids
+  }, [chamadas, periodoPresenca, mesFiltro, trimFiltro])
+
   const filtered = useMemo(() => {
     return alunos
       .filter(a => {
@@ -135,8 +161,15 @@ export default function AlunosPage() {
         return matchSearch && matchTurma
       })
       .map(a => {
-        const pm = presencasMap[a.id]
-        return { ...a, presenca: pm && pm.total > 0 ? Math.round((pm.presentes / pm.total) * 100) : 0 }
+        const pm = alunoPresencasMap[a.id] ?? {}
+        let total = 0, presentes = 0
+        for (const chamadaId of chamadaIdsAtivos) {
+          if (chamadaId in pm) {
+            total++
+            if (pm[chamadaId]) presentes++
+          }
+        }
+        return { ...a, presenca: total > 0 ? Math.round((presentes / total) * 100) : 0 }
       })
       .sort((a, b) => {
         let cmp = 0
@@ -150,7 +183,7 @@ export default function AlunosPage() {
         }
         return sortDir === 'asc' ? cmp : -cmp
       })
-  }, [alunos, search, turmaFilter, presencasMap, sortKey, sortDir, turmaMap])
+  }, [alunos, search, turmaFilter, alunoPresencasMap, chamadaIdsAtivos, sortKey, sortDir, turmaMap])
 
   const faixaPorTurma = useMemo(() => {
     const m: Record<string, string> = {}
