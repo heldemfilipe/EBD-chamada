@@ -60,6 +60,12 @@ interface AlunoDetalhe {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatFaixaEtaria(min: number | null, max: number | null): string {
+  if (min == null && max == null) return ''
+  const minVal = min ?? 0
+  if (max == null || max >= 999) return `${minVal}+ anos`
+  return `${minVal}–${max} anos`
+}
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const coresDisponiveis = [
@@ -73,14 +79,6 @@ const coresDisponiveis = [
   { value: 'bg-pink-500',   label: 'Rosa' },
 ]
 
-const faixasEtarias = [
-  { value: 'Até 7 anos',          label: 'Crianças — Até 7 anos',            min: 0,  max: 7   },
-  { value: '8 a 10 anos',         label: 'Juniores — 8 a 10 anos',           min: 8,  max: 10  },
-  { value: '11 a 13 anos',        label: 'Pré-Adolescentes — 11 a 13 anos',  min: 11, max: 13  },
-  { value: '14 a 16 anos',        label: 'Adolescentes — 14 a 16 anos',      min: 14, max: 16  },
-  { value: '17 a 25 anos',        label: 'Jovens — 17 a 25 anos',            min: 17, max: 25  },
-  { value: 'A partir de 26 anos', label: 'Adultos — A partir de 26 anos',    min: 26, max: 999 },
-]
 
 const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', cargo: '' }
 
@@ -97,7 +95,7 @@ export default function TurmasPage() {
   const [editMode, setEditMode]             = useState(false)
   const [selectedTurma, setSelectedTurma]   = useState<Turma | null>(null)
   const [formData, setFormData] = useState({
-    nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500',
+    nome: '', descricao: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500',
   })
 
   // ── Modal de detalhes ──
@@ -123,8 +121,8 @@ export default function TurmasPage() {
 
         setTurmasData(turmas.map(t => ({
           id: t.id, nome: t.nome, descricao: t.descricao ?? '',
-          faixaEtaria: t.faixa_etaria ?? '',
           idadeMin: t.idade_min ?? null, idadeMax: t.idade_max ?? null,
+          faixaEtaria: formatFaixaEtaria(t.idade_min ?? null, t.idade_max ?? null) || t.faixa_etaria || '',
           sala: t.sala ?? '',
           cor: t.cor ?? 'bg-blue-500', totalAlunos: t.totalAlunos,
         })))
@@ -154,31 +152,32 @@ export default function TurmasPage() {
     if (turma) {
       setEditMode(true); setSelectedTurma(turma)
       setFormData({
-        nome: turma.nome, descricao: turma.descricao, faixaEtaria: turma.faixaEtaria,
+        nome: turma.nome, descricao: turma.descricao,
         idadeMin: turma.idadeMin != null ? String(turma.idadeMin) : '',
         idadeMax: turma.idadeMax != null ? String(turma.idadeMax) : '',
         sala: turma.sala, cor: turma.cor,
       })
     } else {
       setEditMode(false); setSelectedTurma(null)
-      setFormData({ nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
+      setFormData({ nome: '', descricao: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
     }
     setDialogOpen(true)
   }
 
   function handleCloseDialog() {
     setDialogOpen(false); setEditMode(false); setSelectedTurma(null)
-    setFormData({ nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
+    setFormData({ nome: '', descricao: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
   }
 
   async function handleSaveTurma() {
     if (!formData.nome) { toast('Por favor, preencha o nome da turma.', 'error'); return }
     const idadeMin = formData.idadeMin !== '' ? parseInt(formData.idadeMin) : null
     const idadeMax = formData.idadeMax !== '' ? parseInt(formData.idadeMax) : null
+    const faixaLabel = formatFaixaEtaria(idadeMin, idadeMax)
     const resultado = await salvarTurma({
       id: editMode && selectedTurma ? selectedTurma.id : undefined,
       nome: formData.nome, descricao: formData.descricao,
-      faixa_etaria: formData.faixaEtaria,
+      faixa_etaria: faixaLabel || null,
       idade_min: idadeMin, idade_max: idadeMax,
       sala: formData.sala, cor: formData.cor,
     })
@@ -189,14 +188,14 @@ export default function TurmasPage() {
     if (editMode && selectedTurma) {
       setTurmasData(turmasData.map(t =>
         t.id === selectedTurma.id
-          ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, idadeMin, idadeMax, sala: formData.sala, cor: formData.cor }
+          ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: faixaLabel, idadeMin, idadeMax, sala: formData.sala, cor: formData.cor }
           : t
       ))
       toast('Turma atualizada com sucesso!')
     } else {
       setTurmasData([...turmasData, {
         id: resultado.id!, nome: formData.nome, descricao: formData.descricao,
-        faixaEtaria: formData.faixaEtaria, idadeMin, idadeMax,
+        faixaEtaria: faixaLabel, idadeMin, idadeMax,
         sala: formData.sala, cor: formData.cor, totalAlunos: 0,
       }])
       toast('Turma cadastrada com sucesso!')
@@ -625,48 +624,29 @@ export default function TurmasPage() {
               <Input id="descricao" value={formData.descricao} onChange={(e) => setFormData({ ...formData, descricao: e.target.value })} placeholder="Descrição breve da turma" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="faixaEtaria">Faixa Etária</Label>
-              <Select
-                value={formData.faixaEtaria}
-                onValueChange={(v) => {
-                  const faixa = faixasEtarias.find(f => f.value === v)
-                  setFormData({
-                    ...formData, faixaEtaria: v,
-                    idadeMin: faixa ? String(faixa.min) : formData.idadeMin,
-                    idadeMax: faixa ? String(faixa.max) : formData.idadeMax,
-                  })
-                }}
-              >
-                <SelectTrigger id="faixaEtaria"><SelectValue placeholder="Selecione a faixa etária" /></SelectTrigger>
-                <SelectContent>
-                  {faixasEtarias.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="idadeMin">Idade mínima</Label>
+              <Label>Faixa Etária</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground whitespace-nowrap">de</span>
                 <Input
                   id="idadeMin"
                   type="number"
                   min={0}
-                  max={150}
                   value={formData.idadeMin}
                   onChange={(e) => setFormData({ ...formData, idadeMin: e.target.value })}
-                  placeholder="Ex: 0"
+                  placeholder="0"
+                  className="w-20 text-center"
                 />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="idadeMax">Idade máxima</Label>
+                <span className="text-sm text-muted-foreground whitespace-nowrap">até</span>
                 <Input
                   id="idadeMax"
                   type="number"
                   min={0}
-                  max={999}
                   value={formData.idadeMax}
                   onChange={(e) => setFormData({ ...formData, idadeMax: e.target.value })}
-                  placeholder="Ex: 12"
+                  placeholder="999"
+                  className="w-20 text-center"
                 />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">anos</span>
               </div>
             </div>
             <div className="grid gap-2">
