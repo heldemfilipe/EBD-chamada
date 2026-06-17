@@ -118,6 +118,8 @@ export interface Database {
           nome: string
           descricao: string | null
           faixa_etaria: string | null
+          idade_min: number | null
+          idade_max: number | null
           sala: string | null
           cor: string            // cor identificadora (ex: 'bg-blue-500')
           ativa: boolean
@@ -129,6 +131,8 @@ export interface Database {
           nome: string
           descricao?: string | null
           faixa_etaria?: string | null
+          idade_min?: number | null
+          idade_max?: number | null
           sala?: string | null
           cor?: string
           ativa?: boolean
@@ -140,6 +144,8 @@ export interface Database {
           nome?: string
           descricao?: string | null
           faixa_etaria?: string | null
+          idade_min?: number | null
+          idade_max?: number | null
           sala?: string | null
           cor?: string
           ativa?: boolean

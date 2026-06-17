@@ -38,6 +38,8 @@ interface Turma {
   id: string
   nome: string
   faixaEtaria: string
+  idadeMin: number | null
+  idadeMax: number | null
   totalAlunos: number
   sala: string
   cor: string
@@ -72,12 +74,12 @@ const coresDisponiveis = [
 ]
 
 const faixasEtarias = [
-  { value: 'Até 7 anos',          label: 'Crianças — Até 7 anos' },
-  { value: '8 a 10 anos',         label: 'Juniores — 8 a 10 anos' },
-  { value: '11 a 13 anos',        label: 'Pré-Adolescentes — 11 a 13 anos' },
-  { value: '14 a 16 anos',        label: 'Adolescentes — 14 a 16 anos' },
-  { value: '17 a 25 anos',        label: 'Jovens — 17 a 25 anos' },
-  { value: 'A partir de 26 anos', label: 'Adultos — A partir de 26 anos' },
+  { value: 'Até 7 anos',          label: 'Crianças — Até 7 anos',            min: 0,  max: 7   },
+  { value: '8 a 10 anos',         label: 'Juniores — 8 a 10 anos',           min: 8,  max: 10  },
+  { value: '11 a 13 anos',        label: 'Pré-Adolescentes — 11 a 13 anos',  min: 11, max: 13  },
+  { value: '14 a 16 anos',        label: 'Adolescentes — 14 a 16 anos',      min: 14, max: 16  },
+  { value: '17 a 25 anos',        label: 'Jovens — 17 a 25 anos',            min: 17, max: 25  },
+  { value: 'A partir de 26 anos', label: 'Adultos — A partir de 26 anos',    min: 26, max: 999 },
 ]
 
 const ENROLL_FORM_VAZIO = { nome: '', dataNascimento: '', telefone: '', cargo: '' }
@@ -95,7 +97,7 @@ export default function TurmasPage() {
   const [editMode, setEditMode]             = useState(false)
   const [selectedTurma, setSelectedTurma]   = useState<Turma | null>(null)
   const [formData, setFormData] = useState({
-    nome: '', descricao: '', faixaEtaria: '', sala: '', cor: 'bg-blue-500',
+    nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500',
   })
 
   // ── Modal de detalhes ──
@@ -121,7 +123,9 @@ export default function TurmasPage() {
 
         setTurmasData(turmas.map(t => ({
           id: t.id, nome: t.nome, descricao: t.descricao ?? '',
-          faixaEtaria: t.faixa_etaria ?? '', sala: t.sala ?? '',
+          faixaEtaria: t.faixa_etaria ?? '',
+          idadeMin: t.idade_min ?? null, idadeMax: t.idade_max ?? null,
+          sala: t.sala ?? '',
           cor: t.cor ?? 'bg-blue-500', totalAlunos: t.totalAlunos,
         })))
         setProfessoresMock(professores)
@@ -149,25 +153,34 @@ export default function TurmasPage() {
   function handleOpenDialog(turma?: Turma) {
     if (turma) {
       setEditMode(true); setSelectedTurma(turma)
-      setFormData({ nome: turma.nome, descricao: turma.descricao, faixaEtaria: turma.faixaEtaria, sala: turma.sala, cor: turma.cor })
+      setFormData({
+        nome: turma.nome, descricao: turma.descricao, faixaEtaria: turma.faixaEtaria,
+        idadeMin: turma.idadeMin != null ? String(turma.idadeMin) : '',
+        idadeMax: turma.idadeMax != null ? String(turma.idadeMax) : '',
+        sala: turma.sala, cor: turma.cor,
+      })
     } else {
       setEditMode(false); setSelectedTurma(null)
-      setFormData({ nome: '', descricao: '', faixaEtaria: '', sala: '', cor: 'bg-blue-500' })
+      setFormData({ nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
     }
     setDialogOpen(true)
   }
 
   function handleCloseDialog() {
     setDialogOpen(false); setEditMode(false); setSelectedTurma(null)
-    setFormData({ nome: '', descricao: '', faixaEtaria: '', sala: '', cor: 'bg-blue-500' })
+    setFormData({ nome: '', descricao: '', faixaEtaria: '', idadeMin: '', idadeMax: '', sala: '', cor: 'bg-blue-500' })
   }
 
   async function handleSaveTurma() {
     if (!formData.nome) { toast('Por favor, preencha o nome da turma.', 'error'); return }
+    const idadeMin = formData.idadeMin !== '' ? parseInt(formData.idadeMin) : null
+    const idadeMax = formData.idadeMax !== '' ? parseInt(formData.idadeMax) : null
     const resultado = await salvarTurma({
       id: editMode && selectedTurma ? selectedTurma.id : undefined,
       nome: formData.nome, descricao: formData.descricao,
-      faixa_etaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor,
+      faixa_etaria: formData.faixaEtaria,
+      idade_min: idadeMin, idade_max: idadeMax,
+      sala: formData.sala, cor: formData.cor,
     })
     if (!resultado.success) {
       toast(editMode ? 'Erro ao atualizar turma.' : 'Erro ao cadastrar turma.', 'error')
@@ -176,14 +189,15 @@ export default function TurmasPage() {
     if (editMode && selectedTurma) {
       setTurmasData(turmasData.map(t =>
         t.id === selectedTurma.id
-          ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor }
+          ? { ...t, nome: formData.nome, descricao: formData.descricao, faixaEtaria: formData.faixaEtaria, idadeMin, idadeMax, sala: formData.sala, cor: formData.cor }
           : t
       ))
       toast('Turma atualizada com sucesso!')
     } else {
       setTurmasData([...turmasData, {
         id: resultado.id!, nome: formData.nome, descricao: formData.descricao,
-        faixaEtaria: formData.faixaEtaria, sala: formData.sala, cor: formData.cor, totalAlunos: 0,
+        faixaEtaria: formData.faixaEtaria, idadeMin, idadeMax,
+        sala: formData.sala, cor: formData.cor, totalAlunos: 0,
       }])
       toast('Turma cadastrada com sucesso!')
     }
@@ -612,12 +626,48 @@ export default function TurmasPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="faixaEtaria">Faixa Etária</Label>
-              <Select value={formData.faixaEtaria} onValueChange={(v) => setFormData({ ...formData, faixaEtaria: v })}>
+              <Select
+                value={formData.faixaEtaria}
+                onValueChange={(v) => {
+                  const faixa = faixasEtarias.find(f => f.value === v)
+                  setFormData({
+                    ...formData, faixaEtaria: v,
+                    idadeMin: faixa ? String(faixa.min) : formData.idadeMin,
+                    idadeMax: faixa ? String(faixa.max) : formData.idadeMax,
+                  })
+                }}
+              >
                 <SelectTrigger id="faixaEtaria"><SelectValue placeholder="Selecione a faixa etária" /></SelectTrigger>
                 <SelectContent>
                   {faixasEtarias.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="idadeMin">Idade mínima</Label>
+                <Input
+                  id="idadeMin"
+                  type="number"
+                  min={0}
+                  max={150}
+                  value={formData.idadeMin}
+                  onChange={(e) => setFormData({ ...formData, idadeMin: e.target.value })}
+                  placeholder="Ex: 0"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="idadeMax">Idade máxima</Label>
+                <Input
+                  id="idadeMax"
+                  type="number"
+                  min={0}
+                  max={999}
+                  value={formData.idadeMax}
+                  onChange={(e) => setFormData({ ...formData, idadeMax: e.target.value })}
+                  placeholder="Ex: 12"
+                />
+              </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="sala">Sala</Label>

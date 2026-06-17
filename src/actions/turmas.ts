@@ -4,7 +4,7 @@ import sql from '@/lib/db'
 
 export async function buscarTurmasDetalhadas() {
   const [turmas, alunosCount, professores] = await Promise.all([
-    sql`SELECT id, nome, descricao, faixa_etaria, sala, cor FROM turmas WHERE ativa = true ORDER BY nome`,
+    sql`SELECT id, nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor FROM turmas WHERE ativa = true ORDER BY nome`,
     sql`SELECT turma_id, COUNT(*)::int AS total FROM alunos WHERE ativo = true GROUP BY turma_id`,
     sql`
       SELECT p.id, p.nome, json_agg(pt.turma_id) FILTER (WHERE pt.turma_id IS NOT NULL) AS turma_ids
@@ -21,6 +21,7 @@ export async function buscarTurmasDetalhadas() {
   return {
     turmas: turmas.map(t => ({
       id: t.id, nome: t.nome, descricao: t.descricao, faixa_etaria: t.faixa_etaria,
+      idade_min: t.idade_min, idade_max: t.idade_max,
       sala: t.sala, cor: t.cor, totalAlunos: countMap[t.id] ?? 0,
     })),
     professores: professores.map(p => ({
@@ -34,6 +35,8 @@ export async function salvarTurma(dados: {
   nome: string
   descricao?: string | null
   faixa_etaria?: string | null
+  idade_min?: number | null
+  idade_max?: number | null
   sala?: string | null
   cor?: string | null
 }): Promise<{ success: boolean; id?: string; error?: string }> {
@@ -41,14 +44,18 @@ export async function salvarTurma(dados: {
     if (dados.id) {
       await sql`
         UPDATE turmas SET nome = ${dados.nome}, descricao = ${dados.descricao ?? null},
-          faixa_etaria = ${dados.faixa_etaria ?? null}, sala = ${dados.sala ?? null}, cor = ${dados.cor ?? null}
+          faixa_etaria = ${dados.faixa_etaria ?? null},
+          idade_min = ${dados.idade_min ?? null}, idade_max = ${dados.idade_max ?? null},
+          sala = ${dados.sala ?? null}, cor = ${dados.cor ?? null}
         WHERE id = ${dados.id}
       `
       return { success: true, id: dados.id }
     } else {
       const [row] = await sql`
-        INSERT INTO turmas (nome, descricao, faixa_etaria, sala, cor, ativa)
-        VALUES (${dados.nome}, ${dados.descricao ?? null}, ${dados.faixa_etaria ?? null}, ${dados.sala ?? null}, ${dados.cor ?? null}, true)
+        INSERT INTO turmas (nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor, ativa)
+        VALUES (${dados.nome}, ${dados.descricao ?? null}, ${dados.faixa_etaria ?? null},
+          ${dados.idade_min ?? null}, ${dados.idade_max ?? null},
+          ${dados.sala ?? null}, ${dados.cor ?? null}, true)
         RETURNING id
       `
       return { success: true, id: row.id }
