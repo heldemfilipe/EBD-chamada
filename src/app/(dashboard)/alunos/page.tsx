@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, ArrowDown, GraduationCap } from 'lucide-react'
 import { buscarAlunosComTurmas, salvarAluno, excluirAluno } from '@/actions/alunos'
+import { promoverAlunoParaProfessor } from '@/actions/professores'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn, calcularIdade } from '@/lib/utils'
@@ -33,6 +34,8 @@ interface Aluno {
   responsavel: string
   cargo: string
   presenca: number
+  presencaPresentes: number
+  presencaTotal: number
   status: string
   isProfessor: boolean
 }
@@ -70,6 +73,8 @@ export default function AlunosPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [isSaving, setIsSaving] = useState(false)
   const [carregando, setCarregando] = useState(true)
+  const [promoverOpen, setPromoverOpen] = useState(false)
+  const [promovendo, setPromovendo] = useState(false)
 
   function handleSort(key: 'nome' | 'idade' | 'presenca' | 'turma') {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -109,7 +114,7 @@ export default function AlunosPage() {
           id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
           telefone: a.telefone ?? '', email: a.email ?? '',
           dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
-          cargo: a.cargo ?? '', presenca: 0, status: 'ativo',
+          cargo: a.cargo ?? '', presenca: 0, presencaPresentes: 0, presencaTotal: 0, status: 'ativo',
           idade: a.data_nascimento ? (calcularIdade(a.data_nascimento) ?? 0) : 0,
           isProfessor: (a.responsavel ?? '').startsWith('professor:'),
         })))
@@ -169,7 +174,7 @@ export default function AlunosPage() {
             if (pm[chamadaId]) presentes++
           }
         }
-        return { ...a, presenca: total > 0 ? Math.round((presentes / total) * 100) : 0 }
+        return { ...a, presenca: total > 0 ? Math.round((presentes / total) * 100) : 0, presencaPresentes: presentes, presencaTotal: total }
       })
       .sort((a, b) => {
         let cmp = 0
@@ -262,6 +267,17 @@ export default function AlunosPage() {
     setAlunos(alunos.filter(a => a.id !== selected.id))
     toast('Aluno excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)
+  }
+
+  async function handlePromover() {
+    if (!selected) return
+    setPromovendo(true)
+    const result = await promoverAlunoParaProfessor(selected.id)
+    setPromovendo(false)
+    if (!result.success) { toast('Erro ao promover aluno: ' + (result.error ?? ''), 'error'); return }
+    setAlunos(alunos.map(a => a.id === selected.id ? { ...a, isProfessor: true } : a))
+    toast(`${selected.nome} foi promovido a professor!`)
+    setPromoverOpen(false); setSelected(null)
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -551,7 +567,12 @@ export default function AlunosPage() {
                         <TableCell className="hidden md:table-cell">
                           <div className="flex items-center gap-2">
                             <PresenceBar pct={aluno.presenca} className="max-w-[100px]" />
-                            <span className="text-sm font-medium">{aluno.presenca}%</span>
+                            <div className="flex flex-col leading-tight">
+                              <span className="text-sm font-medium">{aluno.presenca}%</span>
+                              {aluno.presencaTotal > 0 && (
+                                <span className="text-xs text-muted-foreground">{aluno.presencaPresentes}/{aluno.presencaTotal} aulas</span>
+                              )}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
@@ -560,6 +581,7 @@ export default function AlunosPage() {
                               <span className="text-xs text-muted-foreground italic">Gerenciar em Professores</span>
                             ) : (
                               <>
+                                <Button variant="ghost" size="icon" title="Promover a Professor" onClick={() => { setSelected(aluno); setPromoverOpen(true) }}><GraduationCap className="h-4 w-4 text-blue-400" /></Button>
                                 <Button variant="ghost" size="icon" onClick={() => openDialog(aluno)}><Edit className="h-4 w-4" /></Button>
                                 <Button variant="ghost" size="icon" onClick={() => { setSelected(aluno); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                               </>
@@ -661,6 +683,23 @@ export default function AlunosPage() {
         description={<>Tem certeza que deseja excluir o aluno <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
         onConfirm={handleDelete}
       />
+
+      <Dialog open={promoverOpen} onOpenChange={setPromoverOpen}>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Promover a Professor</DialogTitle>
+            <DialogDescription>
+              <strong>{selected?.nome}</strong> será cadastrado como professor e continuará na sua turma como aluno. Deseja confirmar?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPromoverOpen(false)} disabled={promovendo}>Cancelar</Button>
+            <Button onClick={handlePromover} disabled={promovendo}>
+              {promovendo ? 'Promovendo...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

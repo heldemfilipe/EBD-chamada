@@ -104,6 +104,25 @@ export async function sincronizarAlunoVinculado(profId: string, nome: string, tu
   }
 }
 
+export async function promoverAlunoParaProfessor(alunoId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const [aluno] = await sql`SELECT id, nome, telefone, email, data_nascimento, turma_id FROM alunos WHERE id = ${alunoId}`
+    if (!aluno) return { success: false, error: 'Aluno não encontrado' }
+
+    const hoje = new Date().toISOString().split('T')[0]
+    const [prof] = await sql`
+      INSERT INTO professores (nome, telefone, email, data_nascimento, turma_aluno_id, data_ingresso, ativo)
+      VALUES (${aluno.nome}, ${aluno.telefone ?? null}, ${aluno.email ?? null}, ${aluno.data_nascimento ?? null}, ${aluno.turma_id ?? null}, ${hoje}, true)
+      RETURNING id
+    `
+    await sql`UPDATE alunos SET responsavel = ${'professor:' + prof.id} WHERE id = ${alunoId}`
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message }
+  }
+}
+
 export async function salvarCargoProfessor(profId: string, cargo: string | null) {
   await sql`UPDATE professores SET cargo = ${cargo} WHERE id = ${profId}`
   await sql`UPDATE alunos SET cargo = ${cargo} WHERE responsavel = ${'professor:' + profId}`

@@ -267,7 +267,7 @@ export function getTurmaCategoria(nome: string): string | null {
   const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   if (n.includes('adulto') || n.includes('heroi') || n.includes('herois') || n.includes('filha')) return 'adultos'
   if (n.includes('shekinah') || n.includes('jovem')) return 'jovens'
-  if (n.includes('pre') && n.includes('dynamo')) return 'pre_adolescentes'
+  if (n.includes('valente')) return 'pre_adolescentes'
   if (n.includes('adolesc') || n.includes('dynamo')) return 'adolescentes'
   if (n.includes('junior') || n.includes('guerreiro')) return 'juniores'
   if (n.includes('primar') || n.includes('cordeirinho')) return 'primarios'
