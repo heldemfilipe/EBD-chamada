@@ -6,7 +6,7 @@ export async function buscarAlunosComTurmas(anoAtual: number) {
   const [turmas, alunos, chamadas] = await Promise.all([
     sql`SELECT id, nome, faixa_etaria, cor FROM turmas WHERE ativa = true ORDER BY nome`,
     sql`SELECT * FROM alunos ORDER BY nome`,
-    sql`SELECT id, data FROM chamadas WHERE ano = ${anoAtual}`,
+    sql`SELECT id, data, turma_id FROM chamadas WHERE ano = ${anoAtual}`,
   ])
 
   const chamadasComMes = chamadas.map(c => {
@@ -15,7 +15,7 @@ export async function buscarAlunosComTurmas(anoAtual: number) {
       const d = c.data instanceof Date ? c.data : new Date(String(c.data) + 'T12:00:00')
       if (!isNaN(d.getTime())) mes = d.getMonth()
     }
-    return { id: String(c.id), mes }
+    return { id: String(c.id), mes, turmaId: c.turma_id ? String(c.turma_id) : null }
   })
 
   let presencasDetalhe: { alunoId: string; chamadaId: string; presente: boolean }[] = []

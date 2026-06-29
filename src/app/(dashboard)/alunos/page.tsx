@@ -92,7 +92,7 @@ export default function AlunosPage() {
   const [periodoPresenca, setPeriodoPresenca] = useState<'ano' | 'mes' | 'trimestre'>('ano')
   const [mesFiltro, setMesFiltro] = useState(new Date().getMonth())
   const [trimFiltro, setTrimFiltro] = useState(Math.floor(new Date().getMonth() / 3))
-  const [chamadas, setChamadas] = useState<{ id: string; mes: number | null }[]>([])
+  const [chamadas, setChamadas] = useState<{ id: string; mes: number | null; turmaId: string | null }[]>([])
   const [presencasDetalhe, setPresencasDetalhe] = useState<{ alunoId: string; chamadaId: string; presente: boolean }[]>([])
 
   useEffect(() => {
@@ -144,18 +144,21 @@ export default function AlunosPage() {
     return m
   }, [presencasDetalhe])
 
-  // IDs das chamadas válidas para o período selecionado
-  const chamadaIdsAtivos = useMemo(() => {
-    const ids = new Set<string>()
+  // IDs das chamadas válidas para o período, agrupadas por turma
+  const chamadaIdsPorTurma = useMemo(() => {
+    const m: Record<string, Set<string>> = {}
     for (const c of chamadas) {
-      if (periodoPresenca === 'ano') {
-        ids.add(c.id)
-      } else if (c.mes !== null) {
-        if (periodoPresenca === 'mes' && c.mes === mesFiltro) ids.add(c.id)
-        if (periodoPresenca === 'trimestre' && TRIMESTRES[trimFiltro].meses.includes(c.mes)) ids.add(c.id)
+      const turmaId = c.turmaId ?? '__sem_turma'
+      const inclui =
+        periodoPresenca === 'ano' ||
+        (c.mes !== null && periodoPresenca === 'mes' && c.mes === mesFiltro) ||
+        (c.mes !== null && periodoPresenca === 'trimestre' && TRIMESTRES[trimFiltro].meses.includes(c.mes))
+      if (inclui) {
+        if (!m[turmaId]) m[turmaId] = new Set()
+        m[turmaId].add(c.id)
       }
     }
-    return ids
+    return m
   }, [chamadas, periodoPresenca, mesFiltro, trimFiltro])
 
   const filtered = useMemo(() => {
@@ -167,12 +170,12 @@ export default function AlunosPage() {
       })
       .map(a => {
         const pm = alunoPresencasMap[a.id] ?? {}
-        let total = 0, presentes = 0
-        for (const chamadaId of chamadaIdsAtivos) {
-          if (chamadaId in pm) {
-            total++
-            if (pm[chamadaId]) presentes++
-          }
+        // Denominador = todas as chamadas da turma do aluno no período
+        const chamadaDaTurma = a.turmaId ? (chamadaIdsPorTurma[a.turmaId] ?? new Set<string>()) : new Set<string>()
+        let total = chamadaDaTurma.size
+        let presentes = 0
+        for (const chamadaId of chamadaDaTurma) {
+          if (pm[chamadaId] === true) presentes++
         }
         return { ...a, presenca: total > 0 ? Math.round((presentes / total) * 100) : 0, presencaPresentes: presentes, presencaTotal: total }
       })
