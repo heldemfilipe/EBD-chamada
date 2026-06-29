@@ -14,8 +14,9 @@ import {
 import {
   Calendar, Plus, Edit, Trash2, GraduationCap, BookOpen, LayoutGrid, Table2,
   ChevronDown, ChevronUp, ListFilter, Users, Sparkles, Link2, Save,
-  Settings2, Unlink,
+  Settings2, Unlink, SlidersHorizontal,
 } from 'lucide-react'
+import { ConfigSugestaoDialog, ConfigSugestao, CONFIG_PADRAO, carregarConfig } from './_ConfigSugestaoDialog'
 import { buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction } from '@/actions/escala'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
@@ -34,19 +35,13 @@ interface Escala {
   tituloAula: string
 }
 interface Professor { id: string; nome: string }
-interface Turma { id: string; nome: string; cor: string }
+interface Turma { id: string; nome: string; cor: string; sala?: string | null }
 
 // ─── Ordenação canônica das turmas ─────────────────────────────────────────────
-function ordemTurma(nome: string): number {
-  const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (n.includes('cordeirinho'))              return 0
-  if (n.includes('guerreiro'))               return 1
-  if (n.includes('pre') && n.includes('dynamo')) return 2
-  if (n.includes('dynamo'))                  return 3
-  if (n.includes('shekinah'))                return 4
-  if (n.includes('filha'))                   return 5
-  if (n.includes('hero') || n.includes('heroi')) return 6
-  return 99
+function ordemTurma(sala: string | null | undefined): number {
+  if (!sala) return 99
+  const m = sala.match(/\d+/)
+  return m ? parseInt(m[0]) : 99
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,11 +103,13 @@ function gerarEscalaSugerida(
   turmasData: Turma[],
   ano: number,
   trimestre: number,
+  cfg: ConfigSugestao = CONFIG_PADRAO,
 ): Array<{ data: string; turmaId: string; professorId: string }> {
   const norm = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   const pNome = (id: string) =>
     norm(professoresData.find(p => p.id === id)?.nome ?? '')
+  const matchesAny = (n: string, list: string[]) => list.some(p => n.includes(p))
 
   const isFilhas  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('filha')
   const isDynamo  = (id: string) => {
@@ -120,21 +117,24 @@ function gerarEscalaSugerida(
     return n.includes('dynamo') && !n.includes('pre')
   }
 
+  const paridadeTrim = cfg.paridadePorTrim[String(trimestre)] ?? 'par'
+
   const domingos = getDomingosTrimestre(trimestre, ano)
   const resultado: Array<{ data: string; turmaId: string; professorId: string }> = []
 
-  const aulasPorProf = new Map<string, Set<number>>()          // profId → aulas used
-  const countPorTurma = new Map<string, Map<string, number>>() // turmaId → profId → count
+  const aulasPorProf = new Map<string, Set<number>>()
+  const countPorTurma = new Map<string, Map<string, number>>()
   let leandroDynamo = 0
 
   const turmasGen = [...turmasData]
-    .sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
+    .sort((a, b) => ordemTurma(a.sala) - ordemTurma(b.sala))
     .filter(t => !isFilhas(t.id))
 
   for (const { aula, data } of domingos) {
-    const isEven = aula % 2 === 0
-    const is2nd  = is2ndSunday(data)
-    const aulaProfs = new Map<string, string>() // profId → turmaId neste domingo
+    const isEven  = aula % 2 === 0
+    const is2nd   = is2ndSunday(data)
+    const isFirst = aula === 1
+    const aulaProfs = new Map<string, string>()
 
     for (const turma of turmasGen) {
       const pool = profTurmasMap[turma.id] ?? []
@@ -142,17 +142,22 @@ function gerarEscalaSugerida(
       const getEligible = (relaxConseq: boolean) =>
         pool.filter(pid => {
           const n = pNome(pid)
-          // Viviana / Livys: somente aulas pares
-          if ((n.includes('viviana') || n.includes('livys')) && !isEven) return false
-          // Eder / Heldem / Leandro: não no 2º domingo do mês
-          if (is2nd && (n.includes('eder') || n.includes('heldem') || n.includes('leandro'))) return false
+          // Paridade configurável por trimestre
+          if (matchesAny(n, cfg.profParidade)) {
+            if (paridadeTrim === 'par'   && !isEven) return false
+            if (paridadeTrim === 'impar' && isEven)  return false
+          }
+          // Sem 2º domingo do mês
+          if (is2nd && matchesAny(n, cfg.semSegundoDomingo)) return false
+          // Sem 1ª aula do trimestre
+          if (isFirst && matchesAny(n, cfg.semPrimeiraAula)) return false
           // Leandro: máx 1 aula no Dynamo
           if (isDynamo(turma.id) && n.includes('leandro') && leandroDynamo >= 1) return false
           // Não pode ensinar duas turmas no mesmo domingo
           if (aulaProfs.has(pid)) return false
           // Sem domingos seguidos
           if (!relaxConseq && aulasPorProf.get(pid)?.has(aula - 1)) return false
-          // Restrições de par
+          // Restrições de par fixas
           const jáEscalados = Array.from(aulaProfs.keys())
           if (n.includes('adriana')  && jáEscalados.some(id => pNome(id).includes('eder')))      return false
           if (n.includes('eder')     && jáEscalados.some(id => pNome(id).includes('adriana')))   return false
@@ -164,10 +169,9 @@ function gerarEscalaSugerida(
         })
 
       let elig = getEligible(false)
-      if (elig.length === 0) elig = getEligible(true) // relaxa consecutivos se necessário
+      if (elig.length === 0) elig = getEligible(true)
       if (elig.length === 0) continue
 
-      // Prioriza quem tem menos aulas nesta turma
       const tc = countPorTurma.get(turma.id) ?? new Map<string, number>()
       elig.sort((a, b) => (tc.get(a) ?? 0) - (tc.get(b) ?? 0))
 
@@ -226,6 +230,11 @@ export default function EscalaPage() {
   // Salas unidas: turmaId → unidaComTurmaId (persiste em localStorage)
   // Salas unidas per-aula: chave = "${turmaId}::${data}", valor = turmaId com quem está unida
   const [salasUnidasConfig, setSalasUnidasConfig] = useState<Record<string, string>>({})
+
+  // Config de sugestão (carregada do localStorage na montagem)
+  const [configSugestao, setConfigSugestao] = useState<ConfigSugestao>(CONFIG_PADRAO)
+  const [configOpen, setConfigOpen]         = useState(false)
+  useEffect(() => { setConfigSugestao(carregarConfig()) }, [])
 
   // Sugestão de escala
   const [profTurmasMap, setProfTurmasMap]         = useState<Record<string, string[]>>({})
@@ -332,7 +341,7 @@ export default function EscalaPage() {
 
   // ── Turmas ordenadas canonicamente ────────────────────────────────────────────
   const turmasOrdenadas = useMemo(
-    () => [...turmasData].sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome)),
+    () => [...turmasData].sort((a, b) => ordemTurma(a.sala) - ordemTurma(b.sala)),
     [turmasData]
   )
 
@@ -380,7 +389,7 @@ export default function EscalaPage() {
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
   const filhasDoReiId = useMemo(
-    () => turmasData.find(t => ordemTurma(t.nome) === 4)?.id ?? null,
+    () => turmasData.find(t => t.nome.toLowerCase().includes('filha'))?.id ?? null,
     [turmasData]
   )
 
@@ -504,7 +513,7 @@ export default function EscalaPage() {
 
   // ── Sugestão de escala ────────────────────────────────────────────────────────
   const abrirSugestao = useCallback(() => {
-    const entradas = gerarEscalaSugerida(profTurmasMap, professoresData, turmasData, parseInt(filtroAno), parseInt(filtroTrim))
+    const entradas = gerarEscalaSugerida(profTurmasMap, professoresData, turmasData, parseInt(filtroAno), parseInt(filtroTrim), configSugestao)
     // Adicionar entradas vazias para aulas marcadas como unidas per-aula
     const entradasComUnidas = [...entradas]
     for (const chave of Object.keys(salasUnidasConfig)) {
@@ -614,6 +623,9 @@ export default function EscalaPage() {
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
+          <Button variant="outline" size="icon" title="Configurar restrições da sugestão" onClick={() => setConfigOpen(true)}>
+            <SlidersHorizontal className="h-4 w-4" />
+          </Button>
           <Button variant="outline" onClick={abrirSugestao} className="flex-1 sm:flex-none" disabled={Object.keys(profTurmasMap).length === 0}>
             <Sparkles className="h-4 w-4 mr-2" />Gerar Sugestão
           </Button>
@@ -1142,6 +1154,14 @@ export default function EscalaPage() {
           </div>
         )
       )}
+
+      {/* ── Dialog Config Sugestão ────────────────────────────────────────── */}
+      <ConfigSugestaoDialog
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        config={configSugestao}
+        onSave={setConfigSugestao}
+      />
 
       {/* ── Dialog Sugestão de Escala ──────────────────────────────────────── */}
       <SugestaoDialog

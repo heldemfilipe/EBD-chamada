@@ -5,7 +5,7 @@ import sql from '@/lib/db'
 export async function buscarDadosEscala() {
   const escalas        = await sql`SELECT id, data, turma_id, professor_id, trimestre, observacoes, titulo_aula FROM escalas ORDER BY data`
   const professores    = await sql`SELECT id, nome FROM professores WHERE ativo = true ORDER BY nome`
-  const turmas         = await sql`SELECT id, nome, cor FROM turmas WHERE ativa = true ORDER BY nome`
+  const turmas         = await sql`SELECT id, nome, cor, sala FROM turmas WHERE ativa = true ORDER BY nome`
   const professorTurmas = await sql`SELECT professor_id, turma_id FROM professor_turmas`
 
   return {
@@ -14,7 +14,7 @@ export async function buscarDadosEscala() {
       trimestre: e.trimestre, observacoes: e.observacoes, titulo_aula: e.titulo_aula,
     })),
     professores: professores.map(p => ({ id: p.id, nome: p.nome })),
-    turmas: turmas.map(t => ({ id: t.id, nome: t.nome, cor: t.cor })),
+    turmas: turmas.map(t => ({ id: t.id, nome: t.nome, cor: t.cor, sala: t.sala ?? null })),
     professorTurmas: professorTurmas.map(pt => ({ professor_id: pt.professor_id, turma_id: pt.turma_id })),
   }
 }

@@ -104,8 +104,8 @@ export function SugestaoDialog({
 
         {/* Legenda das restrições */}
         <div className="px-5 py-2 bg-muted/30 border-b flex-shrink-0 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Viviana / Livys: somente aulas pares</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Eder / Heldem / Leandro: sem 2º domingo</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Viviana / Livys: paridade configurável</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Eder / Heldem / Leandro: sem 2º domingo nem 1ª aula</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Leandro: 1 aula no Dynamo</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />Sem domingos consecutivos</span>
         </div>
