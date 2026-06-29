@@ -191,7 +191,7 @@ export default function AlunosPage() {
         }
         return sortDir === 'asc' ? cmp : -cmp
       })
-  }, [alunos, search, turmaFilter, alunoPresencasMap, chamadaIdsAtivos, sortKey, sortDir, turmaMap])
+  }, [alunos, search, turmaFilter, alunoPresencasMap, chamadaIdsPorTurma, sortKey, sortDir, turmaMap])
 
   const faixaPorTurma = useMemo(() => {
     const m: Record<string, string> = {}
