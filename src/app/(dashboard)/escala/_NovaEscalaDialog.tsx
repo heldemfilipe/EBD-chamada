@@ -14,7 +14,7 @@ import { Calendar, BookOpen, Link2, RotateCcw } from 'lucide-react'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 
 interface Professor { id: string; nome: string }
-interface Turma { id: string; nome: string; cor: string }
+interface Turma { id: string; nome: string; cor: string; sala?: string | null }
 
 const TRIMESTRES_LABEL = [
   '1º Trimestre (Jan–Mar)',
@@ -57,15 +57,21 @@ function fmtDataLonga(dateStr: string): string {
   })
 }
 
-function ordemTurma(nome: string): number {
-  const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (n.includes('cordeirinho'))              return 0
-  if (n.includes('guerreiro'))               return 1
-  if (n.includes('pre') && n.includes('dynamo')) return 2
-  if (n.includes('dynamo'))                  return 3
-  if (n.includes('shekinah'))                return 4
-  if (n.includes('filha'))                   return 5
-  if (n.includes('hero') || n.includes('heroi')) return 6
+function ordemTurma(sala: string | null | undefined, nome?: string): number {
+  if (sala) {
+    const m = sala.match(/\d+/)
+    if (m) return parseInt(m[0])
+  }
+  if (nome) {
+    const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (n.includes('cordeirinho'))              return 1
+    if (n.includes('guerreiro'))               return 2
+    if (n.includes('valente'))                 return 3
+    if (n.includes('dynamo'))                  return 4
+    if (n.includes('shekinah'))                return 5
+    if (n.includes('filha'))                   return 6
+    if (n.includes('hero') || n.includes('heroi')) return 7
+  }
   return 99
 }
 
@@ -74,7 +80,7 @@ export function NovaEscalaDialog({
   isSaving, editMode, domingosTrimForm, dataComputada, salasUnidasConfig, onSalvarSalasUnidas,
   profTurmasMap,
 }: NovaEscalaDialogProps) {
-  const turmasOrdenadas = [...turmas].sort((a, b) => ordemTurma(a.nome) - ordemTurma(b.nome))
+  const turmasOrdenadas = [...turmas].sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome))
   const getTurmaNome = (id: string) => turmas.find(t => t.id === id)?.nome ?? '—'
   const unidaChave = (turmaId: string, data: string) => `${turmaId}::${data}`
 

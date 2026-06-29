@@ -38,10 +38,22 @@ interface Professor { id: string; nome: string }
 interface Turma { id: string; nome: string; cor: string; sala?: string | null }
 
 // ─── Ordenação canônica das turmas ─────────────────────────────────────────────
-function ordemTurma(sala: string | null | undefined): number {
-  if (!sala) return 99
-  const m = sala.match(/\d+/)
-  return m ? parseInt(m[0]) : 99
+function ordemTurma(sala: string | null | undefined, nome?: string): number {
+  if (sala) {
+    const m = sala.match(/\d+/)
+    if (m) return parseInt(m[0])
+  }
+  if (nome) {
+    const n = nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    if (n.includes('cordeirinho'))              return 1
+    if (n.includes('guerreiro'))               return 2
+    if (n.includes('valente'))                 return 3
+    if (n.includes('dynamo'))                  return 4
+    if (n.includes('shekinah'))                return 5
+    if (n.includes('filha'))                   return 6
+    if (n.includes('hero') || n.includes('heroi')) return 7
+  }
+  return 99
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -127,7 +139,7 @@ function gerarEscalaSugerida(
   let leandroDynamo = 0
 
   const turmasGen = [...turmasData]
-    .sort((a, b) => ordemTurma(a.sala) - ordemTurma(b.sala))
+    .sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome))
     .filter(t => !isFilhas(t.id))
 
   for (const { aula, data } of domingos) {
@@ -337,11 +349,12 @@ export default function EscalaPage() {
   // ── Helpers ───────────────────────────────────────────────────────────────────
   const getProfNome  = (id: string | null) => id ? (professoresData.find(p => p.id === id)?.nome ?? '—') : null
   const getTurmaNome = (id: string) => turmasData.find(t => t.id === id)?.nome ?? '—'
+  const getTurmaSala = (id: string) => turmasData.find(t => t.id === id)?.sala ?? null
   const getTurmaCor  = (id: string) => turmasData.find(t => t.id === id)?.cor ?? 'bg-gray-500'
 
   // ── Turmas ordenadas canonicamente ────────────────────────────────────────────
   const turmasOrdenadas = useMemo(
-    () => [...turmasData].sort((a, b) => ordemTurma(a.sala) - ordemTurma(b.sala)),
+    () => [...turmasData].sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome)),
     [turmasData]
   )
 
@@ -432,7 +445,7 @@ export default function EscalaPage() {
     }
     // Ordena escalas dentro de cada card pela ordem canônica das turmas
     for (const entry of Object.values(map)) {
-      entry.escalas.sort((a, b) => ordemTurma(getTurmaNome(a.turmaId)) - ordemTurma(getTurmaNome(b.turmaId)))
+      entry.escalas.sort((a, b) => ordemTurma(getTurmaSala(a.turmaId), getTurmaNome(a.turmaId)) - ordemTurma(getTurmaSala(b.turmaId), getTurmaNome(b.turmaId)))
     }
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [escalasFiltradas, turmasData, professoresData])
