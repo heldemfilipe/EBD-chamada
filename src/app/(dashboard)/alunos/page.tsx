@@ -248,7 +248,7 @@ export default function AlunosPage() {
           turmaId: form.turmaId || null, telefone: form.telefone,
           email: form.email, dataNascimento: form.dataNascimento,
           responsavel: form.responsavel, cargo: form.cargo ?? '',
-          presenca: 0, status: 'ativo', isProfessor: false,
+          presenca: 0, presencaPresentes: 0, presencaTotal: 0, status: 'ativo', isProfessor: false,
         }])
         toast('Aluno cadastrado com sucesso!')
       }
