@@ -30,7 +30,7 @@ export function SecaoSalas({ dados }: SecaoSalasProps) {
             <EmptyState message="Sem dados para o período selecionado" />
           ) : (
             <>
-              <div className="h-[180px] sm:h-[240px]">
+              <div className="h-[180px] sm:h-[240px] xl:h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={dados} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.07} vertical={false} />

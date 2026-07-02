@@ -13,13 +13,14 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Users, ArrowUpDown, ArrowUp, ArrowDown, GraduationCap } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Phone, Mail, Users, GraduationCap } from 'lucide-react'
 import { buscarAlunosComTurmas, salvarAluno, excluirAluno } from '@/actions/alunos'
 import { promoverAlunoParaProfessor } from '@/actions/professores'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn, calcularIdade } from '@/lib/utils'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
+import { useTableSort } from '@/hooks/useTableSort'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Aluno {
@@ -69,24 +70,11 @@ export default function AlunosPage() {
   const [form, setForm] = useState(FORM_VAZIO)
 
   // Ordenação da tabela
-  const [sortKey, setSortKey] = useState<'nome' | 'idade' | 'presenca' | 'turma'>('nome')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const { sortKey, sortDir, handleSort, SortIcon } = useTableSort<'nome' | 'idade' | 'presenca' | 'turma'>('nome')
   const [isSaving, setIsSaving] = useState(false)
   const [carregando, setCarregando] = useState(true)
   const [promoverOpen, setPromoverOpen] = useState(false)
   const [promovendo, setPromovendo] = useState(false)
-
-  function handleSort(key: 'nome' | 'idade' | 'presenca' | 'turma') {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDir('asc') }
-  }
-
-  function SortIcon({ col }: { col: 'nome' | 'idade' | 'presenca' | 'turma' }) {
-    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />
-    return sortDir === 'asc'
-      ? <ArrowUp className="h-3 w-3 ml-1 text-primary" />
-      : <ArrowDown className="h-3 w-3 ml-1 text-primary" />
-  }
 
   // Filtro de período para presença
   const [periodoPresenca, setPeriodoPresenca] = useState<'ano' | 'mes' | 'trimestre'>('ano')

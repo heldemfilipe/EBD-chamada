@@ -730,9 +730,9 @@ export default function RelatoriosPage() {
             </CardHeader>
             <CardContent>
               {grafico.length === 0 ? (
-                <div className="flex items-center justify-center h-[200px] sm:h-[280px] text-muted-foreground text-sm">Sem dados para o período selecionado</div>
+                <div className="flex items-center justify-center h-[200px] sm:h-[280px] xl:h-[340px] text-muted-foreground text-sm">Sem dados para o período selecionado</div>
               ) : (
-                <div className="h-[200px] sm:h-[280px]">
+                <div className="h-[200px] sm:h-[280px] xl:h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={grafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                       <defs>

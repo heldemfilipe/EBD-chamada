@@ -13,12 +13,13 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
 import { buscarProfessoresComTurmas, salvarProfessor, excluirProfessor, sincronizarAlunoVinculado, salvarCargoProfessor } from '@/actions/professores'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog'
+import { useTableSort } from '@/hooks/useTableSort'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Professor {
@@ -34,8 +35,7 @@ export default function ProfessoresPage() {
   const [professores, setProfessores] = useState<Professor[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState<'nome' | 'turmas'>('nome')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const { sortKey, sortDir, handleSort, SortIcon } = useTableSort<'nome' | 'turmas'>('nome')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -67,15 +67,6 @@ export default function ProfessoresPage() {
     load()
     return () => { cancelado = true }
   }, [])
-
-  function handleSort(key: 'nome' | 'turmas') {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDir('asc') }
-  }
-  function SortIcon({ col }: { col: string }) {
-    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />
-    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 ml-1" /> : <ArrowDown className="h-3 w-3 ml-1" />
-  }
 
   const filtered = professores
     .filter(p =>
@@ -210,7 +201,7 @@ export default function ProfessoresPage() {
       </div>
 
       {/* Stats Desktop */}
-      <div className="hidden sm:grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="hidden sm:grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:max-w-6xl">
         <StatCard title="Total de Professores" value={professores.length} icon={Users} description="Ativos no sistema" />
         <StatCard title="Atribuições" value={professores.reduce((a, p) => a + p.turmas.length, 0)} icon={GraduationCap} description="Turmas lecionadas" />
         <StatCard title="Também Alunos" value={professores.filter(p => p.turmaAluno !== null).length} icon={BookOpen} description="Matriculados em turma" />

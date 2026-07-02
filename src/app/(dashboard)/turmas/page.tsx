@@ -295,7 +295,7 @@ export default function TurmasPage() {
         </div>
         <div className="h-9 w-28 bg-muted animate-pulse rounded" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:max-w-6xl">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="rounded-xl border bg-card p-4 space-y-2">
             <div className="h-4 w-24 bg-muted animate-pulse rounded" />
@@ -303,7 +303,7 @@ export default function TurmasPage() {
           </div>
         ))}
       </div>
-      <div className="grid gap-6 sm:grid-cols-2">
+      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="rounded-xl border bg-card p-4 h-40 bg-muted animate-pulse" />
         ))}
@@ -325,7 +325,7 @@ export default function TurmasPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:max-w-6xl">
         <StatCard title="Total de Turmas"  value={turmasData.length} icon={GraduationCap} description="Em funcionamento" />
         <StatCard title="Total de Alunos"  value={totalAlunos}       icon={Users}         description="Em todas as turmas" />
         <StatCard title="Média por Turma"  value={mediaAlunos}                            description="Alunos/turma" />
@@ -333,7 +333,7 @@ export default function TurmasPage() {
       </div>
 
       {/* Turmas Grid */}
-      <div className="grid gap-6 sm:grid-cols-2">
+      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {turmasData.map((turma) => (
           <Card key={turma.id} className="overflow-hidden hover:shadow-lg transition-shadow">
             <div className={`h-2 ${turma.cor}`} />

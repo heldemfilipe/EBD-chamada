@@ -79,32 +79,3 @@ export function agregarPresencas(presencas: { presente: boolean }[]): {
   const presentes = presencas.filter((p) => p.presente === true).length
   return { presentes, total, pct: calcularPct(presentes, total) }
 }
-
-/**
- * Constrói o range de datas (dataInicio, dataFim) para um dado período.
- */
-export function rangeDoPeriodo(opts: {
-  granularidade: 'dia' | 'mes' | 'trimestre' | 'ano'
-  ano: number
-  mes?: number       // índice 0–11
-  trimestre?: number // índice 0–3
-}): { dataInicio: string; dataFim: string } {
-  const { granularidade, ano, mes = 0, trimestre = 0 } = opts
-
-  if (granularidade === 'ano') {
-    return { dataInicio: `${ano}-01-01`, dataFim: `${ano}-12-31` }
-  }
-
-  if (granularidade === 'trimestre') {
-    const mesInicio = trimestre * 3 + 1
-    const mesFim = mesInicio + 2
-    return {
-      dataInicio: `${ano}-${String(mesInicio).padStart(2, '0')}-01`,
-      dataFim:    `${ano}-${String(mesFim).padStart(2, '0')}-31`,
-    }
-  }
-
-  // 'mes' ou 'dia' → usa o mês selecionado
-  const m = String(mes + 1).padStart(2, '0')
-  return { dataInicio: `${ano}-${m}-01`, dataFim: `${ano}-${m}-31` }
-}

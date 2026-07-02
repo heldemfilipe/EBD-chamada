@@ -42,6 +42,7 @@ interface ChamadaDb {
   id: string
   oferta: number | null
   anotacoes: string | null
+  updated_at: string
 }
 
 interface EscalaDb {
@@ -168,7 +169,7 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
         LEFT JOIN turmas t ON t.id = e.turma_id
         WHERE e.data = ${dataISO}`,
 
-    sql`SELECT c.id, c.oferta, c.anotacoes,
+    sql`SELECT c.id, c.oferta, c.anotacoes, c.updated_at,
           json_agg(json_build_object(
             'aluno_id', p.aluno_id,
             'presente', p.presente,
@@ -226,6 +227,7 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
     id: chamadaRows[0].id,
     oferta: chamadaRows[0].oferta,
     anotacoes: chamadaRows[0].anotacoes,
+    updated_at: chamadaRows[0].updated_at,
     presencas: (chamadaRows[0].presencas ?? []) as PresencaDb[],
   } : null
 
@@ -270,18 +272,32 @@ export async function salvarChamada(params: {
   anotacoes: string
   presencas: SalvarPresenca[]
   visitantes: SalvarVisitante[]
-}): Promise<{ success: boolean; error?: string }> {
+  /** updated_at da chamada no momento em que os dados foram carregados na tela — usado para detectar edição concorrente */
+  expectedUpdatedAt?: string | null
+}): Promise<{ success: boolean; error?: string; conflito?: boolean }> {
   try {
-    const { turmaId, data, oferta, anotacoes, presencas, visitantes } = params
+    const { turmaId, data, oferta, anotacoes, presencas, visitantes, expectedUpdatedAt } = params
 
     // 1. Upsert chamada (ano e trimestre são colunas geradas — não inserir)
+    // Se expectedUpdatedAt for informado e a chamada já existir, só atualiza se ninguém mais
+    // tiver alterado essa chamada desde que os dados foram carregados na tela (evita perder
+    // presenças de outro usuário que salvou por cima).
     const [chamadaRow] = await sql`
       INSERT INTO chamadas (turma_id, data, oferta, anotacoes)
       VALUES (${turmaId}, ${data}, ${oferta}, ${anotacoes})
       ON CONFLICT (turma_id, data)
       DO UPDATE SET oferta = EXCLUDED.oferta, anotacoes = EXCLUDED.anotacoes
+      ${expectedUpdatedAt ? sql`WHERE chamadas.updated_at = ${expectedUpdatedAt}` : sql``}
       RETURNING id
     `
+
+    if (!chamadaRow) {
+      return {
+        success: false,
+        conflito: true,
+        error: 'Esta chamada foi alterada por outra pessoa enquanto você editava. Recarregue a página para ver os dados mais recentes antes de salvar novamente.',
+      }
+    }
     const chamadaId = chamadaRow.id
 
     // 2. Upsert presencas + limpar historico visitantes em paralelo

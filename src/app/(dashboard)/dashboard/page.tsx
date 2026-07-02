@@ -351,7 +351,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats desktop: grid de StatCards */}
-      <div className="hidden sm:grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="hidden sm:grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:max-w-6xl">
         <StatCard title="Total de Alunos" value={stats.totalAlunos}      icon={Users}         description="Ativos no sistema" />
         <StatCard title="Professores"      value={stats.totalProfessores}  icon={GraduationCap} description="Cadastrados" />
         <StatCard title="Turmas Ativas"    value={stats.totalTurmas}       icon={BookOpen}      description="Todas as faixas etárias" />
@@ -439,7 +439,7 @@ export default function DashboardPage() {
             <p className="text-sm font-semibold mb-1">Evolução de Presença</p>
             <p className="text-xs text-muted-foreground mb-3">Total de presentes e % no período selecionado</p>
             {dadosGrafico.length > 0 ? (
-              <div className="h-[200px] sm:h-[280px]">
+              <div className="h-[200px] sm:h-[280px] xl:h-[340px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={dadosGrafico} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                     <defs>
@@ -464,7 +464,7 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <EmptyState message="Sem dados para o período selecionado" minHeight="h-[200px] sm:h-[280px]" />
+              <EmptyState message="Sem dados para o período selecionado" minHeight="h-[200px] sm:h-[280px] xl:h-[340px]" />
             )}
           </div>
         </PeriodSelector>

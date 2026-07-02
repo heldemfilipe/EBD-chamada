@@ -5,6 +5,7 @@ import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
 import { buscarPerfilUsuario } from '@/actions/auth'
+import { toast } from '@/lib/toast'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 export interface Perfil {
@@ -183,7 +184,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           await loadPerfil(session.user.id)
         } catch (e: any) {
-          logger.error('Erro ao carregar perfil — liberando tela mesmo assim', { module: 'auth', error: e?.message })
+          logger.error('Erro inesperado ao carregar perfil — fazendo logout por segurança', { module: 'auth', error: e?.message })
+          toast('Não foi possível carregar seu perfil. Faça login novamente.', 'error')
+          await supabase.auth.signOut()
+          setUser(null)
+          resetState()
         }
 
         // 3. Verificação real do JWT em background (segurança)
@@ -227,7 +232,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             resetState()
           }
         } catch (e: any) {
-          logger.error('Erro no onAuthStateChange ao carregar perfil', { module: 'auth', error: e?.message })
+          logger.error('Erro inesperado no onAuthStateChange ao carregar perfil — fazendo logout por segurança', { module: 'auth', error: e?.message })
+          toast('Não foi possível carregar seu perfil. Faça login novamente.', 'error')
+          await supabase.auth.signOut()
+          setUser(null)
+          resetState()
         } finally {
           if (mounted) setLoading(false)
         }

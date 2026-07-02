@@ -109,6 +109,7 @@ export default function ChamadaTurmaPage() {
   const [carregando, setCarregando] = useState(true)
   const [qtdBiblias, setQtdBiblias] = useState<string>('')
   const [qtdRevistas, setQtdRevistas] = useState<string>('')
+  const [chamadaUpdatedAt, setChamadaUpdatedAt] = useState<string | null>(null)
 
   // ── Busca inicial via server action (SQL direto) ────────────────────────────
   useEffect(() => {
@@ -150,6 +151,7 @@ export default function ChamadaTurmaPage() {
         if (dados.chamada) {
           setOfertaCents(Math.round((dados.chamada.oferta || 0) * 100))
           setAnotacoes(dados.chamada.anotacoes ?? '')
+          setChamadaUpdatedAt(dados.chamada.updated_at)
           const presencasMap = new Map(dados.chamada.presencas.map(p => [p.aluno_id, p]))
           setAlunos(
             dados.alunos.map(a => {
@@ -166,6 +168,7 @@ export default function ChamadaTurmaPage() {
         } else {
           setOfertaCents(0)
           setAnotacoes('')
+          setChamadaUpdatedAt(null)
           setAlunos(dados.alunos.map(a => ({ ...mapAluno(a), presente: 'pendente' as const })))
         }
 
@@ -386,10 +389,15 @@ export default function ChamadaTurmaPage() {
           trouxe_biblia: v.trouxe_biblia,
           trouxe_revista: v.trouxe_revista,
         })),
+        expectedUpdatedAt: chamadaUpdatedAt,
       })
 
       if (!result.success) {
-        toast('Erro ao salvar chamada: ' + (result.error ?? 'erro desconhecido'), 'error')
+        if (result.conflito) {
+          toast(result.error ?? 'Esta chamada foi alterada por outra pessoa. Recarregue a página.', 'error')
+        } else {
+          toast('Erro ao salvar chamada: ' + (result.error ?? 'erro desconhecido'), 'error')
+        }
         return
       }
 
