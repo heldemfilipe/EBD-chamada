@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Users, GraduationCap } from 'lucide-react'
-import { buscarAlunosComTurmas, salvarAluno, excluirAluno } from '@/actions/alunos'
+import { Plus, Search, Edit, UserX, UserCheck, Phone, Mail, Users, GraduationCap } from 'lucide-react'
+import { buscarAlunosComTurmas, salvarAluno, definirAtivoAluno } from '@/actions/alunos'
 import { promoverAlunoParaProfessor } from '@/actions/professores'
 import { MESES, TRIMESTRES, BG_TO_HEX, CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
@@ -37,7 +37,7 @@ interface Aluno {
   presenca: number
   presencaPresentes: number
   presencaTotal: number
-  status: string
+  ativo: boolean
   isProfessor: boolean
 }
 
@@ -63,8 +63,9 @@ export default function AlunosPage() {
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
   const [turmaFilter, setTurmaFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [desativarOpen, setDesativarOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [selected, setSelected] = useState<Aluno | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
@@ -102,7 +103,7 @@ export default function AlunosPage() {
           id: a.id, nome: a.nome, turmaId: a.turma_id ?? null, turma: '',
           telefone: a.telefone ?? '', email: a.email ?? '',
           dataNascimento: a.data_nascimento ?? '', responsavel: a.responsavel ?? '',
-          cargo: a.cargo ?? '', presenca: 0, presencaPresentes: 0, presencaTotal: 0, status: 'ativo',
+          cargo: a.cargo ?? '', presenca: 0, presencaPresentes: 0, presencaTotal: 0, ativo: a.ativo ?? true,
           idade: a.data_nascimento ? (calcularIdade(a.data_nascimento) ?? 0) : 0,
           isProfessor: (a.responsavel ?? '').startsWith('professor:'),
         })))
@@ -154,7 +155,8 @@ export default function AlunosPage() {
       .filter(a => {
         const matchSearch = a.nome.toLowerCase().includes(search.toLowerCase()) || a.email.toLowerCase().includes(search.toLowerCase())
         const matchTurma  = turmaFilter === 'all' || a.turmaId === turmaFilter
-        return matchSearch && matchTurma
+        const matchStatus = statusFilter === 'todos' || (statusFilter === 'ativos' ? a.ativo : !a.ativo)
+        return matchSearch && matchTurma && matchStatus
       })
       .map(a => {
         const pm = alunoPresencasMap[a.id] ?? {}
@@ -179,7 +181,7 @@ export default function AlunosPage() {
         }
         return sortDir === 'asc' ? cmp : -cmp
       })
-  }, [alunos, search, turmaFilter, alunoPresencasMap, chamadaIdsPorTurma, sortKey, sortDir, turmaMap])
+  }, [alunos, search, turmaFilter, statusFilter, alunoPresencasMap, chamadaIdsPorTurma, sortKey, sortDir, turmaMap])
 
   const faixaPorTurma = useMemo(() => {
     const m: Record<string, string> = {}
@@ -219,7 +221,7 @@ export default function AlunosPage() {
         data_nascimento: form.dataNascimento || null,
         telefone: form.telefone || null,
         turma_id: form.turmaId || null,
-        ativo: true,
+        ativo: editMode && selected ? selected.ativo : true,
         responsavel: form.responsavel || null,
         cargo: form.cargo || null,
       }
@@ -239,7 +241,7 @@ export default function AlunosPage() {
           turmaId: form.turmaId || null, telefone: form.telefone,
           email: form.email, dataNascimento: form.dataNascimento,
           responsavel: form.responsavel, cargo: form.cargo ?? '',
-          presenca: 0, presencaPresentes: 0, presencaTotal: 0, status: 'ativo', isProfessor: false,
+          presenca: 0, presencaPresentes: 0, presencaTotal: 0, ativo: true, isProfessor: false,
         }])
         toast('Aluno cadastrado com sucesso!')
       }
@@ -251,13 +253,20 @@ export default function AlunosPage() {
     }
   }
 
-  async function handleDelete() {
+  async function handleDesativar() {
     if (!selected) return
-    const result = await excluirAluno(selected.id)
-    if (!result.success) { toast('Erro ao excluir aluno.', 'error'); return }
-    setAlunos(alunos.filter(a => a.id !== selected.id))
-    toast('Aluno excluído com sucesso!')
-    setDeleteOpen(false); setSelected(null)
+    const result = await definirAtivoAluno(selected.id, false)
+    if (!result.success) { toast('Erro ao desativar aluno.', 'error'); return }
+    setAlunos(alunos.map(a => a.id === selected.id ? { ...a, ativo: false } : a))
+    toast('Aluno desativado com sucesso!')
+    setDesativarOpen(false); setSelected(null)
+  }
+
+  async function handleReativar(aluno: Aluno) {
+    const result = await definirAtivoAluno(aluno.id, true)
+    if (!result.success) { toast('Erro ao reativar aluno.', 'error'); return }
+    setAlunos(alunos.map(a => a.id === aluno.id ? { ...a, ativo: true } : a))
+    toast('Aluno reativado com sucesso!')
   }
 
   async function handlePromover() {
@@ -312,12 +321,12 @@ export default function AlunosPage() {
 
       {/* Stats por faixa etária */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard title="Total" value={alunos.length} icon={Users} description="Ativos no sistema" />
+        <StatCard title="Total" value={alunos.filter(a => a.ativo).length} icon={Users} description="Ativos no sistema" />
         {FAIXAS.map((f) => (
           <StatCard
             key={f.faixa}
             title={f.label}
-            value={alunos.filter(a => a.turmaId && faixaPorTurma[a.turmaId] === f.faixa).length}
+            value={alunos.filter(a => a.ativo && a.turmaId && faixaPorTurma[a.turmaId] === f.faixa).length}
             description={f.desc}
             valueClassName={f.color}
           />
@@ -343,6 +352,16 @@ export default function AlunosPage() {
               <SelectContent>
                 <SelectItem value="all">Todas as turmas</SelectItem>
                 {turmas.map((t) => <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+              <SelectTrigger className="w-full md:w-[160px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ativos">Ativos</SelectItem>
+                <SelectItem value="inativos">Inativos</SelectItem>
+                <SelectItem value="todos">Todos</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -407,6 +426,9 @@ export default function AlunosPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-semibold text-sm">{aluno.nome}</span>
+                        {!aluno.ativo && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-muted-foreground/40 text-muted-foreground">Inativo</Badge>
+                        )}
                         {aluno.isProfessor && (
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-400 text-blue-400">Professor</Badge>
                         )}
@@ -435,10 +457,15 @@ export default function AlunosPage() {
                     <div className="flex items-center gap-0.5 flex-shrink-0">
                       {aluno.isProfessor ? (
                         <span className="text-[10px] text-muted-foreground italic pr-1">em Professores</span>
+                      ) : aluno.ativo ? (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(aluno)}><Edit className="h-3.5 w-3.5" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="Desativar" onClick={() => { setSelected(aluno); setDesativarOpen(true) }}><UserX className="h-3.5 w-3.5 text-destructive" /></Button>
+                        </>
                       ) : (
                         <>
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(aluno)}><Edit className="h-3.5 w-3.5" /></Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setSelected(aluno); setDeleteOpen(true) }}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="Reativar" onClick={() => handleReativar(aluno)}><UserCheck className="h-3.5 w-3.5 text-green-600" /></Button>
                         </>
                       )}
                     </div>
@@ -521,6 +548,9 @@ export default function AlunosPage() {
                         <TableCell>
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-medium">{aluno.nome}</span>
+                            {!aluno.ativo && (
+                              <Badge variant="outline" className="text-xs border-muted-foreground/40 text-muted-foreground">Inativo</Badge>
+                            )}
                             {aluno.isProfessor && (
                               <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">Professor</Badge>
                             )}
@@ -570,11 +600,16 @@ export default function AlunosPage() {
                           <div className="flex items-center justify-end gap-2">
                             {aluno.isProfessor ? (
                               <span className="text-xs text-muted-foreground italic">Gerenciar em Professores</span>
-                            ) : (
+                            ) : aluno.ativo ? (
                               <>
                                 <Button variant="ghost" size="icon" title="Promover a Professor" onClick={() => { setSelected(aluno); setPromoverOpen(true) }}><GraduationCap className="h-4 w-4 text-blue-400" /></Button>
                                 <Button variant="ghost" size="icon" onClick={() => openDialog(aluno)}><Edit className="h-4 w-4" /></Button>
-                                <Button variant="ghost" size="icon" onClick={() => { setSelected(aluno); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                <Button variant="ghost" size="icon" title="Desativar" onClick={() => { setSelected(aluno); setDesativarOpen(true) }}><UserX className="h-4 w-4 text-destructive" /></Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => openDialog(aluno)}><Edit className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" title="Reativar" onClick={() => handleReativar(aluno)}><UserCheck className="h-4 w-4 text-green-600" /></Button>
                               </>
                             )}
                           </div>
@@ -669,10 +704,12 @@ export default function AlunosPage() {
       </Dialog>
 
       <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        description={<>Tem certeza que deseja excluir o aluno <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
-        onConfirm={handleDelete}
+        open={desativarOpen}
+        onOpenChange={setDesativarOpen}
+        title="Desativar Aluno"
+        description={<>Tem certeza que deseja desativar <strong>{selected?.nome}</strong>? Ele deixará de aparecer nas turmas, chamadas e escalas, mas o histórico de presença é mantido e pode ser reativado a qualquer momento.</>}
+        confirmLabel="Desativar"
+        onConfirm={handleDesativar}
       />
 
       <Dialog open={promoverOpen} onOpenChange={setPromoverOpen}>

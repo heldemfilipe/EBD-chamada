@@ -9,9 +9,10 @@ interface DeleteConfirmDialogProps {
   title?: string
   description: React.ReactNode
   onConfirm: () => void
+  confirmLabel?: string
 }
 
-export function DeleteConfirmDialog({ open, onOpenChange, title = 'Confirmar Exclusão', description, onConfirm }: DeleteConfirmDialogProps) {
+export function DeleteConfirmDialog({ open, onOpenChange, title = 'Confirmar Exclusão', description, onConfirm, confirmLabel = 'Excluir' }: DeleteConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md">
@@ -21,7 +22,7 @@ export function DeleteConfirmDialog({ open, onOpenChange, title = 'Confirmar Exc
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button variant="destructive" onClick={onConfirm}>Excluir</Button>
+          <Button variant="destructive" onClick={onConfirm}>{confirmLabel}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

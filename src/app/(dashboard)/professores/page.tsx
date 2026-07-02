@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
-import { buscarProfessoresComTurmas, salvarProfessor, excluirProfessor, sincronizarAlunoVinculado, salvarCargoProfessor, tornarProfessorAluno } from '@/actions/professores'
+import { Plus, Search, Edit, UserX, UserCheck, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
+import { buscarProfessoresComTurmas, salvarProfessor, definirAtivoProfessor, sincronizarAlunoVinculado, salvarCargoProfessor, tornarProfessorAluno } from '@/actions/professores'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -25,6 +25,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 interface Professor {
   id: string; nome: string; especialidade: string; turmas: string[]
   turmaAluno: string | null; telefone: string; email: string; dataNascimento: string; dataIngresso: string; cargo: string
+  ativo: boolean
 }
 interface Turma { id: string; nome: string }
 
@@ -35,9 +36,10 @@ export default function ProfessoresPage() {
   const [professores, setProfessores] = useState<Professor[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'ativos' | 'inativos' | 'todos'>('ativos')
   const { sortKey, sortDir, handleSort, SortIcon } = useTableSort<'nome' | 'turmas'>('nome')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [desativarOpen, setDesativarOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [selected, setSelected] = useState<Professor | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
@@ -58,7 +60,7 @@ export default function ProfessoresPage() {
           email: p.email ?? '', dataNascimento: p.data_nascimento ?? '',
           dataIngresso: p.data_ingresso ?? new Date().toISOString().split('T')[0],
           turmaAluno: p.turma_aluno_id ?? null, turmas: p.turma_ids ?? [],
-          cargo: p.cargo ?? '',
+          cargo: p.cargo ?? '', ativo: p.ativo ?? true,
         })))
         setTurmas(turmasData ?? [])
       } catch (e: any) {
@@ -72,11 +74,14 @@ export default function ProfessoresPage() {
   }, [])
 
   const filtered = professores
-    .filter(p =>
-      p.nome.toLowerCase().includes(search.toLowerCase()) ||
-      p.especialidade.toLowerCase().includes(search.toLowerCase()) ||
-      p.email.toLowerCase().includes(search.toLowerCase())
-    )
+    .filter(p => {
+      const matchSearch =
+        p.nome.toLowerCase().includes(search.toLowerCase()) ||
+        p.especialidade.toLowerCase().includes(search.toLowerCase()) ||
+        p.email.toLowerCase().includes(search.toLowerCase())
+      const matchStatus = statusFilter === 'todos' || (statusFilter === 'ativos' ? p.ativo : !p.ativo)
+      return matchSearch && matchStatus
+    })
     .sort((a, b) => {
       const dir = sortDir === 'asc' ? 1 : -1
       if (sortKey === 'turmas') return (a.turmas.length - b.turmas.length) * dir
@@ -124,7 +129,7 @@ export default function ProfessoresPage() {
         setProfessores(professores.map(p => p.id === selected.id ? { ...p, nome: form.nome, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, especialidade: form.especialidade, turmaAluno: form.turmaAluno, turmas: form.turmas, cargo: form.cargo } : p))
         toast('Professor atualizado com sucesso!')
       } else {
-        setProfessores([...professores, { id: profId!, nome: form.nome, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0] }])
+        setProfessores([...professores, { id: profId!, nome: form.nome, telefone: form.telefone, email: form.email, dataNascimento: form.dataNascimento, especialidade: form.especialidade, turmas: form.turmas, turmaAluno: form.turmaAluno, cargo: form.cargo, dataIngresso: new Date().toISOString().split('T')[0], ativo: true }])
         toast('Professor cadastrado com sucesso!')
       }
       closeDialog()
@@ -135,13 +140,20 @@ export default function ProfessoresPage() {
     }
   }
 
-  async function handleDelete() {
+  async function handleDesativar() {
     if (!selected) return
-    const result = await excluirProfessor(selected.id)
-    if (!result.success) { toast(result.error ?? 'Erro ao excluir professor.', 'error'); return }
-    setProfessores(professores.filter(p => p.id !== selected.id))
-    toast('Professor excluído com sucesso!')
-    setDeleteOpen(false); setSelected(null)
+    const result = await definirAtivoProfessor(selected.id, false)
+    if (!result.success) { toast(result.error ?? 'Erro ao desativar professor.', 'error'); return }
+    setProfessores(professores.map(p => p.id === selected.id ? { ...p, ativo: false } : p))
+    toast('Professor desativado com sucesso!')
+    setDesativarOpen(false); setSelected(null)
+  }
+
+  async function handleReativar(professor: Professor) {
+    const result = await definirAtivoProfessor(professor.id, true)
+    if (!result.success) { toast(result.error ?? 'Erro ao reativar professor.', 'error'); return }
+    setProfessores(professores.map(p => p.id === professor.id ? { ...p, ativo: true } : p))
+    toast('Professor reativado com sucesso!')
   }
 
   function openTornarAlunoDialog(professor: Professor) {
@@ -203,29 +215,29 @@ export default function ProfessoresPage() {
         <div className="grid grid-cols-2 divide-x divide-y">
           <div className="flex items-center gap-3 p-4">
             <div className="p-2 rounded-lg bg-muted"><Users className="h-4 w-4 text-muted-foreground" /></div>
-            <div><p className="text-xl font-bold">{professores.length}</p><p className="text-xs text-muted-foreground">Professores</p></div>
+            <div><p className="text-xl font-bold">{professores.filter(p => p.ativo).length}</p><p className="text-xs text-muted-foreground">Professores</p></div>
           </div>
           <div className="flex items-center gap-3 p-4">
             <div className="p-2 rounded-lg bg-muted"><GraduationCap className="h-4 w-4 text-muted-foreground" /></div>
-            <div><p className="text-xl font-bold">{professores.reduce((a, p) => a + p.turmas.length, 0)}</p><p className="text-xs text-muted-foreground">Atribuições</p></div>
+            <div><p className="text-xl font-bold">{professores.filter(p => p.ativo).reduce((a, p) => a + p.turmas.length, 0)}</p><p className="text-xs text-muted-foreground">Atribuições</p></div>
           </div>
           <div className="flex items-center gap-3 p-4">
             <div className="p-2 rounded-lg bg-muted"><BookOpen className="h-4 w-4 text-muted-foreground" /></div>
-            <div><p className="text-xl font-bold">{professores.filter(p => p.turmaAluno !== null).length}</p><p className="text-xs text-muted-foreground">Tb. Alunos</p></div>
+            <div><p className="text-xl font-bold">{professores.filter(p => p.ativo && p.turmaAluno !== null).length}</p><p className="text-xs text-muted-foreground">Tb. Alunos</p></div>
           </div>
           <div className="flex items-center gap-3 p-4">
             <div className="p-2 rounded-lg bg-muted"><Search className="h-4 w-4 text-muted-foreground" /></div>
-            <div><p className="text-xl font-bold">{new Set(professores.map(p => p.especialidade).filter(Boolean)).size}</p><p className="text-xs text-muted-foreground">Especialidades</p></div>
+            <div><p className="text-xl font-bold">{new Set(professores.filter(p => p.ativo).map(p => p.especialidade).filter(Boolean)).size}</p><p className="text-xs text-muted-foreground">Especialidades</p></div>
           </div>
         </div>
       </div>
 
       {/* Stats Desktop */}
       <div className="hidden sm:grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:max-w-6xl">
-        <StatCard title="Total de Professores" value={professores.length} icon={Users} description="Ativos no sistema" />
-        <StatCard title="Atribuições" value={professores.reduce((a, p) => a + p.turmas.length, 0)} icon={GraduationCap} description="Turmas lecionadas" />
-        <StatCard title="Também Alunos" value={professores.filter(p => p.turmaAluno !== null).length} icon={BookOpen} description="Matriculados em turma" />
-        <StatCard title="Especialidades" value={new Set(professores.map(p => p.especialidade).filter(Boolean)).size} description="Diferentes áreas" />
+        <StatCard title="Total de Professores" value={professores.filter(p => p.ativo).length} icon={Users} description="Ativos no sistema" />
+        <StatCard title="Atribuições" value={professores.filter(p => p.ativo).reduce((a, p) => a + p.turmas.length, 0)} icon={GraduationCap} description="Turmas lecionadas" />
+        <StatCard title="Também Alunos" value={professores.filter(p => p.ativo && p.turmaAluno !== null).length} icon={BookOpen} description="Matriculados em turma" />
+        <StatCard title="Especialidades" value={new Set(professores.filter(p => p.ativo).map(p => p.especialidade).filter(Boolean)).size} description="Diferentes áreas" />
       </div>
 
       {/* Lista */}
@@ -235,11 +247,21 @@ export default function ProfessoresPage() {
           <CardDescription>Visualize e gerencie todos os professores cadastrados</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center mb-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center mb-6">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Buscar por nome, especialidade ou email..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+              <SelectTrigger className="w-full md:w-[160px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ativos">Ativos</SelectItem>
+                <SelectItem value="inativos">Inativos</SelectItem>
+                <SelectItem value="todos">Todos</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Controles de sort para mobile */}
@@ -269,6 +291,9 @@ export default function ProfessoresPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm">{prof.nome}</span>
+                        {!prof.ativo && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-muted-foreground/40 text-muted-foreground">Inativo</Badge>
+                        )}
                         {cargoInfo && (
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
                             style={{ backgroundColor: cargoInfo.bg, color: cargoInfo.color, borderColor: cargoInfo.border }}>
@@ -283,11 +308,20 @@ export default function ProfessoresPage() {
                       </div>
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
-                      {!prof.turmaAluno && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                      {prof.ativo ? (
+                        <>
+                          {!prof.turmaAluno && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                          )}
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="Desativar" onClick={() => { setSelected(prof); setDesativarOpen(true) }}><UserX className="h-4 w-4 text-destructive" /></Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title="Reativar" onClick={() => handleReativar(prof)}><UserCheck className="h-4 w-4 text-green-600" /></Button>
+                        </>
                       )}
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setSelected(prof); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                     </div>
                   </div>
                   {/* Turmas */}
@@ -356,6 +390,9 @@ export default function ProfessoresPage() {
                     <TableCell>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium">{prof.nome}</span>
+                        {!prof.ativo && (
+                          <Badge variant="outline" className="text-xs border-muted-foreground/40 text-muted-foreground">Inativo</Badge>
+                        )}
                         {(() => {
                           const c = getCargo(prof.cargo)
                           return c ? (
@@ -401,11 +438,20 @@ export default function ProfessoresPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {!prof.turmaAluno && (
-                          <Button variant="ghost" size="icon" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                        {prof.ativo ? (
+                          <>
+                            {!prof.turmaAluno && (
+                              <Button variant="ghost" size="icon" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                            )}
+                            <Button variant="ghost" size="icon" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" title="Desativar" onClick={() => { setSelected(prof); setDesativarOpen(true) }}><UserX className="h-4 w-4 text-destructive" /></Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button variant="ghost" size="icon" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" title="Reativar" onClick={() => handleReativar(prof)}><UserCheck className="h-4 w-4 text-green-600" /></Button>
+                          </>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => { setSelected(prof); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -499,10 +545,19 @@ export default function ProfessoresPage() {
       </Dialog>
 
       <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        description={<>Tem certeza que deseja excluir o professor <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
-        onConfirm={handleDelete}
+        open={desativarOpen}
+        onOpenChange={setDesativarOpen}
+        title="Desativar Professor"
+        description={
+          <>
+            Tem certeza que deseja desativar <strong>{selected?.nome}</strong>? Ele deixará de aparecer nas turmas e escalas, mas o histórico é mantido e pode ser reativado a qualquer momento.
+            {selected?.turmaAluno && (
+              <> O registro como aluno em <strong>{getTurmaNome(selected.turmaAluno)}</strong> não é afetado.</>
+            )}
+          </>
+        }
+        confirmLabel="Desativar"
+        onConfirm={handleDesativar}
       />
 
       {/* Dialog: Tornar Aluno */}

@@ -5,11 +5,10 @@ import sql from '@/lib/db'
 export async function buscarProfessoresComTurmas() {
   const [professores, turmas] = await Promise.all([
     sql`
-      SELECT p.id, p.nome, p.especialidade, p.telefone, p.email, p.data_nascimento, p.data_ingresso, p.turma_aluno_id, p.cargo,
+      SELECT p.id, p.nome, p.especialidade, p.telefone, p.email, p.data_nascimento, p.data_ingresso, p.turma_aluno_id, p.cargo, p.ativo,
         json_agg(pt.turma_id) FILTER (WHERE pt.turma_id IS NOT NULL) AS turma_ids
       FROM professores p
       LEFT JOIN professor_turmas pt ON pt.professor_id = p.id
-      WHERE p.ativo = true
       GROUP BY p.id
       ORDER BY p.nome
     `,
@@ -20,7 +19,7 @@ export async function buscarProfessoresComTurmas() {
     professores: professores.map(p => ({
       id: p.id, nome: p.nome, especialidade: p.especialidade, telefone: p.telefone,
       email: p.email, data_nascimento: p.data_nascimento, data_ingresso: p.data_ingresso,
-      turma_aluno_id: p.turma_aluno_id, cargo: p.cargo, turma_ids: p.turma_ids ?? [],
+      turma_aluno_id: p.turma_aluno_id, cargo: p.cargo, ativo: p.ativo, turma_ids: p.turma_ids ?? [],
     })),
     turmas: turmas.map(t => ({ id: t.id, nome: t.nome })),
   }
@@ -79,10 +78,10 @@ export async function salvarProfessor(dados: {
   }
 }
 
-export async function excluirProfessor(id: string): Promise<{ success: boolean; error?: string }> {
+/** Ativa/desativa um professor (soft delete) — preserva histórico de turmas/escalas para relatórios */
+export async function definirAtivoProfessor(id: string, ativo: boolean): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`DELETE FROM alunos WHERE responsavel = ${'professor:' + id}`
-    await sql`DELETE FROM professores WHERE id = ${id}`
+    await sql`UPDATE professores SET ativo = ${ativo} WHERE id = ${id}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }

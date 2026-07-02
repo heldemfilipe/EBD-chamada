@@ -77,9 +77,10 @@ export async function salvarAluno(dados: {
   }
 }
 
-export async function excluirAluno(id: string): Promise<{ success: boolean; error?: string }> {
+/** Ativa/desativa um aluno (soft delete) — preserva histórico de presença para relatórios */
+export async function definirAtivoAluno(id: string, ativo: boolean): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`DELETE FROM alunos WHERE id = ${id}`
+    await sql`UPDATE alunos SET ativo = ${ativo} WHERE id = ${id}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }
