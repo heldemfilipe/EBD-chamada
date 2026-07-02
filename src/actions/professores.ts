@@ -127,3 +127,14 @@ export async function salvarCargoProfessor(profId: string, cargo: string | null)
   await sql`UPDATE professores SET cargo = ${cargo} WHERE id = ${profId}`
   await sql`UPDATE alunos SET cargo = ${cargo} WHERE responsavel = ${'professor:' + profId}`
 }
+
+/** Vincula um professor a uma turma como aluno (ação rápida — sem passar pelo formulário completo) */
+export async function tornarProfessorAluno(profId: string, turmaId: string, nome: string, dataNascimento?: string | null): Promise<{ success: boolean; error?: string }> {
+  try {
+    await sql`UPDATE professores SET turma_aluno_id = ${turmaId} WHERE id = ${profId}`
+    await sincronizarAlunoVinculado(profId, nome, turmaId, dataNascimento ?? null)
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message }
+  }
+}

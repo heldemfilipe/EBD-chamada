@@ -14,7 +14,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Edit, Trash2, Phone, Mail, Calendar, GraduationCap, BookOpen, Users } from 'lucide-react'
-import { buscarProfessoresComTurmas, salvarProfessor, excluirProfessor, sincronizarAlunoVinculado, salvarCargoProfessor } from '@/actions/professores'
+import { buscarProfessoresComTurmas, salvarProfessor, excluirProfessor, sincronizarAlunoVinculado, salvarCargoProfessor, tornarProfessorAluno } from '@/actions/professores'
 import { CARGOS, getCargo } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -43,6 +43,9 @@ export default function ProfessoresPage() {
   const [form, setForm] = useState(FORM_VAZIO)
   const [isSaving, setIsSaving] = useState(false)
   const [carregando, setCarregando] = useState(true)
+  const [tornarAlunoOpen, setTornarAlunoOpen] = useState(false)
+  const [tornarAlunoTurmaId, setTornarAlunoTurmaId] = useState<string>('')
+  const [tornandoAluno, setTornandoAluno] = useState(false)
 
   useEffect(() => {
     let cancelado = false
@@ -139,6 +142,23 @@ export default function ProfessoresPage() {
     setProfessores(professores.filter(p => p.id !== selected.id))
     toast('Professor excluído com sucesso!')
     setDeleteOpen(false); setSelected(null)
+  }
+
+  function openTornarAlunoDialog(professor: Professor) {
+    setSelected(professor)
+    setTornarAlunoTurmaId('')
+    setTornarAlunoOpen(true)
+  }
+
+  async function handleTornarAluno() {
+    if (!selected || !tornarAlunoTurmaId) return
+    setTornandoAluno(true)
+    const result = await tornarProfessorAluno(selected.id, tornarAlunoTurmaId, selected.nome, selected.dataNascimento || null)
+    setTornandoAluno(false)
+    if (!result.success) { toast('Erro ao vincular professor como aluno: ' + (result.error ?? ''), 'error'); return }
+    setProfessores(professores.map(p => p.id === selected.id ? { ...p, turmaAluno: tornarAlunoTurmaId } : p))
+    toast(`${selected.nome} agora também é aluno em ${getTurmaNome(tornarAlunoTurmaId)}!`)
+    setTornarAlunoOpen(false); setSelected(null)
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -263,6 +283,9 @@ export default function ProfessoresPage() {
                       </div>
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
+                      {!prof.turmaAluno && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                      )}
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setSelected(prof); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                     </div>
@@ -378,6 +401,9 @@ export default function ProfessoresPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {!prof.turmaAluno && (
+                          <Button variant="ghost" size="icon" title="Tornar Aluno" onClick={() => openTornarAlunoDialog(prof)}><BookOpen className="h-4 w-4 text-blue-400" /></Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={() => openDialog(prof)}><Edit className="h-4 w-4" /></Button>
                         <Button variant="ghost" size="icon" onClick={() => { setSelected(prof); setDeleteOpen(true) }}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                       </div>
@@ -478,6 +504,33 @@ export default function ProfessoresPage() {
         description={<>Tem certeza que deseja excluir o professor <strong>{selected?.nome}</strong>? Esta ação não pode ser desfeita.</>}
         onConfirm={handleDelete}
       />
+
+      {/* Dialog: Tornar Aluno */}
+      <Dialog open={tornarAlunoOpen} onOpenChange={setTornarAlunoOpen}>
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Tornar Aluno</DialogTitle>
+            <DialogDescription>
+              <strong>{selected?.nome}</strong> continuará como professor e também passará a ser aluno matriculado na turma escolhida.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 py-2">
+            <Label htmlFor="tornarAlunoTurma">Turma</Label>
+            <Select value={tornarAlunoTurmaId} onValueChange={setTornarAlunoTurmaId}>
+              <SelectTrigger id="tornarAlunoTurma"><SelectValue placeholder="Selecione a turma" /></SelectTrigger>
+              <SelectContent>
+                {turmas.map((t) => <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTornarAlunoOpen(false)} disabled={tornandoAluno}>Cancelar</Button>
+            <Button onClick={handleTornarAluno} disabled={tornandoAluno || !tornarAlunoTurmaId}>
+              {tornandoAluno ? 'Salvando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
