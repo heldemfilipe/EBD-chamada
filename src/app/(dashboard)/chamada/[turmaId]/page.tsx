@@ -27,7 +27,7 @@ import { formatarDomingo, converterParaISO, getTrimestreRange } from '@/lib/cham
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/lib/toast'
 import { corPresenca } from '@/lib/presence'
-import { buscarDadosChamadaTurma, salvarChamada, converterVisitanteEmAluno } from '@/actions/chamada'
+import { buscarDadosChamadaTurma, salvarChamada, converterVisitanteEmAluno, removerVisitante } from '@/actions/chamada'
 import { AlunoRow } from './_AlunoRow'
 import { AdicionarVisitanteDialog } from './_AdicionarVisitanteDialog'
 
@@ -292,9 +292,27 @@ export default function ChamadaTurmaPage() {
     setVisitantes(prev => prev.map(v => v.id === visitanteId ? { ...v, trouxe_revista: !v.trouxe_revista } : v)),
   [])
 
-  const handleRemoverVisitante = useCallback((visitanteId: string) => {
+  const handleRemoverVisitante = useCallback(async (visitanteId: string) => {
+    const visitante = visitantes.find(v => v.id === visitanteId)
+    if (!visitante) return
+
+    // Visitante ainda não salvo: basta tirar da tela, nada foi persistido.
+    if (visitante.isNovo) {
+      setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
+      return
+    }
+
+    if (!confirm(`Remover ${visitante.nome} da lista de visitantes?\n\nEle não aparecerá mais nas próximas chamadas.`)) return
+
+    const result = await removerVisitante(visitanteId)
+    if (!result.success) {
+      toast(result.error ?? 'Erro ao remover visitante.', 'error')
+      return
+    }
+
     setVisitantes(prev => prev.filter(v => v.id !== visitanteId))
-  }, [])
+    toast(`${visitante.nome} removido.`)
+  }, [visitantes])
 
   const handleAdicionarVisitante = useCallback(() => {
     const nomeTrim = novoVisitante.nome.trim()

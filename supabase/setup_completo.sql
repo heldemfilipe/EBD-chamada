@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS visitantes (
   observacao           TEXT,
   convertido_em_aluno  BOOLEAN NOT NULL DEFAULT FALSE,
   aluno_id             UUID REFERENCES alunos(id) ON DELETE SET NULL,
+  ativo                BOOLEAN NOT NULL DEFAULT TRUE,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

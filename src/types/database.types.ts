@@ -332,6 +332,7 @@ export interface Database {
           observacao: string | null
           convertido_em_aluno: boolean
           aluno_id: string | null
+          ativo: boolean
           created_at: string
           updated_at: string
         }
@@ -343,6 +344,7 @@ export interface Database {
           observacao?: string | null
           convertido_em_aluno?: boolean
           aluno_id?: string | null
+          ativo?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -354,6 +356,7 @@ export interface Database {
           observacao?: string | null
           convertido_em_aluno?: boolean
           aluno_id?: string | null
+          ativo?: boolean
           created_at?: string
           updated_at?: string
         }

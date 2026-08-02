@@ -191,6 +191,7 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
           AND hv.data >= ${trimestreInicio}
           AND hv.data <= ${trimestreFim}
           AND v.convertido_em_aluno = false
+          AND v.ativo = true
         ORDER BY hv.data DESC`,
     ])
   } catch (e: any) {
@@ -415,6 +416,20 @@ export async function converterVisitanteEmAluno(visitanteId: string | null, nome
     }
 
     return { success: true, alunoId: novoAluno.id }
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? 'Erro desconhecido' }
+  }
+}
+
+// ─── Remover visitante ────────────────────────────────────────────────────────
+// Marca como inativo em vez de apagar, preservando o histórico de presença
+// já registrado (usado em relatórios). Um visitante inativo deixa de aparecer
+// nas chamadas seguintes.
+
+export async function removerVisitante(visitanteId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await sql`UPDATE visitantes SET ativo = false WHERE id = ${visitanteId}`
+    return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message ?? 'Erro desconhecido' }
   }
