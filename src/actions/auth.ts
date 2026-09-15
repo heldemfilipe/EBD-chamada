@@ -1,52 +1,62 @@
 "use server"
 
 import sql from '@/lib/db'
+import { obterSessao, MODULOS } from '@/lib/sessao'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
+
+export interface CongregacaoResumo {
+  id: string
+  nome: string
+  ativa: boolean
+}
 
 export interface PerfilComPermissoes {
   id: string
   nome: string
   role: 'admin' | 'usuario'
   ativo: boolean
+  adminGeral: boolean
+  /** Congregação do usuário (null = admin geral) */
+  congregacao: CongregacaoResumo | null
+  /** Congregação cujos dados estão sendo exibidos */
+  congregacaoAtiva: CongregacaoResumo | null
+  /** Lista de congregações para troca — somente admin geral */
+  congregacoes: CongregacaoResumo[]
   modulos: { modulo: string; nivel: string }[]
   turmas: string[]
 }
 
-// ─── Buscar perfil + permissões em uma única query ───────────────────────────
+// ─── Perfil do usuário logado (identificado pela sessão, nunca pelo cliente) ──
 
-export async function buscarPerfilUsuario(userId: string): Promise<PerfilComPermissoes | null> {
-  const rows = await sql`
-    SELECT
-      p.id,
-      p.nome,
-      p.role,
-      p.ativo,
-      COALESCE(
-        json_agg(DISTINCT jsonb_build_object('modulo', pm.modulo, 'nivel', pm.nivel))
-        FILTER (WHERE pm.modulo IS NOT NULL),
-        '[]'
-      ) AS modulos,
-      COALESCE(
-        array_agg(DISTINCT pt.turma_id) FILTER (WHERE pt.turma_id IS NOT NULL),
-        '{}'
-      ) AS turmas
-    FROM perfis p
-    LEFT JOIN permissoes_modulos pm ON pm.perfil_id = p.id
-    LEFT JOIN permissoes_turmas  pt ON pt.perfil_id = p.id
-    WHERE p.id = ${userId}
-    GROUP BY p.id
-  `
+export async function buscarMeuPerfil(): Promise<PerfilComPermissoes | null> {
+  const s = await obterSessao()
+  if (!s) return null
 
-  if (!rows[0]) return null
+  const congregacoes: CongregacaoResumo[] = s.adminGeral
+    ? (await sql`SELECT id, nome, ativa FROM congregacoes ORDER BY nome`).map(c => ({ id: c.id, nome: c.nome, ativa: c.ativa }))
+    : []
 
-  const r = rows[0]
+  const idsBuscar = Array.from(new Set([s.congregacaoId, s.cid].filter((x): x is string => !!x)))
+  const congs = idsBuscar.length > 0
+    ? await sql`SELECT id, nome, ativa FROM congregacoes WHERE id = ANY(${idsBuscar}::uuid[])`
+    : []
+  const porId = new Map(congs.map(c => [c.id as string, { id: c.id as string, nome: c.nome as string, ativa: c.ativa as boolean }]))
+
+  const modulos = s.role === 'admin'
+    ? MODULOS.map(m => ({ modulo: m, nivel: 'editar' }))
+    : Object.entries(s.modulos).map(([modulo, nivel]) => ({ modulo, nivel: nivel as string }))
+
   return {
-    id: r.id,
-    nome: r.nome,
-    role: r.role,
-    ativo: r.ativo,
-    modulos: (r.modulos ?? []) as { modulo: string; nivel: string }[],
-    turmas: (r.turmas ?? []) as string[],
+    id: s.userId,
+    nome: s.nome,
+    role: s.role,
+    ativo: true,
+    adminGeral: s.adminGeral,
+    congregacao: s.congregacaoId ? porId.get(s.congregacaoId) ?? null : null,
+    congregacaoAtiva: s.cid ? porId.get(s.cid) ?? null : null,
+    congregacoes,
+    modulos,
+    turmas: s.turmas === '*' ? [] : s.turmas,
   }
 }

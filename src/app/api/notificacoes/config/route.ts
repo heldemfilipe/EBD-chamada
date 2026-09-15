@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO } from '@/lib/notificacoes'
-import { getNotifConfig } from '@/lib/api-helpers'
+import { getNotifConfig, exigirAdminNotificacoes, respostaErro } from '@/lib/api-helpers'
 
-// ─── GET: retorna configuração atual ──────────────────────────────────────────
+// ─── GET: retorna configuração atual da congregação ───────────────────────────
 export async function GET() {
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const db = createServiceClient() as any
-    const data = await getNotifConfig(db)
+    const data = await getNotifConfig(db, cid)
 
     // Configuração padrão caso a linha não exista ainda
     const config = data ?? {
@@ -30,21 +31,19 @@ export async function GET() {
 
     return NextResponse.json(config)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }
 
-// ─── PUT: salva configuração ───────────────────────────────────────────────────
+// ─── PUT: salva configuração da congregação ───────────────────────────────────
 export async function PUT(req: NextRequest) {
   try {
-    const body = await req.json()
+    const { cid } = await exigirAdminNotificacoes()
+    // id/congregacao_id nunca vêm do cliente
+    const { id: _id, congregacao_id: _cid, ...body } = await req.json()
     const db = createServiceClient() as any
 
-    // Verifica se já existe uma linha
-    const { data: existing } = await db
-      .from('notificacoes_config')
-      .select('id')
-      .single()
+    const existing = await getNotifConfig(db, cid)
 
     let result
     if (existing?.id) {
@@ -57,7 +56,7 @@ export async function PUT(req: NextRequest) {
     } else {
       result = await db
         .from('notificacoes_config')
-        .insert({ ...body })
+        .insert({ ...body, congregacao_id: cid })
         .select('*')
         .single()
     }
@@ -68,7 +67,6 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json(result.data)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }
-

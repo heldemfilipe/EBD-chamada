@@ -1,16 +1,19 @@
 "use server"
 
 import sql from '@/lib/db'
+import { exigirModulo } from '@/lib/sessao'
 
 export async function buscarContadoresGerais() {
+  const { cid } = await exigirModulo('dashboard')
   const [alunos, professores] = await Promise.all([
-    sql`SELECT COUNT(*)::int AS total FROM alunos WHERE ativo = true`,
-    sql`SELECT COUNT(*)::int AS total FROM professores WHERE ativo = true`,
+    sql`SELECT COUNT(*)::int AS total FROM alunos WHERE ativo = true AND congregacao_id = ${cid}`,
+    sql`SELECT COUNT(*)::int AS total FROM professores WHERE ativo = true AND congregacao_id = ${cid}`,
   ])
   return { totalAlunos: alunos[0].total, totalProfessores: professores[0].total }
 }
 
 export async function buscarTurmasComProfessores() {
+  const { cid } = await exigirModulo('dashboard')
   const rows = await sql`
     SELECT
       t.id, t.nome, t.cor,
@@ -20,7 +23,7 @@ export async function buscarTurmasComProfessores() {
     LEFT JOIN professor_turmas pt ON pt.turma_id = t.id
     LEFT JOIN professores p ON p.id = pt.professor_id AND p.ativo = true
     LEFT JOIN alunos a ON a.turma_id = t.id AND a.ativo = true
-    WHERE t.ativa = true
+    WHERE t.ativa = true AND t.congregacao_id = ${cid}
     GROUP BY t.id
   `
   return rows.map(r => ({
@@ -31,6 +34,7 @@ export async function buscarTurmasComProfessores() {
 }
 
 export async function buscarUltimasChamadas(limit: number) {
+  const { cid } = await exigirModulo('dashboard')
   const rows = await sql`
     SELECT c.id, c.data, c.created_at, t.nome AS turma_nome,
       COUNT(p.aluno_id) FILTER (WHERE p.presente = true)::int AS presentes,
@@ -38,6 +42,7 @@ export async function buscarUltimasChamadas(limit: number) {
     FROM chamadas c
     LEFT JOIN turmas t ON t.id = c.turma_id
     LEFT JOIN presencas p ON p.chamada_id = c.id
+    WHERE c.congregacao_id = ${cid}
     GROUP BY c.id, t.nome
     ORDER BY c.created_at DESC
     LIMIT ${limit}
@@ -49,13 +54,14 @@ export async function buscarUltimasChamadas(limit: number) {
 }
 
 export async function buscarUltimosVisitantes(limit: number) {
+  const { cid } = await exigirModulo('dashboard')
   const rows = await sql`
     SELECT hv.id, hv.data, hv.created_at, hv.presente,
       v.nome AS visitante_nome, t.nome AS turma_nome
     FROM historico_visitantes hv
     LEFT JOIN visitantes v ON v.id = hv.visitante_id
     LEFT JOIN turmas t ON t.id = hv.turma_id
-    WHERE hv.presente = true
+    WHERE hv.presente = true AND hv.congregacao_id = ${cid}
     ORDER BY hv.created_at DESC
     LIMIT ${limit}
   `
@@ -66,6 +72,7 @@ export async function buscarUltimosVisitantes(limit: number) {
 }
 
 export async function buscarDadosPeriodo(ano: number) {
+  const { cid } = await exigirModulo('dashboard')
   const [chamadas, alunos, turmas] = await Promise.all([
     sql`
       SELECT c.id, c.data, c.turma_id,
@@ -73,16 +80,16 @@ export async function buscarDadosPeriodo(ano: number) {
           FILTER (WHERE p.aluno_id IS NOT NULL) AS presencas
       FROM chamadas c
       LEFT JOIN presencas p ON p.chamada_id = c.id
-      WHERE c.ano = ${ano}
+      WHERE c.ano = ${ano} AND c.congregacao_id = ${cid}
       GROUP BY c.id
     `,
     sql`
       SELECT a.id, a.nome, a.turma_id, t.nome AS turma_nome, a.responsavel, a.cargo
       FROM alunos a
       LEFT JOIN turmas t ON t.id = a.turma_id
-      WHERE a.ativo = true
+      WHERE a.ativo = true AND a.congregacao_id = ${cid}
     `,
-    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true`,
+    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true AND congregacao_id = ${cid}`,
   ])
 
   return {
@@ -99,18 +106,19 @@ export async function buscarDadosPeriodo(ano: number) {
 }
 
 export async function buscarAniversariantes() {
+  const { cid } = await exigirModulo('dashboard')
   const [alunos, professores] = await Promise.all([
     sql`
       SELECT a.id, a.nome, a.data_nascimento, a.responsavel,
         t.nome AS turma_nome
       FROM alunos a
       LEFT JOIN turmas t ON t.id = a.turma_id
-      WHERE a.ativo = true AND a.data_nascimento IS NOT NULL
+      WHERE a.ativo = true AND a.data_nascimento IS NOT NULL AND a.congregacao_id = ${cid}
     `,
     sql`
       SELECT p.id, p.nome, p.data_nascimento
       FROM professores p
-      WHERE p.ativo = true AND p.data_nascimento IS NOT NULL
+      WHERE p.ativo = true AND p.data_nascimento IS NOT NULL AND p.congregacao_id = ${cid}
         AND NOT EXISTS (SELECT 1 FROM alunos a WHERE a.responsavel = 'professor:' || p.id::text AND a.ativo = true)
     `,
   ])

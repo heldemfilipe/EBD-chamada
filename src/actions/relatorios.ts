@@ -1,13 +1,16 @@
 "use server"
 
 import sql from '@/lib/db'
+import { exigirModulo, filtrarChamadasDaCongregacao } from '@/lib/sessao'
 
 export async function buscarTurmasDisponiveis() {
-  const rows = await sql`SELECT id, nome FROM turmas WHERE ativa = true ORDER BY nome`
+  const { cid } = await exigirModulo(['relatorios', 'usuarios'])
+  const rows = await sql`SELECT id, nome FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`
   return rows.map(r => ({ id: r.id, nome: r.nome }))
 }
 
 export async function buscarChamadasPorAno(ano: number, turmaFiltro?: string) {
+  const { cid } = await exigirModulo('relatorios')
   const rows = turmaFiltro
     ? await sql`
         SELECT c.id, c.data, c.turma_id, c.oferta,
@@ -19,7 +22,7 @@ export async function buscarChamadasPorAno(ano: number, turmaFiltro?: string) {
         FROM chamadas c
         LEFT JOIN presencas p ON p.chamada_id = c.id
         LEFT JOIN historico_visitantes hv ON hv.chamada_id = c.id AND hv.presente = true
-        WHERE c.ano = ${ano} AND c.turma_id = ${turmaFiltro}
+        WHERE c.ano = ${ano} AND c.turma_id = ${turmaFiltro} AND c.congregacao_id = ${cid}
         GROUP BY c.id ORDER BY c.data
       `
     : await sql`
@@ -32,7 +35,7 @@ export async function buscarChamadasPorAno(ano: number, turmaFiltro?: string) {
         FROM chamadas c
         LEFT JOIN presencas p ON p.chamada_id = c.id
         LEFT JOIN historico_visitantes hv ON hv.chamada_id = c.id AND hv.presente = true
-        WHERE c.ano = ${ano}
+        WHERE c.ano = ${ano} AND c.congregacao_id = ${cid}
         GROUP BY c.id ORDER BY c.data
       `
 
@@ -44,11 +47,12 @@ export async function buscarChamadasPorAno(ano: number, turmaFiltro?: string) {
 }
 
 export async function buscarDadosPorSala(ano: number) {
+  const { cid } = await exigirModulo('relatorios')
   const [turmas, alunosCount, chamadas] = await Promise.all([
-    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true`,
+    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true AND congregacao_id = ${cid}`,
     sql`
       SELECT turma_id, COUNT(*)::int AS total
-      FROM alunos WHERE ativo = true
+      FROM alunos WHERE ativo = true AND congregacao_id = ${cid}
       GROUP BY turma_id
     `,
     sql`
@@ -61,7 +65,7 @@ export async function buscarDadosPorSala(ano: number) {
       FROM chamadas c
       LEFT JOIN presencas p ON p.chamada_id = c.id
       LEFT JOIN historico_visitantes hv ON hv.chamada_id = c.id AND hv.presente = true
-      WHERE c.ano = ${ano}
+      WHERE c.ano = ${ano} AND c.congregacao_id = ${cid}
       GROUP BY c.id
     `,
   ])
@@ -80,10 +84,11 @@ export async function buscarDadosPorSala(ano: number) {
 }
 
 export async function buscarTopAlunos(ano: number, turmaFiltro?: string) {
+  const { cid } = await exigirModulo('relatorios')
   // Buscar chamadas do ano/turma
   const chamadas = turmaFiltro
-    ? await sql`SELECT id FROM chamadas WHERE ano = ${ano} AND turma_id = ${turmaFiltro}`
-    : await sql`SELECT id FROM chamadas WHERE ano = ${ano}`
+    ? await sql`SELECT id FROM chamadas WHERE ano = ${ano} AND turma_id = ${turmaFiltro} AND congregacao_id = ${cid}`
+    : await sql`SELECT id FROM chamadas WHERE ano = ${ano} AND congregacao_id = ${cid}`
 
   if (chamadas.length === 0) return { ranking: [] }
 
@@ -101,8 +106,8 @@ export async function buscarTopAlunos(ano: number, turmaFiltro?: string) {
   if (alunoIds.length === 0) return { ranking: [] }
 
   const alunosQuery = turmaFiltro
-    ? await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.turma_id = ${turmaFiltro}`
-    : await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true`
+    ? await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.turma_id = ${turmaFiltro} AND a.congregacao_id = ${cid}`
+    : await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.congregacao_id = ${cid}`
 
   const alunosMap = new Map(alunosQuery.map(a => [a.id, { nome: a.nome, turma_nome: a.turma_nome }]))
 
@@ -124,13 +129,14 @@ export async function buscarTopAlunos(ano: number, turmaFiltro?: string) {
 }
 
 export async function buscarDesempenhoProfessores(ano: number) {
+  const { cid } = await exigirModulo('relatorios')
   const professores = await sql`
     SELECT p.id, p.nome,
       json_agg(json_build_object('turma_id', pt.turma_id, 'turma_nome', t.nome)) FILTER (WHERE pt.turma_id IS NOT NULL) AS turmas
     FROM professores p
     LEFT JOIN professor_turmas pt ON pt.professor_id = p.id
     LEFT JOIN turmas t ON t.id = pt.turma_id
-    WHERE p.ativo = true
+    WHERE p.ativo = true AND p.congregacao_id = ${cid}
     GROUP BY p.id
   `
 
@@ -155,9 +161,10 @@ export async function buscarDesempenhoProfessores(ano: number) {
 }
 
 export async function buscarVisitantesRelatorio(ano: number, turmaFiltro?: string) {
+  const { cid } = await exigirModulo('relatorios')
   const chamadas = turmaFiltro
-    ? await sql`SELECT id, data FROM chamadas WHERE ano = ${ano} AND turma_id = ${turmaFiltro}`
-    : await sql`SELECT id, data FROM chamadas WHERE ano = ${ano}`
+    ? await sql`SELECT id, data FROM chamadas WHERE ano = ${ano} AND turma_id = ${turmaFiltro} AND congregacao_id = ${cid}`
+    : await sql`SELECT id, data FROM chamadas WHERE ano = ${ano} AND congregacao_id = ${cid}`
 
   if (chamadas.length === 0) return { visitantes: [] }
   const chamadaIds = chamadas.map(c => c.id)
@@ -181,9 +188,10 @@ export async function buscarVisitantesRelatorio(ano: number, turmaFiltro?: strin
 }
 
 export async function buscarAlunosPorTurma(turmaId: string, ano: number) {
+  const { cid } = await exigirModulo('relatorios')
   const [alunos, chamadas] = await Promise.all([
-    sql`SELECT id, nome, cargo FROM alunos WHERE turma_id = ${turmaId} AND ativo = true ORDER BY nome`,
-    sql`SELECT id, data FROM chamadas WHERE turma_id = ${turmaId} AND ano = ${ano}`,
+    sql`SELECT id, nome, cargo FROM alunos WHERE turma_id = ${turmaId} AND ativo = true AND congregacao_id = ${cid} ORDER BY nome`,
+    sql`SELECT id, data FROM chamadas WHERE turma_id = ${turmaId} AND ano = ${ano} AND congregacao_id = ${cid}`,
   ])
 
   let presencasMap: Record<string, { total: number; presentes: number; biblias: number }> = {}
@@ -207,7 +215,9 @@ export async function buscarAlunosPorTurma(turmaId: string, ano: number) {
   }
 }
 
-export async function buscarRankingAlunos(chamadaIds: string[], turmaFiltro?: string) {
+export async function buscarRankingAlunos(chamadaIdsParam: string[], turmaFiltro?: string) {
+  const { cid } = await exigirModulo('relatorios')
+  const chamadaIds = await filtrarChamadasDaCongregacao(chamadaIdsParam, cid)
   if (chamadaIds.length === 0) return []
 
   const presencas = await sql`
@@ -222,8 +232,8 @@ export async function buscarRankingAlunos(chamadaIds: string[], turmaFiltro?: st
   if (alunoIds.length === 0) return []
 
   const alunos = turmaFiltro
-    ? await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.turma_id = ${turmaFiltro}`
-    : await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true`
+    ? await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.turma_id = ${turmaFiltro} AND a.congregacao_id = ${cid}`
+    : await sql`SELECT a.id, a.nome, t.nome AS turma_nome FROM alunos a LEFT JOIN turmas t ON t.id = a.turma_id WHERE a.id = ANY(${alunoIds}) AND a.ativo = true AND a.congregacao_id = ${cid}`
 
   const alunosMap = new Map(alunos.map(a => [a.id, { nome: a.nome, turma_nome: a.turma_nome }]))
 
@@ -236,6 +246,7 @@ export async function buscarRankingAlunos(chamadaIds: string[], turmaFiltro?: st
 }
 
 export async function buscarProfessoresRelatorio(ano: number) {
+  const { cid } = await exigirModulo('relatorios')
   const [professores, profAlunos, chamadas] = await Promise.all([
     sql`
       SELECT p.id, p.nome,
@@ -243,11 +254,11 @@ export async function buscarProfessoresRelatorio(ano: number) {
       FROM professores p
       LEFT JOIN professor_turmas pt ON pt.professor_id = p.id
       LEFT JOIN turmas t ON t.id = pt.turma_id
-      WHERE p.ativo = true
+      WHERE p.ativo = true AND p.congregacao_id = ${cid}
       GROUP BY p.id
     `,
-    sql`SELECT id, responsavel, turma_id FROM alunos WHERE responsavel LIKE 'professor:%' AND ativo = true`,
-    sql`SELECT id, data, turma_id FROM chamadas WHERE ano = ${ano}`,
+    sql`SELECT id, responsavel, turma_id FROM alunos WHERE responsavel LIKE 'professor:%' AND ativo = true AND congregacao_id = ${cid}`,
+    sql`SELECT id, data, turma_id FROM chamadas WHERE ano = ${ano} AND congregacao_id = ${cid}`,
   ])
 
   const chamadaIds = chamadas.map(c => c.id)
@@ -263,7 +274,9 @@ export async function buscarProfessoresRelatorio(ano: number) {
   }
 }
 
-export async function buscarVisitantesPorChamadas(chamadaIds: string[]) {
+export async function buscarVisitantesPorChamadas(chamadaIdsParam: string[]) {
+  const { cid } = await exigirModulo('relatorios')
+  const chamadaIds = await filtrarChamadasDaCongregacao(chamadaIdsParam, cid)
   if (chamadaIds.length === 0) return []
   const rows = await sql`
     SELECT hv.visitante_id, hv.data, hv.presente, hv.trouxe_biblia, hv.trouxe_revista,
@@ -280,8 +293,10 @@ export async function buscarVisitantesPorChamadas(chamadaIds: string[]) {
   }))
 }
 
-export async function buscarAlunosTurmaDetalhado(turmaId: string, chamadaIds: string[]) {
-  const alunos = await sql`SELECT id, nome, cargo FROM alunos WHERE turma_id = ${turmaId} AND ativo = true ORDER BY nome`
+export async function buscarAlunosTurmaDetalhado(turmaId: string, chamadaIdsParam: string[]) {
+  const { cid } = await exigirModulo('relatorios')
+  const chamadaIds = await filtrarChamadasDaCongregacao(chamadaIdsParam, cid)
+  const alunos = await sql`SELECT id, nome, cargo FROM alunos WHERE turma_id = ${turmaId} AND ativo = true AND congregacao_id = ${cid} ORDER BY nome`
 
   const ppa: Record<string, { presentes: number; faltas: number; biblias: number; revistas: number }> = {}
   if (chamadaIds.length > 0) {

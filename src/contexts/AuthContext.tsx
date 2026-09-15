@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { logger } from '@/lib/logger'
-import { buscarPerfilUsuario } from '@/actions/auth'
+import { buscarMeuPerfil, type CongregacaoResumo } from '@/actions/auth'
+import { selecionarCongregacao } from '@/actions/congregacoes'
 import { toast } from '@/lib/toast'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -16,11 +17,19 @@ export interface Perfil {
 }
 
 export type NivelPermissao = 'ver' | 'editar'
+export type { CongregacaoResumo }
 
 interface AuthContextType {
   user: User | null
   perfil: Perfil | null
-  isAdmin: boolean
+  isAdmin: boolean              // admin geral OU admin da congregação
+  isAdminGeral: boolean         // admin sem congregação — gerencia todas
+  congregacao: CongregacaoResumo | null        // congregação do usuário (null = admin geral)
+  congregacaoAtiva: CongregacaoResumo | null   // congregação cujos dados estão sendo exibidos
+  congregacoes: CongregacaoResumo[]            // opções de troca (somente admin geral)
+  trocarCongregacao: (id: string) => Promise<void>
+  recarregarPerfil: () => Promise<void>
+  podeGerenciarUsuarios: boolean
   modulosPermitidos: string[]   // lista de módulos acessíveis; admin = todos
   permissoesModulos: Record<string, NivelPermissao>  // modulo -> nivel
   turmasPermitidas: string[]    // lista de turma_ids; admin = ['*']
@@ -40,6 +49,13 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   perfil: null,
   isAdmin: false,
+  isAdminGeral: false,
+  congregacao: null,
+  congregacaoAtiva: null,
+  congregacoes: [],
+  trocarCongregacao: async () => {},
+  recarregarPerfil: async () => {},
+  podeGerenciarUsuarios: false,
   modulosPermitidos: [],
   permissoesModulos: {},
   turmasPermitidas: [],
@@ -58,13 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [turmasPermitidas, setTurmasPermitidas] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [setupPendente, setSetupPendente] = useState(false)
+  const [isAdminGeral, setIsAdminGeral] = useState(false)
+  const [congregacao, setCongregacao] = useState<CongregacaoResumo | null>(null)
+  const [congregacaoAtiva, setCongregacaoAtiva] = useState<CongregacaoResumo | null>(null)
+  const [congregacoes, setCongregacoes] = useState<CongregacaoResumo[]>([])
 
   async function loadPerfil(userId: string) {
     logger.info('Carregando perfil do usuário', { module: 'auth', userId })
 
-    let perfilData: Awaited<ReturnType<typeof buscarPerfilUsuario>>
+    let perfilData: Awaited<ReturnType<typeof buscarMeuPerfil>>
     try {
-      perfilData = await buscarPerfilUsuario(userId)
+      perfilData = await buscarMeuPerfil()
     } catch (err: any) {
       const msg = (err?.message ?? '') as string
       const tabelaNaoExiste = msg.includes('does not exist') || msg.includes('relation')
@@ -92,12 +112,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // ─ Caso 1: Usuário sem perfil cadastrado
+    // ─ Caso 1: Usuário sem perfil, perfil inativo ou congregação desativada
     if (!perfilData) {
-      logger.warn('Usuário autenticado sem perfil na tabela "perfis" — fazendo logout', {
+      logger.warn('Usuário sem perfil ativo (ou congregação desativada) — fazendo logout', {
         module: 'auth',
         userId,
       })
+      toast('Seu acesso está desativado. Procure o administrador.', 'error')
       await supabase.auth.signOut()
       resetState()
       return
@@ -118,6 +139,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ─ Caso 3: Perfil OK → aplicar permissões
     setSetupPendente(false)
     setPerfil({ id: perfilData.id, nome: perfilData.nome, role: perfilData.role, ativo: perfilData.ativo })
+    setIsAdminGeral(perfilData.adminGeral)
+    setCongregacao(perfilData.congregacao)
+    setCongregacaoAtiva(perfilData.congregacaoAtiva)
+    setCongregacoes(perfilData.congregacoes)
 
     if (perfilData.role === 'admin') {
       setModulosPermitidos(TODOS_MODULOS)
@@ -156,6 +181,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissoesModulos({})
     setTurmasPermitidas([])
     setSetupPendente(false)
+    setIsAdminGeral(false)
+    setCongregacao(null)
+    setCongregacaoAtiva(null)
+    setCongregacoes([])
   }
 
   useEffect(() => {
@@ -266,7 +295,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetState()
   }
 
+  const recarregarPerfil = useCallback(async () => {
+    if (user) await loadPerfil(user.id)
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const trocarCongregacao = useCallback(async (id: string) => {
+    const res = await selecionarCongregacao(id)
+    if (!res.success) {
+      toast(res.error ?? 'Não foi possível trocar de congregação.', 'error')
+      return
+    }
+    if (user) await loadPerfil(user.id)
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const isAdmin = perfil?.role === 'admin'
+  const podeGerenciarUsuarios = isAdmin || permissoesModulos['usuarios'] !== undefined
 
   const podeEditar = useCallback((modulo: string) => {
     if (perfil?.role === 'admin') return true
@@ -278,6 +321,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       perfil,
       isAdmin,
+      isAdminGeral,
+      congregacao,
+      congregacaoAtiva,
+      congregacoes,
+      trocarCongregacao,
+      recarregarPerfil,
+      podeGerenciarUsuarios,
       modulosPermitidos,
       permissoesModulos,
       turmasPermitidas,

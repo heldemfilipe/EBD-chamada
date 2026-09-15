@@ -118,6 +118,8 @@ supabase/setup_auth.sql    # Tabelas de autenticação (perfis, permissões)
 
 > Alternativamente, use `supabase/setup_completo.sql` para executar tudo de uma vez.
 
+Em seguida, execute as migrations de `supabase/migrations/` em ordem numérica. A **`009_congregacoes.sql`** é obrigatória para a versão multi-congregação: cria as congregações, vincula todos os dados existentes a uma congregação padrão ("Sede"), cria os perfis de acesso e remove o acesso direto via chave pública (PostgREST).
+
 **O `schema.sql` cria:**
 - Tabelas: `turmas`, `professores`, `professor_turmas`, `alunos`, `chamadas`, `presencas`, `visitantes`, `historico_visitantes`, `escalas`
 - Views de agregação, triggers de `updated_at`, índices e RLS
@@ -190,12 +192,21 @@ Acesse [http://localhost:3000](http://localhost:3000) — você será redirecion
 
 ## Autenticação e Permissões
 
+### Congregações
+
+Cada congregação é um ambiente isolado: turmas, alunos, professores, visitantes, chamadas, escalas e notificações pertencem a uma única congregação. Usuários de uma congregação não enxergam dados, usuários nem a existência de outras congregações.
+
 ### Papéis
 
 | Papel | Acesso |
 |---|---|
-| **Admin** | Todos os módulos + todas as turmas + aba Usuários |
-| **Colaborador** | Apenas módulos e turmas configurados pelo admin |
+| **Admin geral** | Admin sem congregação. Cadastra congregações, alterna entre elas pela sidebar e gerencia usuários de todas |
+| **Admin da congregação** | Todos os módulos e turmas da própria congregação + usuários dela |
+| **Colaborador** | Apenas módulos (ver/editar) e turmas definidos. Com o módulo **Usuários**, cria usuários vinculados à própria congregação, concedendo no máximo o acesso que ele mesmo possui |
+
+### Perfis de acesso
+
+Modelos de permissão reutilizáveis (ex.: "Somente Escala"). Podem ser **globais** (criados pelo admin geral, disponíveis para todas as congregações) ou **da congregação**. Ao vincular um perfil a um usuário, alterações no perfil valem para todos que o usam; também é possível definir permissões personalizadas por usuário.
 
 ### Proteção de rotas
 
@@ -208,8 +219,10 @@ O middleware (`src/middleware.ts`) protege todas as rotas no **edge layer**:
 
 Na aba **Usuários** (admin), cada colaborador pode ter:
 
-- Acesso por módulo (Dashboard, Chamada, Alunos, Professores, Turmas, Escala, Relatórios)
+- Acesso por módulo (Dashboard, Chamada, Alunos, Professores, Turmas, Escala, Relatórios, Usuários), com nível Visualizar ou Editar
 - Acesso restrito a turmas específicas (aplicado à página Chamada)
+
+Todas as Server Actions validam sessão, módulo, nível e congregação no servidor (`src/lib/sessao.ts`), então o isolamento não depende da interface.
 
 ---
 
@@ -362,17 +375,12 @@ Pontos instrumentados: `middleware`, `AuthContext`, `api/usuarios`.
 
 Todas as tabelas possuem **Row Level Security** habilitado no Supabase:
 
-| Tabela | Leitura | Escrita |
-|---|---|---|
-| `turmas`, `alunos`, `chamadas`, etc. | `authenticated` | `authenticated` |
-| `perfis`, `permissoes_modulos`, `permissoes_turmas` | `authenticated` | `service_role` apenas |
+Após a migration `009_congregacoes.sql`, todas as tabelas têm RLS habilitado **sem políticas** para `anon`/`authenticated`: nada é acessível diretamente pela chave pública. O aplicativo acessa os dados somente pelo servidor (connection string direta e `service_role`).
 
-As queries SQL do aplicativo são executadas via **connection string direta** (server-side), portanto passam pelo RLS do PostgreSQL normalmente, com as permissões do role configurado na connection string.
-
-As permissões granulares por módulo e turma são verificadas:
-- No **cliente** via `AuthContext` (renderização condicional de menus e conteúdo)
-- No **edge** via `middleware.ts` (proteção de rota antes de qualquer renderização)
-- Na **API** via verificação de `role` antes de qualquer mutação
+As permissões são verificadas:
+- No **servidor** via `src/lib/sessao.ts` em toda Server Action e rota de API (sessão, módulo, nível ver/editar, turma e congregação)
+- No **cliente** via `AuthContext` + `DashboardLayout` (menus e bloqueio de rotas sem acesso)
+- No **edge** via `middleware.ts` (exige login)
 
 ---
 

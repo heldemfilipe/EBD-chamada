@@ -1,6 +1,19 @@
 "use server"
 
 import sql from '@/lib/db'
+import {
+  exigirModulo, podeAcessarTurma, AcessoNegadoError,
+  assertTurmasDaCongregacao, assertAlunosDaCongregacao, assertVisitantesDaCongregacao,
+  type Sessao,
+} from '@/lib/sessao'
+
+/** Valida que a turma é da congregação ativa e está liberada para o usuário. */
+async function assertTurmaChamada(s: Sessao, cid: string, turmaId: string) {
+  await assertTurmasDaCongregacao([turmaId], cid)
+  if (!podeAcessarTurma(s, turmaId)) {
+    throw new AcessoNegadoError('Você não tem acesso à chamada desta turma.')
+  }
+}
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +78,7 @@ interface VisitanteHistDb {
 // ─── Chamada — pagina principal ───────────────────────────────────────────────
 
 export async function buscarTurmasComContagem(): Promise<TurmaResumo[]> {
+  const { cid } = await exigirModulo('chamada')
   const rows = await sql`
     SELECT
       t.id,
@@ -75,7 +89,7 @@ export async function buscarTurmasComContagem(): Promise<TurmaResumo[]> {
       COUNT(a.id)::int AS total_alunos
     FROM turmas t
     LEFT JOIN alunos a ON a.turma_id = t.id AND a.ativo = true
-    WHERE t.ativa = true
+    WHERE t.ativa = true AND t.congregacao_id = ${cid}
     GROUP BY t.id
     ORDER BY t.nome
   `
@@ -92,6 +106,7 @@ export async function buscarTurmasComContagem(): Promise<TurmaResumo[]> {
 export async function buscarResumoDia(dataISO: string): Promise<{
   porTurma: Record<string, ResumoDiaTurma>
 }> {
+  const { cid } = await exigirModulo('chamada')
   // Chamadas + presenças em uma unica query
   const chamadas = await sql`
     SELECT
@@ -103,7 +118,7 @@ export async function buscarResumoDia(dataISO: string): Promise<{
       COUNT(p.aluno_id) FILTER (WHERE p.trouxe_revista = true)::int AS revistas
     FROM chamadas c
     LEFT JOIN presencas p ON p.chamada_id = c.id
-    WHERE c.data = ${dataISO}
+    WHERE c.data = ${dataISO} AND c.congregacao_id = ${cid}
     GROUP BY c.id, c.turma_id, c.oferta
   `
 
@@ -115,7 +130,7 @@ export async function buscarResumoDia(dataISO: string): Promise<{
       COUNT(*) FILTER (WHERE trouxe_biblia = true)::int AS biblias,
       COUNT(*) FILTER (WHERE trouxe_revista = true)::int AS revistas
     FROM historico_visitantes
-    WHERE data = ${dataISO} AND presente = true
+    WHERE data = ${dataISO} AND presente = true AND congregacao_id = ${cid}
     GROUP BY turma_id
   `
 
@@ -153,6 +168,8 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
   if (!uuidRegex.test(turmaId)) {
     throw new Error(`turmaId inválido: ${turmaId}`)
   }
+  const { s, cid } = await exigirModulo('chamada')
+  await assertTurmaChamada(s, cid, turmaId)
 
   let turmaRows, alunosRows, escalaRows, chamadaRows, visitanteRows
   try {
@@ -167,7 +184,7 @@ export async function buscarDadosChamadaTurma(turmaId: string, dataISO: string, 
     sql`SELECT e.professor_id, e.turma_id, t.nome AS turma_nome
         FROM escalas e
         LEFT JOIN turmas t ON t.id = e.turma_id
-        WHERE e.data = ${dataISO}`,
+        WHERE e.data = ${dataISO} AND e.congregacao_id = ${cid}`,
 
     sql`SELECT c.id, c.oferta, c.anotacoes, c.updated_at,
           json_agg(json_build_object(
@@ -278,6 +295,10 @@ export async function salvarChamada(params: {
 }): Promise<{ success: boolean; error?: string; conflito?: boolean }> {
   try {
     const { turmaId, data, oferta, anotacoes, presencas, visitantes, expectedUpdatedAt } = params
+    const { s, cid } = await exigirModulo('chamada', 'editar')
+    await assertTurmaChamada(s, cid, turmaId)
+    await assertAlunosDaCongregacao(presencas.map(p => p.aluno_id), cid)
+    await assertVisitantesDaCongregacao(visitantes.map(v => v.id), cid)
 
     // 1. Upsert chamada (ano e trimestre são colunas geradas — não inserir)
     // Se expectedUpdatedAt for informado e a chamada já existir, só atualiza se ninguém mais
@@ -340,8 +361,8 @@ export async function salvarChamada(params: {
       const novosIds = new Map<number, string>()
       if (novos.length > 0) {
         const inserted = await sql`
-          INSERT INTO visitantes (nome, telefone, observacao)
-          SELECT * FROM unnest(
+          INSERT INTO visitantes (nome, telefone, observacao, congregacao_id)
+          SELECT *, ${cid}::uuid FROM unnest(
             ${sql.array(novos.map(v => v.nome))}::text[],
             ${sql.array(novos.map(v => v.telefone ?? ''))}::text[],
             ${sql.array(novos.map(v => v.observacao ?? ''))}::text[]
@@ -355,7 +376,7 @@ export async function salvarChamada(params: {
       for (const v of existentes) {
         await sql`
           UPDATE visitantes SET nome = ${v.nome}, telefone = ${v.telefone}, observacao = ${v.observacao}
-          WHERE id = ${v.id!}
+          WHERE id = ${v.id!} AND congregacao_id = ${cid}
         `
       }
 
@@ -393,6 +414,9 @@ export async function salvarChamada(params: {
 
 export async function converterVisitanteEmAluno(visitanteId: string | null, nome: string, telefone: string | null, turmaId: string): Promise<{ success: boolean; alunoId?: string; error?: string; duplicado?: boolean }> {
   try {
+    const { s, cid } = await exigirModulo('chamada', 'editar')
+    await assertTurmaChamada(s, cid, turmaId)
+    await assertVisitantesDaCongregacao([visitanteId], cid)
     const [existente] = await sql`
       SELECT id FROM alunos
       WHERE turma_id = ${turmaId} AND ativo = true AND lower(trim(nome)) = lower(trim(${nome}))
@@ -403,15 +427,15 @@ export async function converterVisitanteEmAluno(visitanteId: string | null, nome
     }
 
     const [novoAluno] = await sql`
-      INSERT INTO alunos (nome, telefone, turma_id, ativo)
-      VALUES (${nome}, ${telefone}, ${turmaId}, true)
+      INSERT INTO alunos (nome, telefone, turma_id, ativo, congregacao_id)
+      VALUES (${nome}, ${telefone}, ${turmaId}, true, ${cid})
       RETURNING id
     `
 
     if (visitanteId) {
       await sql`
         UPDATE visitantes SET convertido_em_aluno = true, aluno_id = ${novoAluno.id}
-        WHERE id = ${visitanteId}
+        WHERE id = ${visitanteId} AND congregacao_id = ${cid}
       `
     }
 
@@ -428,7 +452,8 @@ export async function converterVisitanteEmAluno(visitanteId: string | null, nome
 
 export async function removerVisitante(visitanteId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`UPDATE visitantes SET ativo = false WHERE id = ${visitanteId}`
+    const { cid } = await exigirModulo('chamada', 'editar')
+    await sql`UPDATE visitantes SET ativo = false WHERE id = ${visitanteId} AND congregacao_id = ${cid}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message ?? 'Erro desconhecido' }

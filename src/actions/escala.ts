@@ -1,12 +1,19 @@
 "use server"
 
 import sql from '@/lib/db'
+import { exigirModulo, assertTurmasDaCongregacao, assertProfessoresDaCongregacao } from '@/lib/sessao'
 
 export async function buscarDadosEscala() {
-  const escalas        = await sql`SELECT id, data, turma_id, professor_id, trimestre, observacoes, titulo_aula FROM escalas ORDER BY data`
-  const professores    = await sql`SELECT id, nome FROM professores WHERE ativo = true ORDER BY nome`
-  const turmas         = await sql`SELECT id, nome, cor, sala FROM turmas WHERE ativa = true ORDER BY nome`
-  const professorTurmas = await sql`SELECT professor_id, turma_id FROM professor_turmas`
+  const { cid } = await exigirModulo('escala')
+  const escalas        = await sql`SELECT id, data, turma_id, professor_id, trimestre, observacoes, titulo_aula FROM escalas WHERE congregacao_id = ${cid} ORDER BY data`
+  const professores    = await sql`SELECT id, nome FROM professores WHERE ativo = true AND congregacao_id = ${cid} ORDER BY nome`
+  const turmas         = await sql`SELECT id, nome, cor, sala FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`
+  const professorTurmas = await sql`
+    SELECT pt.professor_id, pt.turma_id
+    FROM professor_turmas pt
+    JOIN turmas t ON t.id = pt.turma_id
+    WHERE t.congregacao_id = ${cid}
+  `
 
   return {
     escalas: escalas.map(e => ({
@@ -28,12 +35,15 @@ export async function salvarEscala(dados: {
   titulo_aula?: string | null
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const { cid } = await exigirModulo('escala', 'editar')
+    await assertTurmasDaCongregacao([dados.turma_id], cid)
+    await assertProfessoresDaCongregacao([dados.professor_id], cid)
     if (dados.id) {
       await sql`
         UPDATE escalas SET data = ${dados.data}, turma_id = ${dados.turma_id},
           professor_id = ${dados.professor_id}, observacoes = ${dados.observacoes ?? null},
           titulo_aula = ${dados.titulo_aula ?? null}
-        WHERE id = ${dados.id}
+        WHERE id = ${dados.id} AND congregacao_id = ${cid}
       `
       return { success: true, id: dados.id }
     } else {
@@ -51,7 +61,8 @@ export async function salvarEscala(dados: {
 
 export async function excluirEscala(id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`DELETE FROM escalas WHERE id = ${id}`
+    const { cid } = await exigirModulo('escala', 'editar')
+    await sql`DELETE FROM escalas WHERE id = ${id} AND congregacao_id = ${cid}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }

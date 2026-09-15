@@ -2,157 +2,188 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
 import { getLicaoTema } from '@/lib/constants'
+import { obterSessao } from '@/lib/sessao'
 
 // ─── POST /api/notificacoes/disparar ─────────────────────────────────────────
-// Pode ser chamado pelo Vercel Cron ou manualmente
-// Body opcional: { data?: 'YYYY-MM-DD', skip_auth?: true }
+// Manual (admin logado): dispara apenas para a congregação ativa do usuário.
+// Vercel Cron (Authorization: Bearer CRON_SECRET): dispara para todas as
+// congregações com notificações ativas.
+// Body opcional: { data?: 'YYYY-MM-DD' }
 
 export async function POST(req: NextRequest) {
   // Ler body uma única vez
   const reqBody = await req.json().catch(() => ({}))
 
-  // Verificar secret do cron (pula se chamado com flag skip_auth)
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && !reqBody.skip_auth) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-  }
-
   try {
     const db = createServiceClient() as any
+    const sessao = await obterSessao()
 
-    // 1. Carregar configuração
-    const { data: config } = await db
+    // ─ Disparo manual por um administrador
+    if (sessao) {
+      if (sessao.role !== 'admin' || !sessao.cid) {
+        return NextResponse.json({ error: 'Apenas administradores podem disparar notificações.' }, { status: 403 })
+      }
+      const { data: config } = await db
+        .from('notificacoes_config')
+        .select('*')
+        .eq('congregacao_id', sessao.cid)
+        .maybeSingle()
+      if (!config) {
+        return NextResponse.json({ error: 'Notificações não configuradas para esta congregação', enviados: 0, erros: 0 })
+      }
+      const resultado = await dispararCongregacao(db, config, reqBody.data)
+      return NextResponse.json(resultado)
+    }
+
+    // ─ Cron: exige o secret quando configurado
+    const cronSecret = process.env.CRON_SECRET
+    if (cronSecret) {
+      const auth = req.headers.get('authorization') ?? ''
+      if (auth !== `Bearer ${cronSecret}`) {
+        return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+      }
+    }
+
+    const { data: configs = [] } = await db
       .from('notificacoes_config')
       .select('*')
-      .single()
+      .eq('ativo', true)
+      .not('congregacao_id', 'is', null)
 
-    const provedor = config?.provedor ?? 'zapi'
-
-    if (provedor === 'meta') {
-      if (!config?.meta_access_token || !config?.meta_phone_number_id) {
-        return NextResponse.json({ error: 'Meta Cloud API não configurada', enviados: 0, erros: 0 })
-      }
-    } else if (provedor === 'baileys') {
-      if (!config?.baileys_url || !config?.baileys_instance) {
-        return NextResponse.json({ error: 'Baileys não configurado', enviados: 0, erros: 0 })
-      }
-    } else {
-      if (!config?.zapi_instance_id || !config?.zapi_token) {
-        return NextResponse.json({ error: 'Z-API não configurada', enviados: 0, erros: 0 })
-      }
+    const resultados = []
+    for (const config of configs ?? []) {
+      resultados.push({ congregacao_id: config.congregacao_id, ...(await dispararCongregacao(db, config, reqBody.data)) })
     }
 
-    // 2. Determinar data da aula
-    const dataAula: string = reqBody.data ?? proximaDataDiaAula(config.dia_aula ?? 0)
-
-    // 3. Buscar escalas do dia
-    const { data: escalas = [] } = await db
-      .from('escalas')
-      .select('turma_id, professor_id, turmas(nome), professores(nome, telefone)')
-      .eq('data', dataAula)
-
-    if (!escalas || escalas.length === 0) {
-      return NextResponse.json({ mensagem: 'Nenhuma escala para esta data', dataAula, enviados: 0, erros: 0 })
-    }
-
-    // 4. Carregar overrides da semana
-    const { data: overrides = [] } = await db
-      .from('notificacoes_semana')
-      .select('*')
-      .eq('data_aula', dataAula)
-
-    // 5. Calcular nº da aula e período
-    const dAula    = new Date(dataAula + 'T12:00:00')
-    const aulaNum  = calcularNumeroAula(dataAula)
-    const diaAula  = dAula.getDay()
-    const anoAula  = dAula.getFullYear()
-    const trimAula = Math.floor(dAula.getMonth() / 3) + 1
-    const template = config.template ?? TEMPLATE_PADRAO
-
-    const logs: any[]  = []
-    let enviados    = 0
-    let erros       = 0
-    let silenciados = 0
-
-    // 6. Enviar para cada professor
-    for (const e of escalas) {
-      const override = (overrides as any[]).find(
-        o => o.professor_id === e.professor_id && o.turma_id === e.turma_id
-      )
-
-      if (override?.silenciado) {
-        silenciados++
-        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-          numero_telefone: null, mensagem: null, status: 'silenciado', erro: null })
-        continue
-      }
-
-      const prof  = e.professores
-      const turma = e.turmas
-      const tema  = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum) ?? undefined
-      const tel   = prof?.telefone ? formatarTelefone(prof.telefone) : null
-
-      if (!tel) {
-        erros++
-        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-          numero_telefone: null, mensagem: null, status: 'sem_telefone',
-          erro: 'Professor sem telefone cadastrado' })
-        continue
-      }
-
-      const mensagem = formatarMensagem(
-        override?.mensagem_personalizada ?? template,
-        { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula, tema }
-      )
-
-      try {
-        let enviado = false
-        let erroMsg = ''
-
-        if (provedor === 'meta') {
-          const resultado = await enviarMeta(config, tel, mensagem, prof?.nome ?? '', aulaNum, dataAula, turma?.nome ?? '', tema)
-          enviado = resultado.ok
-          erroMsg = resultado.erro
-        } else if (provedor === 'baileys') {
-          const resultado = await enviarBaileys(config, tel, mensagem)
-          enviado = resultado.ok
-          erroMsg = resultado.erro
-        } else {
-          const resultado = await enviarZapi(config, tel, mensagem)
-          enviado = resultado.ok
-          erroMsg = resultado.erro
-        }
-
-        if (enviado) {
-          enviados++
-          logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-            numero_telefone: tel, mensagem, status: 'enviado', erro: null })
-        } else {
-          erros++
-          logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-            numero_telefone: tel, mensagem, status: 'erro', erro: erroMsg })
-        }
-      } catch (sendErr: any) {
-        erros++
-        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
-          numero_telefone: tel, mensagem, status: 'erro', erro: sendErr.message })
-      }
-
-      await new Promise(r => setTimeout(r, 500))
-    }
-
-    // 7. Gravar logs
-    if (logs.length > 0) {
-      await db.from('notificacoes_log').insert(logs)
-    }
-
-    return NextResponse.json({ dataAula, aulaNum, enviados, erros, silenciados, provedor })
+    return NextResponse.json({
+      congregacoes: resultados.length,
+      enviados: resultados.reduce((s, r: any) => s + (r.enviados ?? 0), 0),
+      erros: resultados.reduce((s, r: any) => s + (r.erros ?? 0), 0),
+      resultados,
+    })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
+}
+
+// ─── Disparo de uma congregação ───────────────────────────────────────────────
+async function dispararCongregacao(db: any, config: any, dataParam?: string) {
+  const cid = config.congregacao_id
+  const provedor = config?.provedor ?? 'zapi'
+
+  if (provedor === 'meta') {
+    if (!config?.meta_access_token || !config?.meta_phone_number_id) {
+      return { error: 'Meta Cloud API não configurada', enviados: 0, erros: 0 }
+    }
+  } else if (provedor === 'baileys') {
+    if (!config?.baileys_url || !config?.baileys_instance) {
+      return { error: 'Baileys não configurado', enviados: 0, erros: 0 }
+    }
+  } else {
+    if (!config?.zapi_instance_id || !config?.zapi_token) {
+      return { error: 'Z-API não configurada', enviados: 0, erros: 0 }
+    }
+  }
+
+  // 1. Determinar data da aula
+  const dataAula: string = dataParam ?? proximaDataDiaAula(config.dia_aula ?? 0)
+
+  // 2. Buscar escalas do dia (somente da congregação)
+  const { data: escalas = [] } = await db
+    .from('escalas')
+    .select('turma_id, professor_id, turmas(nome), professores(nome, telefone)')
+    .eq('data', dataAula)
+    .eq('congregacao_id', cid)
+
+  if (!escalas || escalas.length === 0) {
+    return { mensagem: 'Nenhuma escala para esta data', dataAula, enviados: 0, erros: 0 }
+  }
+
+  // 3. Carregar overrides da semana
+  const { data: overrides = [] } = await db
+    .from('notificacoes_semana')
+    .select('*')
+    .eq('data_aula', dataAula)
+    .eq('congregacao_id', cid)
+
+  // 4. Calcular nº da aula e período
+  const dAula    = new Date(dataAula + 'T12:00:00')
+  const aulaNum  = calcularNumeroAula(dataAula)
+  const diaAula  = dAula.getDay()
+  const anoAula  = dAula.getFullYear()
+  const trimAula = Math.floor(dAula.getMonth() / 3) + 1
+  const template = config.template ?? TEMPLATE_PADRAO
+
+  const logs: any[]  = []
+  let enviados    = 0
+  let erros       = 0
+  let silenciados = 0
+
+  // 5. Enviar para cada professor
+  for (const e of escalas) {
+    const override = (overrides as any[]).find(
+      o => o.professor_id === e.professor_id && o.turma_id === e.turma_id
+    )
+
+    if (override?.silenciado) {
+      silenciados++
+      logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+        numero_telefone: null, mensagem: null, status: 'silenciado', erro: null })
+      continue
+    }
+
+    const prof  = e.professores
+    const turma = e.turmas
+    const tema  = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum) ?? undefined
+    const tel   = prof?.telefone ? formatarTelefone(prof.telefone) : null
+
+    if (!tel) {
+      erros++
+      logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+        numero_telefone: null, mensagem: null, status: 'sem_telefone',
+        erro: 'Professor sem telefone cadastrado' })
+      continue
+    }
+
+    const mensagem = formatarMensagem(
+      override?.mensagem_personalizada ?? template,
+      { professor: prof?.nome ?? 'Professor', aula: aulaNum, sala: turma?.nome ?? '', data: dataAula, diaAula, tema }
+    )
+
+    try {
+      let resultado: { ok: boolean; erro: string }
+      if (provedor === 'meta') {
+        resultado = await enviarMeta(config, tel, mensagem, prof?.nome ?? '', aulaNum, dataAula, turma?.nome ?? '', tema)
+      } else if (provedor === 'baileys') {
+        resultado = await enviarBaileys(config, tel, mensagem)
+      } else {
+        resultado = await enviarZapi(config, tel, mensagem)
+      }
+
+      if (resultado.ok) {
+        enviados++
+        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: tel, mensagem, status: 'enviado', erro: null })
+      } else {
+        erros++
+        logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+          numero_telefone: tel, mensagem, status: 'erro', erro: resultado.erro })
+      }
+    } catch (sendErr: any) {
+      erros++
+      logs.push({ professor_id: e.professor_id, turma_id: e.turma_id, data_aula: dataAula,
+        numero_telefone: tel, mensagem, status: 'erro', erro: sendErr.message })
+    }
+
+    await new Promise(r => setTimeout(r, 500))
+  }
+
+  // 6. Gravar logs (congregacao_id é preenchido pelo trigger a partir da turma)
+  if (logs.length > 0) {
+    await db.from('notificacoes_log').insert(logs)
+  }
+
+  return { dataAula, aulaNum, enviados, erros, silenciados, provedor }
 }
 
 // ─── Envio via Meta Cloud API ─────────────────────────────────────────────────

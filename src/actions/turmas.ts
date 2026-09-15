@@ -1,16 +1,18 @@
 "use server"
 
 import sql from '@/lib/db'
+import { exigirModulo, assertTurmasDaCongregacao, assertAlunosDaCongregacao } from '@/lib/sessao'
 
 export async function buscarTurmasDetalhadas() {
+  const { cid } = await exigirModulo('turmas')
   const [turmas, alunosCount, professores] = await Promise.all([
-    sql`SELECT id, nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor FROM turmas WHERE ativa = true ORDER BY nome`,
-    sql`SELECT turma_id, COUNT(*)::int AS total FROM alunos WHERE ativo = true GROUP BY turma_id`,
+    sql`SELECT id, nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`,
+    sql`SELECT turma_id, COUNT(*)::int AS total FROM alunos WHERE ativo = true AND congregacao_id = ${cid} GROUP BY turma_id`,
     sql`
       SELECT p.id, p.nome, json_agg(pt.turma_id) FILTER (WHERE pt.turma_id IS NOT NULL) AS turma_ids
       FROM professores p
       LEFT JOIN professor_turmas pt ON pt.professor_id = p.id
-      WHERE p.ativo = true
+      WHERE p.ativo = true AND p.congregacao_id = ${cid}
       GROUP BY p.id
     `,
   ])
@@ -41,21 +43,22 @@ export async function salvarTurma(dados: {
   cor?: string | null
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const { cid } = await exigirModulo('turmas', 'editar')
     if (dados.id) {
       await sql`
         UPDATE turmas SET nome = ${dados.nome}, descricao = ${dados.descricao ?? null},
           faixa_etaria = ${dados.faixa_etaria ?? null},
           idade_min = ${dados.idade_min ?? null}, idade_max = ${dados.idade_max ?? null},
           sala = ${dados.sala ?? null}, cor = ${dados.cor ?? null}
-        WHERE id = ${dados.id}
+        WHERE id = ${dados.id} AND congregacao_id = ${cid}
       `
       return { success: true, id: dados.id }
     } else {
       const [row] = await sql`
-        INSERT INTO turmas (nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor, ativa)
+        INSERT INTO turmas (nome, descricao, faixa_etaria, idade_min, idade_max, sala, cor, ativa, congregacao_id)
         VALUES (${dados.nome}, ${dados.descricao ?? null}, ${dados.faixa_etaria ?? null},
           ${dados.idade_min ?? null}, ${dados.idade_max ?? null},
-          ${dados.sala ?? null}, ${dados.cor ?? null}, true)
+          ${dados.sala ?? null}, ${dados.cor ?? null}, true, ${cid})
         RETURNING id
       `
       return { success: true, id: row.id }
@@ -67,7 +70,8 @@ export async function salvarTurma(dados: {
 
 export async function excluirTurma(id: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`DELETE FROM turmas WHERE id = ${id}`
+    const { cid } = await exigirModulo('turmas', 'editar')
+    await sql`DELETE FROM turmas WHERE id = ${id} AND congregacao_id = ${cid}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }
@@ -75,9 +79,10 @@ export async function excluirTurma(id: string): Promise<{ success: boolean; erro
 }
 
 export async function buscarDetalhesTurma(turmaId: string, anoAtual: number) {
+  const { cid } = await exigirModulo('turmas')
   const [alunos, chamadas] = await Promise.all([
-    sql`SELECT id, nome, data_nascimento FROM alunos WHERE turma_id = ${turmaId} AND ativo = true ORDER BY nome`,
-    sql`SELECT id, data FROM chamadas WHERE turma_id = ${turmaId} AND ano = ${anoAtual}`,
+    sql`SELECT id, nome, data_nascimento FROM alunos WHERE turma_id = ${turmaId} AND ativo = true AND congregacao_id = ${cid} ORDER BY nome`,
+    sql`SELECT id, data FROM chamadas WHERE turma_id = ${turmaId} AND ano = ${anoAtual} AND congregacao_id = ${cid}`,
   ])
 
   let presencasMap: Record<string, { total: number; presentes: number }> = {}
@@ -99,7 +104,8 @@ export async function buscarDetalhesTurma(turmaId: string, anoAtual: number) {
 }
 
 export async function buscarAlunosSemTurma() {
-  const rows = await sql`SELECT id, nome FROM alunos WHERE turma_id IS NULL AND ativo = true ORDER BY nome`
+  const { cid } = await exigirModulo('turmas')
+  const rows = await sql`SELECT id, nome FROM alunos WHERE turma_id IS NULL AND ativo = true AND congregacao_id = ${cid} ORDER BY nome`
   return rows.map(r => ({ id: r.id, nome: r.nome }))
 }
 
@@ -111,13 +117,16 @@ export async function matricularAluno(dados: {
   telefone?: string | null
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const { cid } = await exigirModulo('turmas', 'editar')
+    await assertTurmasDaCongregacao([dados.turma_id], cid)
     if (dados.id) {
-      await sql`UPDATE alunos SET turma_id = ${dados.turma_id} WHERE id = ${dados.id}`
+      await assertAlunosDaCongregacao([dados.id], cid)
+      await sql`UPDATE alunos SET turma_id = ${dados.turma_id} WHERE id = ${dados.id} AND congregacao_id = ${cid}`
       return { success: true, id: dados.id }
     } else {
       const [row] = await sql`
-        INSERT INTO alunos (nome, data_nascimento, telefone, turma_id, ativo)
-        VALUES (${dados.nome!}, ${dados.data_nascimento ?? null}, ${dados.telefone ?? null}, ${dados.turma_id}, true)
+        INSERT INTO alunos (nome, data_nascimento, telefone, turma_id, ativo, congregacao_id)
+        VALUES (${dados.nome!}, ${dados.data_nascimento ?? null}, ${dados.telefone ?? null}, ${dados.turma_id}, true, ${cid})
         RETURNING id
       `
       return { success: true, id: row.id }

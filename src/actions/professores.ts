@@ -1,18 +1,23 @@
 "use server"
 
 import sql from '@/lib/db'
+import {
+  exigirModulo, assertTurmasDaCongregacao, assertAlunosDaCongregacao, assertProfessoresDaCongregacao,
+} from '@/lib/sessao'
 
 export async function buscarProfessoresComTurmas() {
+  const { cid } = await exigirModulo('professores')
   const [professores, turmas] = await Promise.all([
     sql`
       SELECT p.id, p.nome, p.especialidade, p.telefone, p.email, p.data_nascimento, p.data_ingresso, p.turma_aluno_id, p.cargo, p.ativo,
         json_agg(pt.turma_id) FILTER (WHERE pt.turma_id IS NOT NULL) AS turma_ids
       FROM professores p
       LEFT JOIN professor_turmas pt ON pt.professor_id = p.id
+      WHERE p.congregacao_id = ${cid}
       GROUP BY p.id
       ORDER BY p.nome
     `,
-    sql`SELECT id, nome FROM turmas WHERE ativa = true ORDER BY nome`,
+    sql`SELECT id, nome FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`,
   ])
 
   return {
@@ -37,8 +42,12 @@ export async function salvarProfessor(dados: {
   turmas: string[]
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const { cid } = await exigirModulo('professores', 'editar')
+    await assertTurmasDaCongregacao([...dados.turmas, dados.turma_aluno_id], cid)
+
     let profId: string
     if (dados.id) {
+      await assertProfessoresDaCongregacao([dados.id], cid)
       await sql`
         UPDATE professores SET
           nome = ${dados.nome},
@@ -48,15 +57,15 @@ export async function salvarProfessor(dados: {
           turma_aluno_id = ${dados.turma_aluno_id ?? null},
           data_nascimento = ${dados.data_nascimento ?? null},
           cargo = ${dados.cargo ?? null}
-        WHERE id = ${dados.id}
+        WHERE id = ${dados.id} AND congregacao_id = ${cid}
       `
       profId = dados.id
       // Recriar turmas
       await sql`DELETE FROM professor_turmas WHERE professor_id = ${profId}`
     } else {
       const [row] = await sql`
-        INSERT INTO professores (nome, especialidade, telefone, email, turma_aluno_id, data_nascimento, cargo, data_ingresso, ativo)
-        VALUES (${dados.nome}, ${dados.especialidade ?? null}, ${dados.telefone ?? null}, ${dados.email ?? null}, ${dados.turma_aluno_id ?? null}, ${dados.data_nascimento ?? null}, ${dados.cargo ?? null}, ${new Date().toISOString().split('T')[0]}, true)
+        INSERT INTO professores (nome, especialidade, telefone, email, turma_aluno_id, data_nascimento, cargo, data_ingresso, ativo, congregacao_id)
+        VALUES (${dados.nome}, ${dados.especialidade ?? null}, ${dados.telefone ?? null}, ${dados.email ?? null}, ${dados.turma_aluno_id ?? null}, ${dados.data_nascimento ?? null}, ${dados.cargo ?? null}, ${new Date().toISOString().split('T')[0]}, true, ${cid})
         RETURNING id
       `
       profId = row.id
@@ -81,40 +90,51 @@ export async function salvarProfessor(dados: {
 /** Ativa/desativa um professor (soft delete) — preserva histórico de turmas/escalas para relatórios */
 export async function definirAtivoProfessor(id: string, ativo: boolean): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`UPDATE professores SET ativo = ${ativo} WHERE id = ${id}`
+    const { cid } = await exigirModulo('professores', 'editar')
+    await assertProfessoresDaCongregacao([id], cid)
+    await sql`UPDATE professores SET ativo = ${ativo} WHERE id = ${id} AND congregacao_id = ${cid}`
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }
   }
 }
 
-export async function sincronizarAlunoVinculado(profId: string, nome: string, turmaAluno: string | null, dataNascimento?: string | null) {
+/** Mantém o registro de aluno espelhado de um professor. Assume escopo já validado. */
+async function sincronizarAlunoVinculadoInterno(cid: string, profId: string, nome: string, turmaAluno: string | null, dataNascimento?: string | null) {
   const marcador = `professor:${profId}`
-  const existente = await sql`SELECT id FROM alunos WHERE responsavel = ${marcador} LIMIT 1`
+  const existente = await sql`SELECT id FROM alunos WHERE responsavel = ${marcador} AND congregacao_id = ${cid} LIMIT 1`
 
   if (turmaAluno) {
     if (existente.length > 0) {
       await sql`UPDATE alunos SET nome = ${nome}, turma_id = ${turmaAluno}, data_nascimento = ${dataNascimento ?? null}, ativo = true WHERE id = ${existente[0].id}`
     } else {
-      await sql`INSERT INTO alunos (nome, turma_id, responsavel, data_nascimento, ativo) VALUES (${nome}, ${turmaAluno}, ${marcador}, ${dataNascimento ?? null}, true)`
+      await sql`INSERT INTO alunos (nome, turma_id, responsavel, data_nascimento, ativo, congregacao_id) VALUES (${nome}, ${turmaAluno}, ${marcador}, ${dataNascimento ?? null}, true, ${cid})`
     }
   } else if (existente.length > 0) {
     await sql`DELETE FROM alunos WHERE id = ${existente[0].id}`
   }
 }
 
+export async function sincronizarAlunoVinculado(profId: string, nome: string, turmaAluno: string | null, dataNascimento?: string | null) {
+  const { cid } = await exigirModulo('professores', 'editar')
+  await assertProfessoresDaCongregacao([profId], cid)
+  await assertTurmasDaCongregacao([turmaAluno], cid)
+  await sincronizarAlunoVinculadoInterno(cid, profId, nome, turmaAluno, dataNascimento)
+}
+
 export async function promoverAlunoParaProfessor(alunoId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const [aluno] = await sql`SELECT id, nome, telefone, email, data_nascimento, turma_id FROM alunos WHERE id = ${alunoId}`
+    const { cid } = await exigirModulo(['alunos', 'professores'], 'editar')
+    const [aluno] = await sql`SELECT id, nome, telefone, email, data_nascimento, turma_id FROM alunos WHERE id = ${alunoId} AND congregacao_id = ${cid}`
     if (!aluno) return { success: false, error: 'Aluno não encontrado' }
 
     const hoje = new Date().toISOString().split('T')[0]
     const [prof] = await sql`
-      INSERT INTO professores (nome, telefone, email, data_nascimento, turma_aluno_id, data_ingresso, ativo)
-      VALUES (${aluno.nome}, ${aluno.telefone ?? null}, ${aluno.email ?? null}, ${aluno.data_nascimento ?? null}, ${aluno.turma_id ?? null}, ${hoje}, true)
+      INSERT INTO professores (nome, telefone, email, data_nascimento, turma_aluno_id, data_ingresso, ativo, congregacao_id)
+      VALUES (${aluno.nome}, ${aluno.telefone ?? null}, ${aluno.email ?? null}, ${aluno.data_nascimento ?? null}, ${aluno.turma_id ?? null}, ${hoje}, true, ${cid})
       RETURNING id
     `
-    await sql`UPDATE alunos SET responsavel = ${'professor:' + prof.id} WHERE id = ${alunoId}`
+    await sql`UPDATE alunos SET responsavel = ${'professor:' + prof.id} WHERE id = ${alunoId} AND congregacao_id = ${cid}`
 
     return { success: true }
   } catch (e: any) {
@@ -123,15 +143,19 @@ export async function promoverAlunoParaProfessor(alunoId: string): Promise<{ suc
 }
 
 export async function salvarCargoProfessor(profId: string, cargo: string | null) {
-  await sql`UPDATE professores SET cargo = ${cargo} WHERE id = ${profId}`
-  await sql`UPDATE alunos SET cargo = ${cargo} WHERE responsavel = ${'professor:' + profId}`
+  const { cid } = await exigirModulo('professores', 'editar')
+  await sql`UPDATE professores SET cargo = ${cargo} WHERE id = ${profId} AND congregacao_id = ${cid}`
+  await sql`UPDATE alunos SET cargo = ${cargo} WHERE responsavel = ${'professor:' + profId} AND congregacao_id = ${cid}`
 }
 
 /** Vincula um professor a uma turma como aluno (ação rápida — sem passar pelo formulário completo) */
 export async function tornarProfessorAluno(profId: string, turmaId: string, nome: string, dataNascimento?: string | null): Promise<{ success: boolean; error?: string }> {
   try {
-    await sql`UPDATE professores SET turma_aluno_id = ${turmaId} WHERE id = ${profId}`
-    await sincronizarAlunoVinculado(profId, nome, turmaId, dataNascimento ?? null)
+    const { cid } = await exigirModulo('professores', 'editar')
+    await assertProfessoresDaCongregacao([profId], cid)
+    await assertTurmasDaCongregacao([turmaId], cid)
+    await sql`UPDATE professores SET turma_aluno_id = ${turmaId} WHERE id = ${profId} AND congregacao_id = ${cid}`
+    await sincronizarAlunoVinculadoInterno(cid, profId, nome, turmaId, dataNascimento ?? null)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }

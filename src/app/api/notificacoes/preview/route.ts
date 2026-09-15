@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
 import { TEMPLATE_PADRAO, formatarTelefone, formatarMensagem } from '@/lib/notificacoes'
 import { getLicaoTema } from '@/lib/constants'
-import { getNotifConfig } from '@/lib/api-helpers'
+import { getNotifConfig, exigirAdminNotificacoes, respostaErro } from '@/lib/api-helpers'
 
 /** Calcula o número de aula de uma data dentro do trimestre */
 function calcularNumeroAula(dataIso: string): number {
@@ -32,14 +32,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const db = createServiceClient() as any
 
     const [escalasRes, configData, overridesRes] = await Promise.all([
       db.from('escalas')
         .select('id, turma_id, professor_id, turmas(nome, cor), professores(nome, telefone)')
-        .eq('data', dataAula),
-      getNotifConfig(db),
-      db.from('notificacoes_semana').select('*').eq('data_aula', dataAula),
+        .eq('data', dataAula)
+        .eq('congregacao_id', cid),
+      getNotifConfig(db, cid),
+      db.from('notificacoes_semana').select('*').eq('data_aula', dataAula).eq('congregacao_id', cid),
     ])
 
     const escalas   = escalasRes.data  ?? []
@@ -82,6 +84,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ notificacoes, aulaNum, diaAula, dataAula })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }

@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { exigirAdminNotificacoes, respostaErro } from '@/lib/api-helpers'
+import { AcessoNegadoError } from '@/lib/sessao'
 
 // ─── GET: verifica conexão com o provedor configurado ─────────────────────────
 export async function GET() {
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const db = createServiceClient() as any
     const { data: config } = await db
       .from('notificacoes_config')
-      .select('provedor, zapi_instance_id, zapi_token, meta_access_token, meta_phone_number_id, baileys_url, baileys_instance, baileys_token')
-      .single()
+      .select('*')
+      .eq('congregacao_id', cid)
+      .maybeSingle()
 
     const provedor = config?.provedor ?? 'zapi'
 
@@ -93,6 +97,7 @@ export async function GET() {
       detalhes: json,
     })
   } catch (e: any) {
+    if (e instanceof AcessoNegadoError) return respostaErro(e)
     return NextResponse.json({ conectado: false, motivo: 'timeout_ou_erro', erro: e.message })
   }
 }

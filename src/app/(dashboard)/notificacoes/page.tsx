@@ -343,7 +343,7 @@ export default function NotificacoesPage() {
     setDisparando(true)
     setResultadoDisparo(null)
     try {
-      const body: any = { skip_auth: true, data: dataAulaSelecionada }
+      const body: any = { data: dataAulaSelecionada }
       const resp = await fetch('/api/notificacoes/disparar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

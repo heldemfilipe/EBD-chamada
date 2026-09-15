@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase'
+import { exigirAdminNotificacoes, respostaErro } from '@/lib/api-helpers'
+import { assertTurmasDaCongregacao, assertProfessoresDaCongregacao } from '@/lib/sessao'
 
 // ─── GET: busca overrides de uma semana ───────────────────────────────────────
 // ?data=YYYY-MM-DD (data da aula)
@@ -12,16 +14,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const db = createServiceClient() as any
     const { data, error } = await db
       .from('notificacoes_semana')
       .select('*')
       .eq('data_aula', dataAula)
+      .eq('congregacao_id', cid)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data ?? [])
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }
 
@@ -29,12 +33,15 @@ export async function GET(req: NextRequest) {
 // body: { data_aula, professor_id, turma_id, silenciado?, mensagem_personalizada? }
 export async function POST(req: NextRequest) {
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const body = await req.json()
     const { data_aula, professor_id, turma_id, silenciado, mensagem_personalizada } = body
 
     if (!data_aula || !professor_id || !turma_id) {
       return NextResponse.json({ error: 'Campos obrigatórios ausentes' }, { status: 400 })
     }
+    await assertTurmasDaCongregacao([turma_id], cid)
+    await assertProfessoresDaCongregacao([professor_id], cid)
 
     const db = createServiceClient() as any
     const { data, error } = await db
@@ -49,7 +56,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }
 
@@ -66,10 +73,12 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
+    const { cid } = await exigirAdminNotificacoes()
     const db = createServiceClient() as any
     const { error } = await db
       .from('notificacoes_semana')
       .delete()
+      .eq('congregacao_id', cid)
       .eq('data_aula', dataAula)
       .eq('professor_id', professorId)
       .eq('turma_id', turmaId)
@@ -77,6 +86,6 @@ export async function DELETE(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return respostaErro(e)
   }
 }

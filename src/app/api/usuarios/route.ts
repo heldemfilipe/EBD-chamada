@@ -1,362 +1,351 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { createServiceClient } from '@/lib/supabase'
+import sql from '@/lib/db'
 import { logger } from '@/lib/logger'
+import {
+  obterSessao, podeGerenciarUsuarios, normalizarModulos, assertPodeConceder,
+  assertTurmasDaCongregacao, AcessoNegadoError, type Sessao, type ModuloPermissao,
+} from '@/lib/sessao'
 
 const MOD = 'api:usuarios'
 
-// ─── Helper: verificar se o chamador é admin ──────────────────────────────────
+// Regras de escopo:
+//   admin geral          → vê e gerencia todos os usuários, de qualquer congregação
+//   admin da congregação → apenas usuários da própria congregação
+//   colaborador gestor   → (módulo 'usuarios') apenas colaboradores da própria
+//                          congregação, concedendo no máximo o acesso que possui
+// Nenhum usuário de congregação enxerga outras congregações nem seus usuários.
 
-async function verificarAdmin(req: NextRequest) {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        },
-      },
+class ErroApi extends Error {
+  constructor(public status: number, msg: string) { super(msg) }
+}
+
+function responderErro(e: unknown) {
+  if (e instanceof ErroApi) return NextResponse.json({ error: e.message }, { status: e.status })
+  if (e instanceof AcessoNegadoError) return NextResponse.json({ error: e.message }, { status: 403 })
+  logger.error('Erro inesperado na rota de usuários', { module: MOD, error: e as Error })
+  return NextResponse.json({ error: (e as Error)?.message ?? 'Erro interno' }, { status: 500 })
+}
+
+async function exigirGestor(nivel: 'ver' | 'editar'): Promise<Sessao> {
+  const s = await obterSessao()
+  if (!s) throw new ErroApi(401, 'Sessão expirada')
+  if (!podeGerenciarUsuarios(s, nivel)) throw new ErroApi(403, 'Sem permissão')
+  return s
+}
+
+interface Alvo { id: string; role: 'admin' | 'usuario'; congregacao_id: string | null }
+
+async function carregarAlvo(id: string): Promise<Alvo> {
+  const [alvo] = await sql`SELECT id, role, congregacao_id FROM perfis WHERE id = ${id}`
+  if (!alvo) throw new ErroApi(404, 'Usuário não encontrado')
+  return alvo as Alvo
+}
+
+/** O gestor pode agir sobre este usuário? (404 para não revelar usuários de fora) */
+function assertAlvoNoEscopo(s: Sessao, alvo: Alvo) {
+  if (s.adminGeral) return
+  if (alvo.congregacao_id !== s.congregacaoId) throw new ErroApi(404, 'Usuário não encontrado')
+  if (s.role !== 'admin' && alvo.role === 'admin' && alvo.id !== s.userId) {
+    throw new ErroApi(403, 'Você não pode alterar administradores.')
+  }
+}
+
+interface AcessoResolvido {
+  role: 'admin' | 'usuario'
+  congregacaoId: string | null
+  perfilAcessoId: string | null
+  modulos: ModuloPermissao[]
+  turmas: string[]
+}
+
+/** Valida e resolve role/congregação/permissões pedidas pelo gestor. */
+async function resolverAcesso(s: Sessao, body: any): Promise<AcessoResolvido> {
+  // Papel
+  const role: 'admin' | 'usuario' = body.role === 'admin' ? 'admin' : 'usuario'
+  if (role === 'admin' && s.role !== 'admin') {
+    throw new ErroApi(403, 'Você não pode criar administradores.')
+  }
+
+  // Congregação
+  let congregacaoId: string | null
+  if (s.adminGeral) {
+    congregacaoId = body.congregacao_id || null
+    if (role === 'usuario' && !congregacaoId) throw new ErroApi(400, 'Selecione a congregação do usuário.')
+    if (congregacaoId) {
+      const [c] = await sql`SELECT id FROM congregacoes WHERE id = ${congregacaoId}`
+      if (!c) throw new ErroApi(400, 'Congregação inválida.')
     }
-  )
-  const { data: { user }, error: userErr } = await supabase.auth.getUser()
-
-  if (userErr) {
-    logger.error('Falha ao verificar usuário na rota de usuários', {
-      module: MOD,
-      method: req.method,
-      path: req.nextUrl.pathname,
-      error: userErr,
-    })
-    return null
+  } else {
+    congregacaoId = s.congregacaoId
   }
 
-  if (!user) {
-    logger.warn('Requisição sem sessão ativa', {
-      module: MOD,
-      method: req.method,
-      path: req.nextUrl.pathname,
-    })
-    return null
+  if (role === 'admin') {
+    return { role, congregacaoId, perfilAcessoId: null, modulos: [], turmas: [] }
   }
 
-  const db = createServiceClient()
-  const { data: perfil, error: perfilErr } = await (db as any)
-    .from('perfis')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  if (perfilErr) {
-    logger.error('Falha ao verificar role do usuário', {
-      module: MOD,
-      userId: user.id,
-      error: perfilErr,
-    })
-    return null
+  // Perfil de acesso (modelo) ou permissões personalizadas
+  const perfilAcessoId: string | null = body.perfil_acesso_id || null
+  let modulos: ModuloPermissao[]
+  if (perfilAcessoId) {
+    const [pa] = await sql`
+      SELECT id, congregacao_id,
+        COALESCE((SELECT json_agg(json_build_object('modulo', modulo, 'nivel', nivel))
+                  FROM perfis_acesso_modulos WHERE perfil_acesso_id = perfis_acesso.id), '[]') AS modulos
+      FROM perfis_acesso WHERE id = ${perfilAcessoId}
+    `
+    if (!pa || (pa.congregacao_id !== null && pa.congregacao_id !== congregacaoId)) {
+      throw new ErroApi(400, 'Perfil de acesso inválido para esta congregação.')
+    }
+    modulos = normalizarModulos(pa.modulos)
+    assertPodeConceder(s, modulos)
+    modulos = [] // permissões vêm do perfil; nada é gravado por usuário
+  } else {
+    modulos = normalizarModulos(body.modulos)
+    assertPodeConceder(s, modulos)
   }
 
-  if (perfil?.role !== 'admin') {
-    logger.warn('Acesso negado — usuário não é admin', {
-      module: MOD,
-      userId: user.id,
-      role: perfil?.role ?? 'desconhecido',
-      method: req.method,
-    })
-    return null
+  // Turmas liberadas na chamada
+  const turmas: string[] = Array.isArray(body.turmas)
+    ? Array.from(new Set(body.turmas.filter((t: unknown) => typeof t === 'string')))
+    : []
+  if (turmas.length > 0) {
+    await assertTurmasDaCongregacao(turmas, congregacaoId!)
+    if (s.turmas !== '*') {
+      const minhas = s.turmas
+      if (turmas.some(t => !minhas.includes(t))) {
+        throw new ErroApi(403, 'Você só pode liberar turmas às quais você tem acesso.')
+      }
+    }
   }
 
-  return user
+  return { role, congregacaoId, perfilAcessoId, modulos, turmas }
+}
+
+async function gravarPermissoes(tx: typeof sql, userId: string, acesso: AcessoResolvido) {
+  await tx`DELETE FROM permissoes_modulos WHERE perfil_id = ${userId}`
+  await tx`DELETE FROM permissoes_turmas WHERE perfil_id = ${userId}`
+  if (acesso.role === 'admin') return
+  if (acesso.modulos.length > 0) {
+    await tx`
+      INSERT INTO permissoes_modulos (perfil_id, modulo, nivel)
+      SELECT ${userId}::uuid, * FROM unnest(
+        ${sql.array(acesso.modulos.map(m => m.modulo))}::text[],
+        ${sql.array(acesso.modulos.map(m => m.nivel))}::text[]
+      )
+    `
+  }
+  if (acesso.turmas.length > 0) {
+    await tx`
+      INSERT INTO permissoes_turmas (perfil_id, turma_id)
+      SELECT ${userId}::uuid, unnest(${sql.array(acesso.turmas)}::uuid[])
+    `
+  }
+}
+
+async function mapaEmails(db: any): Promise<Record<string, string>> {
+  const emails: Record<string, string> = {}
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 })
+    if (error) {
+      logger.error('Falha ao listar auth.users', { module: MOD, error })
+      break
+    }
+    for (const u of data?.users ?? []) emails[u.id] = u.email ?? ''
+    if (!data?.users || data.users.length < 1000) break
+  }
+  return emails
 }
 
 // ─── GET — Listar usuários ────────────────────────────────────────────────────
-export async function GET(req: NextRequest) {
-  const t0 = Date.now()
-  logger.info('GET /api/usuarios — listando usuários', { module: MOD })
+export async function GET() {
+  try {
+    const s = await exigirGestor('ver')
 
-  const session = await verificarAdmin(req)
-  if (!session) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+    const perfis = await sql`
+      SELECT p.id, p.nome, p.role, p.ativo, p.created_at, p.congregacao_id, p.perfil_acesso_id,
+        c.nome AS congregacao_nome, pa.nome AS perfil_acesso_nome,
+        COALESCE((
+          SELECT json_agg(json_build_object('modulo', m.modulo, 'nivel', m.nivel))
+          FROM (
+            SELECT modulo, nivel FROM perfis_acesso_modulos
+            WHERE p.perfil_acesso_id IS NOT NULL AND perfil_acesso_id = p.perfil_acesso_id
+            UNION ALL
+            SELECT modulo, nivel FROM permissoes_modulos
+            WHERE p.perfil_acesso_id IS NULL AND perfil_id = p.id
+          ) m
+        ), '[]') AS modulos,
+        COALESCE((
+          SELECT json_agg(json_build_object('id', t.id, 'nome', t.nome) ORDER BY t.nome)
+          FROM permissoes_turmas pt JOIN turmas t ON t.id = pt.turma_id
+          WHERE pt.perfil_id = p.id
+        ), '[]') AS turmas
+      FROM perfis p
+      LEFT JOIN congregacoes c ON c.id = p.congregacao_id
+      LEFT JOIN perfis_acesso pa ON pa.id = p.perfil_acesso_id
+      WHERE ${s.adminGeral
+        ? sql`TRUE`
+        : s.role === 'admin'
+          ? sql`p.congregacao_id = ${s.congregacaoId}`
+          : sql`p.congregacao_id = ${s.congregacaoId} AND (p.role = 'usuario' OR p.id = ${s.userId})`}
+      ORDER BY p.nome
+    `
 
-  const db = createServiceClient() as any
+    const emails = await mapaEmails(createServiceClient() as any)
 
-  const { data: perfis, error: perfisErr } = await db
-    .from('perfis')
-    .select('id, nome, role, ativo, created_at')
-    .order('nome')
-
-  if (perfisErr) {
-    logger.error('Falha ao buscar perfis', { module: MOD, userId: session.id, error: perfisErr })
-    return NextResponse.json({ error: 'Erro ao buscar usuários' }, { status: 500 })
+    return NextResponse.json(perfis.map(p => ({
+      id: p.id,
+      nome: p.nome,
+      role: p.role,
+      ativo: p.ativo,
+      created_at: p.created_at,
+      email: emails[p.id] ?? '',
+      congregacao_id: p.congregacao_id,
+      congregacao_nome: s.adminGeral ? p.congregacao_nome : undefined,
+      perfil_acesso_id: p.perfil_acesso_id,
+      perfil_acesso_nome: p.perfil_acesso_nome,
+      modulos: p.modulos,
+      turmas: p.turmas,
+    })))
+  } catch (e) {
+    return responderErro(e)
   }
-
-  const { data: { users }, error: usersErr } = await db.auth.admin.listUsers()
-  if (usersErr) {
-    logger.error('Falha ao listar auth.users', { module: MOD, userId: session.id, error: usersErr })
-  }
-
-  const emailPorId: Record<string, string> = {}
-  for (const u of users ?? []) emailPorId[u.id] = u.email ?? ''
-
-  const ids = (perfis ?? []).map((p: any) => p.id)
-  const [{ data: modulos, error: modErr }, { data: turmas, error: turErr }] = await Promise.all([
-    db.from('permissoes_modulos').select('perfil_id, modulo, nivel').in('perfil_id', ids),
-    db.from('permissoes_turmas').select('perfil_id, turma_id, turmas(nome)').in('perfil_id', ids),
-  ])
-
-  if (modErr) logger.warn('Falha ao buscar permissões de módulos', { module: MOD, error: modErr })
-  if (turErr) logger.warn('Falha ao buscar permissões de turmas',  { module: MOD, error: turErr })
-
-  const modsPorId: Record<string, { modulo: string; nivel: string }[]> = {}
-  const turmasPorId: Record<string, { id: string; nome: string }[]> = {}
-
-  for (const m of modulos ?? []) {
-    if (!modsPorId[m.perfil_id]) modsPorId[m.perfil_id] = []
-    modsPorId[m.perfil_id].push({ modulo: m.modulo, nivel: m.nivel ?? 'editar' })
-  }
-  for (const t of turmas ?? []) {
-    if (!turmasPorId[t.perfil_id]) turmasPorId[t.perfil_id] = []
-    turmasPorId[t.perfil_id].push({ id: t.turma_id, nome: t.turmas?.nome ?? '' })
-  }
-
-  const result = (perfis ?? []).map((p: any) => ({
-    ...p,
-    email: emailPorId[p.id] ?? '',
-    modulos: modsPorId[p.id] ?? [],
-    turmas: turmasPorId[p.id] ?? [],
-  }))
-
-  logger.info(`GET /api/usuarios — ${result.length} usuário(s) retornado(s)`, {
-    module: MOD,
-    userId: session.id,
-    total: result.length,
-    duration: Date.now() - t0,
-  })
-
-  return NextResponse.json(result)
 }
 
 // ─── POST — Criar usuário ─────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const t0 = Date.now()
-  const session = await verificarAdmin(req)
-  if (!session) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
-
-  let body: any
   try {
-    body = await req.json()
+    const s = await exigirGestor('editar')
+    const body = await req.json().catch(() => { throw new ErroApi(400, 'Body inválido') })
+
+    const nome = String(body.nome ?? '').trim()
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const senha = String(body.senha ?? '')
+    if (!nome || !email || !senha) throw new ErroApi(400, 'Nome, e-mail e senha são obrigatórios')
+    if (senha.length < 6) throw new ErroApi(400, 'A senha deve ter pelo menos 6 caracteres')
+
+    const acesso = await resolverAcesso(s, body)
+    const db = createServiceClient() as any
+
+    const { data: authUser, error: authError } = await db.auth.admin.createUser({
+      email, password: senha, email_confirm: true,
+    })
+    if (authError) {
+      logger.warn('Falha ao criar usuário no Supabase Auth', { module: MOD, email, error: authError })
+      const msg = /already|registered|exists/i.test(authError.message)
+        ? 'Este e-mail já está em uso.'
+        : authError.message
+      throw new ErroApi(400, msg)
+    }
+
+    const novoId: string = authUser.user.id
+    try {
+      await sql.begin(async t => {
+        const tx = t as unknown as typeof sql // tipagem do postgres.js não expõe a assinatura de chamada
+        await tx`
+          INSERT INTO perfis (id, nome, role, ativo, congregacao_id, perfil_acesso_id)
+          VALUES (${novoId}, ${nome}, ${acesso.role}, true, ${acesso.congregacaoId}, ${acesso.perfilAcessoId})
+        `
+        await gravarPermissoes(tx, novoId, acesso)
+      })
+    } catch (e) {
+      logger.error('Falha ao criar perfil — removendo auth user (rollback)', { module: MOD, novoId, error: e as Error })
+      await db.auth.admin.deleteUser(novoId)
+      throw new ErroApi(500, 'Erro ao criar usuário')
+    }
+
+    logger.info(`Usuário criado: ${email}`, { module: MOD, userId: s.userId, novoId, role: acesso.role })
+    return NextResponse.json({ id: novoId, nome, email, role: acesso.role })
   } catch (e) {
-    logger.error('Body inválido na criação de usuário', { module: MOD, error: e as Error })
-    return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
+    return responderErro(e)
   }
-
-  const { nome, email, senha, role, modulos, turmas } = body
-
-  if (!nome || !email || !senha) {
-    logger.warn('POST /api/usuarios — campos obrigatórios ausentes', {
-      module: MOD,
-      userId: session.id,
-      camposFaltando: [!nome && 'nome', !email && 'email', !senha && 'senha'].filter(Boolean),
-    })
-    return NextResponse.json({ error: 'Nome, e-mail e senha são obrigatórios' }, { status: 400 })
-  }
-
-  logger.info(`Criando usuário: ${email} (role: ${role ?? 'usuario'})`, {
-    module: MOD,
-    userId: session.id,
-    email,
-    role,
-  })
-
-  const db = createServiceClient() as any
-
-  // 1. Criar usuário no auth do Supabase
-  const { data: authUser, error: authError } = await db.auth.admin.createUser({
-    email,
-    password: senha,
-    email_confirm: true,
-  })
-
-  if (authError) {
-    logger.error('Falha ao criar usuário no Supabase Auth', {
-      module: MOD,
-      userId: session.id,
-      email,
-      error: authError,
-    })
-    return NextResponse.json({ error: authError.message }, { status: 400 })
-  }
-
-  const newUserId = authUser.user.id
-  logger.debug('Usuário criado no Auth', { module: MOD, newUserId, email })
-
-  // 2. Criar perfil
-  const { error: perfilError } = await db.from('perfis').insert({
-    id: newUserId,
-    nome,
-    role: role === 'admin' ? 'admin' : 'usuario',
-    ativo: true,
-  })
-
-  if (perfilError) {
-    logger.error('Falha ao criar perfil — removendo auth user por rollback', {
-      module: MOD,
-      newUserId,
-      error: perfilError,
-    })
-    await db.auth.admin.deleteUser(newUserId)
-    return NextResponse.json({ error: 'Erro ao criar perfil' }, { status: 500 })
-  }
-
-  // 3. Se colaborador, salvar permissões
-  if (role !== 'admin') {
-    const modInserts   = (modulos ?? []).map((m: any) => ({
-      perfil_id: newUserId,
-      modulo: typeof m === 'string' ? m : m.modulo,
-      nivel: typeof m === 'string' ? 'editar' : (m.nivel ?? 'editar'),
-    }))
-    const turmaInserts = (turmas  ?? []).map((t: string) => ({ perfil_id: newUserId, turma_id: t }))
-
-    if (modInserts.length > 0) {
-      const { error: modErr } = await db.from('permissoes_modulos').insert(modInserts)
-      if (modErr) logger.warn('Falha ao salvar permissões de módulos', { module: MOD, newUserId, error: modErr })
-    }
-    if (turmaInserts.length > 0) {
-      const { error: turErr } = await db.from('permissoes_turmas').insert(turmaInserts)
-      if (turErr) logger.warn('Falha ao salvar permissões de turmas', { module: MOD, newUserId, error: turErr })
-    }
-
-    logger.debug('Permissões de colaborador salvas', {
-      module: MOD,
-      newUserId,
-      totalModulos: modInserts.length,
-      totalTurmas: turmaInserts.length,
-    })
-  }
-
-  logger.info(`Usuário criado com sucesso: ${email}`, {
-    module: MOD,
-    userId: session.id,
-    newUserId,
-    role: role ?? 'usuario',
-    duration: Date.now() - t0,
-  })
-
-  return NextResponse.json({ id: newUserId, nome, email, role })
 }
 
 // ─── PUT — Atualizar usuário ──────────────────────────────────────────────────
 export async function PUT(req: NextRequest) {
-  const t0 = Date.now()
-  const session = await verificarAdmin(req)
-  if (!session) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
-
-  let body: any
   try {
-    body = await req.json()
+    const s = await exigirGestor('editar')
+    const body = await req.json().catch(() => { throw new ErroApi(400, 'Body inválido') })
+    if (!body.id) throw new ErroApi(400, 'ID obrigatório')
+
+    const alvo = await carregarAlvo(body.id)
+    assertAlvoNoEscopo(s, alvo)
+
+    const nome = String(body.nome ?? '').trim()
+    if (!nome) throw new ErroApi(400, 'Nome é obrigatório')
+    const novaSenha = body.novaSenha ? String(body.novaSenha) : ''
+    if (novaSenha && novaSenha.length < 6) throw new ErroApi(400, 'A senha deve ter pelo menos 6 caracteres')
+
+    const proprio = alvo.id === s.userId
+    // Ninguém altera o próprio nível de acesso (evita auto-promoção e auto-bloqueio)
+    const acesso = proprio ? null : await resolverAcesso(s, body)
+
+    await sql.begin(async t => {
+      const tx = t as unknown as typeof sql
+      if (acesso) {
+        await tx`
+          UPDATE perfis SET nome = ${nome}, role = ${acesso.role}, congregacao_id = ${acesso.congregacaoId},
+            perfil_acesso_id = ${acesso.perfilAcessoId}
+          WHERE id = ${alvo.id}
+        `
+        await gravarPermissoes(tx, alvo.id, acesso)
+      } else {
+        await tx`UPDATE perfis SET nome = ${nome} WHERE id = ${alvo.id}`
+      }
+    })
+
+    if (novaSenha) {
+      const db = createServiceClient() as any
+      const { error } = await db.auth.admin.updateUserById(alvo.id, { password: novaSenha })
+      if (error) throw new ErroApi(400, `Dados salvos, mas falhou ao trocar a senha: ${error.message}`)
+    }
+
+    logger.info(`Usuário atualizado: ${alvo.id}`, { module: MOD, userId: s.userId, targetId: alvo.id })
+    return NextResponse.json({ success: true })
   } catch (e) {
-    logger.error('Body inválido na atualização de usuário', { module: MOD, error: e as Error })
-    return NextResponse.json({ error: 'Body inválido' }, { status: 400 })
+    return responderErro(e)
   }
+}
 
-  const { id, nome, role, ativo, modulos, turmas, novaSenha } = body
+// ─── PATCH — Ativar/desativar usuário ─────────────────────────────────────────
+export async function PATCH(req: NextRequest) {
+  try {
+    const s = await exigirGestor('editar')
+    const body = await req.json().catch(() => { throw new ErroApi(400, 'Body inválido') })
+    if (!body.id || typeof body.ativo !== 'boolean') throw new ErroApi(400, 'Parâmetros inválidos')
+    if (body.id === s.userId) throw new ErroApi(400, 'Você não pode desativar sua própria conta')
 
-  if (!id) {
-    logger.warn('PUT /api/usuarios — ID ausente no body', { module: MOD, userId: session.id })
-    return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
+    const alvo = await carregarAlvo(body.id)
+    assertAlvoNoEscopo(s, alvo)
+
+    await sql`UPDATE perfis SET ativo = ${body.ativo} WHERE id = ${alvo.id}`
+    return NextResponse.json({ success: true })
+  } catch (e) {
+    return responderErro(e)
   }
-
-  logger.info(`Atualizando usuário: ${id}`, {
-    module: MOD,
-    userId: session.id,
-    targetId: id,
-    role,
-    ativo,
-    trocouSenha: !!novaSenha,
-  })
-
-  const db = createServiceClient() as any
-
-  const { error: updateErr } = await db.from('perfis').update({ nome, role, ativo }).eq('id', id)
-  if (updateErr) {
-    logger.error('Falha ao atualizar perfil', { module: MOD, targetId: id, error: updateErr })
-  }
-
-  if (novaSenha) {
-    const { error: passErr } = await db.auth.admin.updateUserById(id, { password: novaSenha })
-    if (passErr) logger.error('Falha ao atualizar senha', { module: MOD, targetId: id, error: passErr })
-    else logger.debug('Senha atualizada com sucesso', { module: MOD, targetId: id })
-  }
-
-  // Resetar e recriar permissões
-  await db.from('permissoes_modulos').delete().eq('perfil_id', id)
-  await db.from('permissoes_turmas').delete().eq('perfil_id', id)
-
-  if (role !== 'admin') {
-    const modInserts   = (modulos ?? []).map((m: any) => ({
-      perfil_id: id,
-      modulo: typeof m === 'string' ? m : m.modulo,
-      nivel: typeof m === 'string' ? 'editar' : (m.nivel ?? 'editar'),
-    }))
-    const turmaInserts = (turmas  ?? []).map((t: string) => ({ perfil_id: id, turma_id: t }))
-
-    if (modInserts.length > 0)   await db.from('permissoes_modulos').insert(modInserts)
-    if (turmaInserts.length > 0) await db.from('permissoes_turmas').insert(turmaInserts)
-  }
-
-  logger.info(`Usuário atualizado com sucesso: ${id}`, {
-    module: MOD,
-    userId: session.id,
-    targetId: id,
-    duration: Date.now() - t0,
-  })
-
-  return NextResponse.json({ success: true })
 }
 
 // ─── DELETE — Apagar usuário permanentemente ─────────────────────────────────
 export async function DELETE(req: NextRequest) {
-  const session = await verificarAdmin(req)
-  if (!session) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+  try {
+    const s = await exigirGestor('editar')
+    const id = new URL(req.url).searchParams.get('id')
+    if (!id) throw new ErroApi(400, 'ID obrigatório')
+    if (id === s.userId) throw new ErroApi(400, 'Você não pode apagar sua própria conta')
 
-  const { searchParams } = new URL(req.url)
-  const id = searchParams.get('id')
+    const alvo = await carregarAlvo(id)
+    assertAlvoNoEscopo(s, alvo)
 
-  if (!id) {
-    logger.warn('DELETE /api/usuarios — ID ausente nos params', { module: MOD, userId: session.id })
-    return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 })
+    await sql`DELETE FROM perfis WHERE id = ${id}` // permissões caem em cascata
+    const db = createServiceClient() as any
+    const { error: authErr } = await db.auth.admin.deleteUser(id)
+    if (authErr) {
+      logger.error('Falha ao apagar auth user (perfil já removido)', { module: MOD, targetId: id, error: authErr })
+    }
+
+    logger.info(`Usuário apagado permanentemente: ${id}`, { module: MOD, userId: s.userId, targetId: id })
+    return NextResponse.json({ success: true })
+  } catch (e) {
+    return responderErro(e)
   }
-
-  if (id === session.id) {
-    logger.warn('Tentativa de auto-exclusão bloqueada', { module: MOD, userId: session.id })
-    return NextResponse.json({ error: 'Você não pode apagar sua própria conta' }, { status: 400 })
-  }
-
-  const db = createServiceClient() as any
-
-  // Apagar permissões, perfil e usuario do auth em sequencia
-  await db.from('permissoes_modulos').delete().eq('perfil_id', id)
-  await db.from('permissoes_turmas').delete().eq('perfil_id', id)
-
-  const { error: perfilErr } = await db.from('perfis').delete().eq('id', id)
-  if (perfilErr) {
-    logger.error('Falha ao apagar perfil', { module: MOD, userId: session.id, targetId: id, error: perfilErr })
-    return NextResponse.json({ error: 'Falha ao apagar usuário' }, { status: 500 })
-  }
-
-  const { error: authErr } = await db.auth.admin.deleteUser(id)
-  if (authErr) {
-    logger.error('Falha ao apagar auth user (perfil ja removido)', { module: MOD, userId: session.id, targetId: id, error: authErr })
-    // Nao retorna erro — perfil ja foi removido, auth pode ter sido removido em outro momento
-  }
-
-  logger.info(`Usuário apagado permanentemente: ${id}`, {
-    module: MOD,
-    userId: session.id,
-    targetId: id,
-  })
-
-  return NextResponse.json({ success: true })
 }
