@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { KeyRound, Loader2, Eye, EyeOff, AlertTriangle } from 'lucide-react'
 
-/** Formulário de troca da própria senha (usado na tela obrigatória e no diálogo). */
-export function FormTrocaSenha({ onSucesso, rodape }: { onSucesso: () => void; rodape?: React.ReactNode }) {
+/** Formulário de troca da própria senha (usado na tela obrigatória e em Minha Conta). */
+export function FormTrocaSenha({ onSucesso, rodape, autoFocus = true }: { onSucesso: () => void; rodape?: React.ReactNode; autoFocus?: boolean }) {
   const [senhaAtual, setSenhaAtual] = useState('')
   const [novaSenha, setNovaSenha] = useState('')
   const [confirmar, setConfirmar] = useState('')
@@ -56,7 +56,7 @@ export function FormTrocaSenha({ onSucesso, rodape }: { onSucesso: () => void; r
           onChange={e => setSenhaAtual(e.target.value)}
           placeholder="A senha que você usou para entrar"
           autoComplete="current-password"
-          autoFocus
+          autoFocus={autoFocus}
         />
       </div>
 

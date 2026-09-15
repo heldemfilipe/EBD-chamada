@@ -37,6 +37,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     if (seg === 'congregacoes') return isAdminGeral
     if (seg === 'usuarios') return podeGerenciarUsuarios
     if (seg === 'notificacoes') return isAdmin
+    if (seg === 'minha-conta') return true
     const modulo = ROTAS_MODULO[seg]
     return modulo ? modulosPermitidos.includes(modulo) : true
   }
@@ -93,7 +94,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </p>
       </div>
     )
-  } else if (isAdminGeral && !congregacaoAtiva && segmento !== 'congregacoes' && !setupPendente) {
+  } else if (isAdminGeral && !congregacaoAtiva && !['congregacoes', 'minha-conta'].includes(segmento) && !setupPendente) {
     conteudo = (
       <div className="flex flex-col items-center justify-center text-center py-24 gap-3">
         <Church className="h-10 w-10 text-muted-foreground" />
