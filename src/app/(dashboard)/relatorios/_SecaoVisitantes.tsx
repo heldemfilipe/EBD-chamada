@@ -8,8 +8,10 @@ import { UserPlus } from 'lucide-react'
 import { corPresenca, badgePresenca, labelPresenca } from '@/lib/presence'
 import { cn } from '@/lib/utils'
 
-interface VisitanteRelatorio {
+export interface VisitanteRelatorio {
   id: string; nome: string; telefone: string; convertido: boolean
+  /** Primeira visita da vida aconteceu dentro do período */
+  primeiraVez: boolean
   visitas: { data: string; presente: boolean; trouxe_biblia: boolean; trouxe_revista: boolean }[]
   presentes: number; pct: number; biblias: number; revistas: number
 }
@@ -50,8 +52,8 @@ export function SecaoVisitantes({ visitantes, visitantesOrdenados, sort, onSort,
                   <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Total de visitas</p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3 text-center">
-                  <p className="text-xl font-bold text-green-600">{visitantes.reduce((s, v) => s + v.presentes, 0)}</p>
-                  <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">Presenças</p>
+                  <p className="text-xl font-bold text-green-600">{visitantes.filter(v => v.primeiraVez).length}</p>
+                  <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-0.5">1ª visita no período</p>
                 </div>
                 <div className="rounded-lg border bg-muted/30 p-3 text-center">
                   <p className="text-xl font-bold text-emerald-600">{visitantesConvertidos}</p>
@@ -79,6 +81,7 @@ export function SecaoVisitantes({ visitantes, visitantesOrdenados, sort, onSort,
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-semibold text-sm truncate">{v.nome}</p>
+                          {v.primeiraVez && <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-600">1ª vez</Badge>}
                           {v.convertido && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border">Convertido</Badge>}
                         </div>
                         {v.telefone && <p className="text-[11px] text-muted-foreground">{v.telefone}</p>}
@@ -130,7 +133,10 @@ export function SecaoVisitantes({ visitantes, visitantesOrdenados, sort, onSort,
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <div>
-                              <p className="font-medium text-sm">{v.nome}</p>
+                              <p className="font-medium text-sm flex items-center gap-1.5">
+                                {v.nome}
+                                {v.primeiraVez && <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-600">1ª vez</Badge>}
+                              </p>
                               {v.telefone && <p className="text-[11px] text-muted-foreground md:hidden">{v.telefone}</p>}
                             </div>
                             {v.convertido && <Badge className="text-[10px] bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border flex-shrink-0">Convertido</Badge>}

@@ -8,39 +8,45 @@ export function calcularPct(presentes: number, total: number): number {
   return Math.round((presentes / total) * 100)
 }
 
+// ─── Escala única de avaliação (usada em todas as telas) ──────────────────────
+//   90%+ Excelente · 70%+ Bom · 50%+ Regular · abaixo de 50% Crítico
+
+export type NivelPresenca = 'excelente' | 'bom' | 'regular' | 'critico'
+
+export const FAIXAS_PRESENCA: { nivel: NivelPresenca; min: number; label: string; hex: string; texto: string; badge: string; barra: string }[] = [
+  { nivel: 'excelente', min: 90, label: 'Excelente', hex: '#22c55e', texto: 'text-green-600',  badge: 'bg-green-500/15 text-green-600 border-green-500/30',   barra: 'bg-green-500' },
+  { nivel: 'bom',       min: 70, label: 'Bom',       hex: '#3b82f6', texto: 'text-blue-600',   badge: 'bg-blue-500/15 text-blue-600 border-blue-500/30',      barra: 'bg-blue-500' },
+  { nivel: 'regular',   min: 50, label: 'Regular',   hex: '#eab308', texto: 'text-yellow-600', badge: 'bg-yellow-500/15 text-yellow-700 border-yellow-500/30', barra: 'bg-yellow-500' },
+  { nivel: 'critico',   min: 0,  label: 'Crítico',   hex: '#ef4444', texto: 'text-red-600',    badge: 'bg-red-500/15 text-red-600 border-red-500/30',         barra: 'bg-red-500' },
+]
+
+export function faixaPresenca(pct: number) {
+  return FAIXAS_PRESENCA.find(f => pct >= f.min) ?? FAIXAS_PRESENCA[FAIXAS_PRESENCA.length - 1]
+}
+
 /** Cor hex para gráfico baseado no percentual */
 export function corPresenca(pct: number): string {
-  if (pct >= 90) return '#22c55e'  // verde
-  if (pct >= 75) return '#eab308'  // amarelo
-  return '#ef4444'                 // vermelho
+  return faixaPresenca(pct).hex
 }
 
 /** Classe de texto Tailwind baseada no percentual */
 export function corTextoPresenca(pct: number): string {
-  if (pct >= 90) return 'text-green-600'
-  if (pct >= 75) return 'text-yellow-600'
-  return 'text-red-600'
+  return faixaPresenca(pct).texto
 }
 
 /** Classe de badge (bg + text + border) baseada no percentual */
 export function badgePresenca(pct: number): string {
-  if (pct >= 90) return 'bg-green-500/15 text-green-600 border-green-500/30'
-  if (pct >= 75) return 'bg-yellow-500/15 text-yellow-600 border-yellow-500/30'
-  return 'bg-red-500/15 text-red-600 border-red-500/30'
+  return faixaPresenca(pct).badge
 }
 
 /** Rótulo textual do nível de presença */
 export function labelPresenca(pct: number): string {
-  if (pct >= 90) return 'Excelente'
-  if (pct >= 75) return 'Bom'
-  return 'Atenção'
+  return faixaPresenca(pct).label
 }
 
 /** Classe da barra de progresso baseada no percentual */
 export function corBarraPresenca(pct: number): string {
-  if (pct === 100) return 'bg-green-500'
-  if (pct >= 90)   return 'bg-primary'
-  return 'bg-yellow-500'
+  return faixaPresenca(pct).barra
 }
 
 /**

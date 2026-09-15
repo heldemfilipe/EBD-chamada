@@ -3,28 +3,19 @@
 import sql from '@/lib/db'
 import { exigirModulo, assertTurmasDaCongregacao, assertAlunosDaCongregacao } from '@/lib/sessao'
 
-export async function buscarAlunosComTurmas(anoAtual: number) {
+export async function buscarAlunosComTurmas(ano: number) {
   const { cid } = await exigirModulo('alunos')
   const [turmas, alunos, chamadas] = await Promise.all([
-    sql`SELECT id, nome, faixa_etaria, cor FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`,
+    sql`SELECT id, nome, faixa_etaria, cor, sala, idade_min, idade_max FROM turmas WHERE ativa = true AND congregacao_id = ${cid} ORDER BY nome`,
     sql`SELECT * FROM alunos WHERE congregacao_id = ${cid} ORDER BY nome`,
-    sql`SELECT id, data, turma_id FROM chamadas WHERE ano = ${anoAtual} AND congregacao_id = ${cid}`,
+    sql`SELECT id, data, turma_id FROM chamadas WHERE ano = ${ano} AND congregacao_id = ${cid} ORDER BY data`,
   ])
 
-  const chamadasComMes = chamadas.map(c => {
-    let mes: number | null = null
-    if (c.data) {
-      const d = c.data instanceof Date ? c.data : new Date(String(c.data) + 'T12:00:00')
-      if (!isNaN(d.getTime())) mes = d.getMonth()
-    }
-    return { id: String(c.id), mes, turmaId: c.turma_id ? String(c.turma_id) : null }
-  })
-
-  let presencasDetalhe: { alunoId: string; chamadaId: string; presente: boolean }[] = []
+  let presencasDetalhe: { alunoId: string; chamadaId: string; presente: boolean; biblia: boolean; revista: boolean }[] = []
   if (chamadas.length > 0) {
     const chamadaIds = chamadas.map(c => c.id)
     const presencas = await sql`
-      SELECT aluno_id, chamada_id, presente
+      SELECT aluno_id, chamada_id, presente, trouxe_biblia, trouxe_revista
       FROM presencas
       WHERE chamada_id = ANY(${chamadaIds})
     `
@@ -32,13 +23,18 @@ export async function buscarAlunosComTurmas(anoAtual: number) {
       alunoId: String(p.aluno_id),
       chamadaId: String(p.chamada_id),
       presente: Boolean(p.presente),
+      biblia: Boolean(p.trouxe_biblia),
+      revista: Boolean(p.trouxe_revista),
     }))
   }
 
   return {
-    turmas: turmas.map(t => ({ id: t.id, nome: t.nome, faixa_etaria: t.faixa_etaria, cor: t.cor })),
+    turmas: turmas.map(t => ({
+      id: t.id, nome: t.nome, faixa_etaria: t.faixa_etaria, cor: t.cor, sala: t.sala ?? null,
+      idade_min: t.idade_min ?? null, idade_max: t.idade_max ?? null,
+    })),
     alunos: alunos.map(a => ({ ...a })),
-    chamadas: chamadasComMes,
+    chamadas: chamadas.map(c => ({ id: String(c.id), data: String(c.data), turmaId: c.turma_id ? String(c.turma_id) : null })),
     presencasDetalhe,
   }
 }
@@ -51,6 +47,7 @@ export async function salvarAluno(dados: {
   turma_id: string | null
   ativo: boolean
   responsavel?: string | null
+  email?: string | null
   cargo?: string | null
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
@@ -64,14 +61,17 @@ export async function salvarAluno(dados: {
           telefone = ${dados.telefone ?? null},
           turma_id = ${dados.turma_id},
           ativo = ${dados.ativo},
+          email = ${dados.email?.trim() || null},
+          -- o marcador 'professor:<id>' liga o aluno ao cadastro de professor e não pode ser sobrescrito
+          responsavel = CASE WHEN responsavel LIKE 'professor:%' THEN responsavel ELSE ${dados.responsavel?.trim() || null} END,
           cargo = ${dados.cargo ?? null}
         WHERE id = ${dados.id} AND congregacao_id = ${cid}
       `
       return { success: true, id: dados.id }
     } else {
       const [row] = await sql`
-        INSERT INTO alunos (nome, data_nascimento, telefone, turma_id, ativo, responsavel, cargo, congregacao_id)
-        VALUES (${dados.nome}, ${dados.data_nascimento ?? null}, ${dados.telefone ?? null}, ${dados.turma_id}, ${dados.ativo}, ${dados.responsavel ?? null}, ${dados.cargo ?? null}, ${cid})
+        INSERT INTO alunos (nome, data_nascimento, telefone, email, turma_id, ativo, responsavel, cargo, congregacao_id)
+        VALUES (${dados.nome}, ${dados.data_nascimento ?? null}, ${dados.telefone ?? null}, ${dados.email?.trim() || null}, ${dados.turma_id}, ${dados.ativo}, ${dados.responsavel ?? null}, ${dados.cargo ?? null}, ${cid})
         RETURNING id
       `
       return { success: true, id: row.id }

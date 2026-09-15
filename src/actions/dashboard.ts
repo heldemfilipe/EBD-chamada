@@ -5,18 +5,26 @@ import { exigirModulo } from '@/lib/sessao'
 
 export async function buscarContadoresGerais() {
   const { cid } = await exigirModulo('dashboard')
-  const [alunos, professores] = await Promise.all([
-    sql`SELECT COUNT(*)::int AS total FROM alunos WHERE ativo = true AND congregacao_id = ${cid}`,
+  const [[alunos], [professores]] = await Promise.all([
+    sql`
+      SELECT COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE responsavel LIKE 'professor:%')::int AS professores
+      FROM alunos WHERE ativo = true AND congregacao_id = ${cid}
+    `,
     sql`SELECT COUNT(*)::int AS total FROM professores WHERE ativo = true AND congregacao_id = ${cid}`,
   ])
-  return { totalAlunos: alunos[0].total, totalProfessores: professores[0].total }
+  return {
+    totalAlunos: alunos.total as number,
+    alunosProfessores: alunos.professores as number,
+    totalProfessores: professores.total as number,
+  }
 }
 
 export async function buscarTurmasComProfessores() {
   const { cid } = await exigirModulo('dashboard')
   const rows = await sql`
     SELECT
-      t.id, t.nome, t.cor,
+      t.id, t.nome, t.cor, t.sala,
       json_agg(DISTINCT p.nome) FILTER (WHERE p.nome IS NOT NULL) AS professores,
       COUNT(DISTINCT a.id)::int AS total_alunos
     FROM turmas t
@@ -26,11 +34,14 @@ export async function buscarTurmasComProfessores() {
     WHERE t.ativa = true AND t.congregacao_id = ${cid}
     GROUP BY t.id
   `
-  return rows.map(r => ({
-    id: r.id, nome: r.nome, cor: r.cor ?? 'bg-blue-500',
-    professores: r.professores ?? [],
-    totalAlunos: r.total_alunos,
-  }))
+  const numSala = (s: string | null) => parseInt(s?.match(/\d+/)?.[0] ?? '') || 999
+  return rows
+    .map(r => ({
+      id: r.id as string, nome: r.nome as string, cor: (r.cor ?? 'bg-blue-500') as string, sala: (r.sala ?? null) as string | null,
+      professores: (r.professores ?? []) as string[],
+      totalAlunos: r.total_alunos as number,
+    }))
+    .sort((a, b) => numSala(a.sala) - numSala(b.sala) || a.nome.localeCompare(b.nome, 'pt-BR'))
 }
 
 export async function buscarUltimasChamadas(limit: number) {
@@ -53,21 +64,27 @@ export async function buscarUltimasChamadas(limit: number) {
   }))
 }
 
+/** Visitantes recentes — um item por visitante (última visita), com o total de visitas. */
 export async function buscarUltimosVisitantes(limit: number) {
   const { cid } = await exigirModulo('dashboard')
   const rows = await sql`
-    SELECT hv.id, hv.data, hv.created_at, hv.presente,
-      v.nome AS visitante_nome, t.nome AS turma_nome
-    FROM historico_visitantes hv
-    LEFT JOIN visitantes v ON v.id = hv.visitante_id
-    LEFT JOIN turmas t ON t.id = hv.turma_id
-    WHERE hv.presente = true AND hv.congregacao_id = ${cid}
-    ORDER BY hv.created_at DESC
+    SELECT * FROM (
+      SELECT DISTINCT ON (hv.visitante_id)
+        hv.visitante_id, hv.data, hv.created_at,
+        v.nome AS visitante_nome, t.nome AS turma_nome,
+        (SELECT COUNT(*)::int FROM historico_visitantes x WHERE x.visitante_id = hv.visitante_id AND x.presente = true) AS visitas
+      FROM historico_visitantes hv
+      JOIN visitantes v ON v.id = hv.visitante_id
+      LEFT JOIN turmas t ON t.id = hv.turma_id
+      WHERE hv.presente = true AND hv.congregacao_id = ${cid}
+      ORDER BY hv.visitante_id, hv.data DESC, hv.created_at DESC
+    ) ultimos
+    ORDER BY data DESC, created_at DESC
     LIMIT ${limit}
   `
   return rows.map(r => ({
-    id: r.id, data: r.data, created_at: r.created_at, presente: r.presente,
-    visitante_nome: r.visitante_nome, turma_nome: r.turma_nome,
+    id: r.visitante_id as string, data: r.data as string, created_at: r.created_at as string,
+    visitante_nome: r.visitante_nome as string, turma_nome: r.turma_nome as string | null, visitas: r.visitas as number,
   }))
 }
 
@@ -82,6 +99,7 @@ export async function buscarDadosPeriodo(ano: number) {
       LEFT JOIN presencas p ON p.chamada_id = c.id
       WHERE c.ano = ${ano} AND c.congregacao_id = ${cid}
       GROUP BY c.id
+      ORDER BY c.data
     `,
     sql`
       SELECT a.id, a.nome, a.turma_id, t.nome AS turma_nome, a.responsavel, a.cargo
@@ -89,19 +107,22 @@ export async function buscarDadosPeriodo(ano: number) {
       LEFT JOIN turmas t ON t.id = a.turma_id
       WHERE a.ativo = true AND a.congregacao_id = ${cid}
     `,
-    sql`SELECT id, nome, cor FROM turmas WHERE ativa = true AND congregacao_id = ${cid}`,
+    sql`SELECT id, nome, cor, sala FROM turmas WHERE ativa = true AND congregacao_id = ${cid}`,
   ])
 
+  const numSala = (s: string | null) => parseInt(s?.match(/\d+/)?.[0] ?? '') || 999
   return {
     chamadas: chamadas.map(c => ({
-      id: c.id, data: c.data, turma_id: c.turma_id,
-      presencas: c.presencas ?? [],
+      id: c.id as string, data: c.data as string, turma_id: c.turma_id as string,
+      presencas: (c.presencas ?? []) as { aluno_id: string; presente: boolean }[],
     })),
     alunos: alunos.map(a => ({
-      id: a.id, nome: a.nome, turma_id: a.turma_id, turma_nome: a.turma_nome,
-      responsavel: a.responsavel, cargo: a.cargo,
+      id: a.id as string, nome: a.nome as string, turma_id: a.turma_id as string | null, turma_nome: a.turma_nome as string | null,
+      responsavel: a.responsavel as string | null, cargo: a.cargo as string | null,
     })),
-    turmas: turmas.map(t => ({ id: t.id, nome: t.nome, cor: t.cor ?? 'bg-blue-500' })),
+    turmas: turmas
+      .map(t => ({ id: t.id as string, nome: t.nome as string, cor: (t.cor ?? 'bg-blue-500') as string, sala: (t.sala ?? null) as string | null }))
+      .sort((a, b) => numSala(a.sala) - numSala(b.sala) || a.nome.localeCompare(b.nome, 'pt-BR')),
   }
 }
 
@@ -127,7 +148,6 @@ export async function buscarAniversariantes() {
     if (!v) return ''
     if (v instanceof Date) return v.toISOString().split('T')[0]
     const s = String(v)
-    // Se ja esta no formato YYYY-MM-DD, retornar direto
     if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.split('T')[0]
     return s
   }
@@ -140,18 +160,55 @@ export async function buscarAniversariantes() {
     isProfessor: typeof r.responsavel === 'string' && (r.responsavel as string).startsWith('professor:'),
   })).filter(r => r.data_nascimento !== '')
 
-  // Adicionar professores que nao estao vinculados como alunos
   for (const p of professores) {
     const dn = normalizarData(p.data_nascimento)
     if (!dn) continue
-    resultado.push({
-      id: p.id as string,
-      nome: p.nome as string,
-      data_nascimento: dn,
-      turma_nome: '',
-      isProfessor: true,
-    })
+    resultado.push({ id: p.id as string, nome: p.nome as string, data_nascimento: dn, turma_nome: '', isProfessor: true })
   }
 
   return resultado
+}
+
+/** Escala do próximo domingo com aula (a partir de `hoje`, YYYY-MM-DD) e status de confirmação. */
+export async function buscarProximoDomingo(hoje: string) {
+  const { cid } = await exigirModulo('dashboard')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(hoje)) return null
+
+  const [prox] = await sql`SELECT MIN(data) AS data FROM escalas WHERE congregacao_id = ${cid} AND data >= ${hoje}`
+  if (!prox?.data) return null
+
+  const base = sql`
+    SELECT e.id, t.nome AS turma_nome, t.cor AS turma_cor, t.sala, p.nome AS professor_nome
+    FROM escalas e
+    JOIN turmas t ON t.id = e.turma_id
+    LEFT JOIN professores p ON p.id = e.professor_id
+    WHERE e.congregacao_id = ${cid} AND e.data = ${prox.data}
+  `
+  // Status de lembrete/confirmação (tolerante à migration 011 ainda não aplicada)
+  const status = await sql`
+    SELECT id, confirmado,
+      to_char(lembrete_enviado_em   AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS lembrete_enviado_em,
+      to_char(lembrete_reenviado_em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS lembrete_reenviado_em
+    FROM escalas WHERE congregacao_id = ${cid} AND data = ${prox.data}
+  `.catch(() => [])
+  const porId = new Map(status.map(s => [s.id as string, s]))
+  const numSala = (s: string | null) => parseInt(s?.match(/\d+/)?.[0] ?? '') || 999
+
+  const escalas = (await base)
+    .map(e => {
+      const s = porId.get(e.id)
+      return {
+        id: e.id as string,
+        turma_nome: e.turma_nome as string,
+        turma_cor: (e.turma_cor ?? 'bg-blue-500') as string,
+        sala: (e.sala ?? null) as string | null,
+        professor_nome: (e.professor_nome ?? null) as string | null,
+        confirmado: !!s?.confirmado,
+        lembrete_enviado_em: (s?.lembrete_enviado_em ?? null) as string | null,
+        lembrete_reenviado_em: (s?.lembrete_reenviado_em ?? null) as string | null,
+      }
+    })
+    .sort((a, b) => numSala(a.sala) - numSala(b.sala))
+
+  return { data: prox.data as string, escalas }
 }

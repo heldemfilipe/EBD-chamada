@@ -85,7 +85,7 @@ export function ExportDialog({
                 ['porSala',    'Presença por sala'],
                 ...(turmaFiltro !== 'all' ? [['alunosTurma', 'Lista de alunos da turma'] as const] : []),
                 ['topAlunos',  'Top 10 alunos'],
-                ['atencao',    'Alunos em atenção'],
+                ['atencao',    'Presença crítica'],
                 ['professores','Desempenho professores'],
                 ['visitantesRelatorio', 'Visitantes'],
               ] as const).map(([key, label]) => (
