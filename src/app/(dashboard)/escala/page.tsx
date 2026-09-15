@@ -14,12 +14,17 @@ import {
 import {
   Calendar, Plus, Edit, Trash2, GraduationCap, BookOpen, LayoutGrid, Table2,
   ChevronDown, ChevronUp, ListFilter, Users, Sparkles, Link2, Save,
-  Settings2, Unlink, SlidersHorizontal,
+  Settings2, Unlink, SlidersHorizontal, MessageCircle, CheckCircle2,
 } from 'lucide-react'
 import { ConfigSugestaoDialog } from './_ConfigSugestaoDialog'
 import { CONFIG_SUGESTAO_VAZIA, contarRegras, type ConfigSugestao } from '@/lib/escala-sugestao'
 import { useAuth } from '@/contexts/AuthContext'
-import { buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction } from '@/actions/escala'
+import {
+  buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction,
+  registrarLembreteWhatsApp, definirConfirmacaoEscala,
+} from '@/actions/escala'
+import { AcoesLembrete, EnviarLembreteDialog, MensagensWhatsAppDialog } from './_LembreteWhatsApp'
+import { MENSAGENS_PADRAO, type MensagensWhatsApp } from '@/lib/lembrete-whatsapp'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { turmaCorRgba } from '@/lib/presence'
@@ -35,8 +40,11 @@ interface Escala {
   trimestre: number
   observacao: string
   tituloAula: string
+  confirmado: boolean
+  lembreteEnviadoEm: string | null
+  lembreteReenviadoEm: string | null
 }
-interface Professor { id: string; nome: string }
+interface Professor { id: string; nome: string; telefone?: string | null }
 interface Turma { id: string; nome: string; cor: string; sala?: string | null }
 
 // ─── Ordenação canônica das turmas ─────────────────────────────────────────────
@@ -248,6 +256,11 @@ export default function EscalaPage() {
   const [configSugestao, setConfigSugestao] = useState<ConfigSugestao>(CONFIG_SUGESTAO_VAZIA)
   const [configOpen, setConfigOpen]         = useState(false)
 
+  // Lembretes de WhatsApp (envio manual pelo link wa.me)
+  const [mensagensWhatsApp, setMensagensWhatsApp] = useState<MensagensWhatsApp>(MENSAGENS_PADRAO)
+  const [mensagensOpen, setMensagensOpen]         = useState(false)
+  const [envioLembrete, setEnvioLembrete]         = useState<{ escala: Escala; tipo: 'lembrete' | 'reenvio' } | null>(null)
+
   // Sugestão de escala
   const [profTurmasMap, setProfTurmasMap]         = useState<Record<string, string[]>>({})
   const [sugestaoOpen, setSugestaoOpen]           = useState(false)
@@ -306,14 +319,18 @@ export default function EscalaPage() {
   // ── Função de carga reutilizável ──────────────────────────────────────────────
   const carregarDados = useCallback(async () => {
     try {
-      const { escalas, professores, turmas, professorTurmas, configSugestao: cfg } = await fetchEscala()
+      const { escalas, professores, turmas, professorTurmas, configSugestao: cfg, mensagensWhatsApp: msgs } = await fetchEscala()
       setConfigSugestao(cfg)
+      setMensagensWhatsApp(msgs)
 
       setEscalasData(escalas.map((e: any) => ({
         id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
         trimestre: e.trimestre ?? (Math.floor(new Date(e.data + 'T12:00:00').getMonth() / 3) + 1),
         observacao: e.observacoes ?? '',
         tituloAula: e.titulo_aula ?? '',
+        confirmado: !!e.confirmado,
+        lembreteEnviadoEm: e.lembrete_enviado_em ?? null,
+        lembreteReenviadoEm: e.lembrete_reenviado_em ?? null,
       })))
       setProfessoresData(professores)
       setTurmasData(turmas)
@@ -352,6 +369,48 @@ export default function EscalaPage() {
   const getTurmaNome = (id: string) => turmasData.find(t => t.id === id)?.nome ?? '—'
   const getTurmaSala = (id: string) => turmasData.find(t => t.id === id)?.sala ?? null
   const getTurmaCor  = (id: string) => turmasData.find(t => t.id === id)?.cor ?? 'bg-gray-500'
+  const getProfTelefone = (id: string | null) => id ? (professoresData.find(p => p.id === id)?.telefone ?? null) : null
+  const podeEditarEscala = podeEditar('escala')
+
+  // ── Lembretes de WhatsApp ─────────────────────────────────────────────────────
+  function atualizarLembreteLocal(id: string, dados: { confirmado?: boolean; lembrete_enviado_em?: string | null; lembrete_reenviado_em?: string | null }) {
+    setEscalasData(prev => prev.map(e => e.id !== id ? e : {
+      ...e,
+      confirmado: dados.confirmado ?? e.confirmado,
+      lembreteEnviadoEm: dados.lembrete_enviado_em !== undefined ? dados.lembrete_enviado_em : e.lembreteEnviadoEm,
+      lembreteReenviadoEm: dados.lembrete_reenviado_em !== undefined ? dados.lembrete_reenviado_em : e.lembreteReenviadoEm,
+    }))
+  }
+
+  async function registrarEnvioLembrete(escala: Escala, tipo: 'lembrete' | 'reenvio') {
+    const res = await registrarLembreteWhatsApp(escala.id, tipo)
+    if (!res.success) { toast(res.error ?? 'Não foi possível registrar o envio.', 'error'); return }
+    atualizarLembreteLocal(escala.id, res)
+  }
+
+  async function confirmarEscala(escala: Escala, confirmado: boolean) {
+    const res = await definirConfirmacaoEscala(escala.id, confirmado)
+    if (!res.success) { toast(res.error ?? 'Não foi possível atualizar a confirmação.', 'error'); return }
+    atualizarLembreteLocal(escala.id, res)
+    if (confirmado) toast(`${getProfNome(escala.professorId)} confirmou a aula.`, 'success')
+  }
+
+  function variaveisLembrete(escala: Escala) {
+    const turmaNome = getTurmaNome(escala.turmaId)
+    const info = getAulaInfo(escala.data)
+    return {
+      professor: getProfNome(escala.professorId) ?? '',
+      turma: turmaNome,
+      data: escala.data,
+      aula: info?.aula ?? null,
+      licao: escala.tituloAula || (info ? getLicaoTema(turmaNome, String(info.ano), info.trimestre, info.aula) : null) || null,
+    }
+  }
+  // Estável enquanto a janela está aberta (não apaga o texto editado em re-renderizações)
+  const variaveisEnvio = useMemo(
+    () => envioLembrete ? variaveisLembrete(envioLembrete.escala) : null,
+    [envioLembrete] // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
   // ── Turmas ordenadas canonicamente ────────────────────────────────────────────
   const turmasOrdenadas = useMemo(
@@ -637,6 +696,9 @@ export default function EscalaPage() {
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
+          <Button variant="outline" size="icon" title="Mensagens de lembrete pelo WhatsApp" onClick={() => setMensagensOpen(true)}>
+            <MessageCircle className="h-4 w-4" />
+          </Button>
           <Button variant="outline" size="icon" title="Regras da sugestão desta congregação" onClick={() => setConfigOpen(true)} className="relative">
             <SlidersHorizontal className="h-4 w-4" />
             {contarRegras(configSugestao) > 0 && (
@@ -808,6 +870,16 @@ export default function EscalaPage() {
                     <>
                       <GraduationCap className="h-3.5 w-3.5 flex-shrink-0" />
                       <span className="text-xs">{linha.professor}</span>
+                      {linha.escala && (
+                        <AcoesLembrete
+                          compacto
+                          escala={linha.escala}
+                          telefone={getProfTelefone(linha.escala.professorId)}
+                          podeEditar={podeEditarEscala}
+                          onEnviar={tipo => linha.escala && setEnvioLembrete({ escala: linha.escala, tipo })}
+                          onConfirmar={v => linha.escala && confirmarEscala(linha.escala, v)}
+                        />
+                      )}
                       <div className="flex gap-0.5 ml-1">
                         <button
                           onClick={() => linha.escala && abrirDialog(linha.escala)}
@@ -1102,6 +1174,12 @@ export default function EscalaPage() {
                         <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
                           {escalas.length} turma{escalas.length !== 1 ? 's' : ''}
                         </Badge>
+                        {escalas.some(e => e.confirmado || e.lembreteEnviadoEm) && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-600">
+                            <CheckCircle2 className="h-3 w-3" />
+                            {escalas.filter(e => e.confirmado).length}/{escalas.length} confirmados
+                          </span>
+                        )}
                       </div>
 
                       {/* Professores resumidos (quando recolhido) */}
@@ -1154,6 +1232,18 @@ export default function EscalaPage() {
                               <span className="text-xs">{getProfNome(escala.professorId)}</span>
                             </div>
 
+                            {escala.professorId && (
+                              <div className="flex-shrink-0">
+                                <AcoesLembrete
+                                  escala={escala}
+                                  telefone={getProfTelefone(escala.professorId)}
+                                  podeEditar={podeEditarEscala}
+                                  onEnviar={tipo => setEnvioLembrete({ escala, tipo })}
+                                  onConfirmar={v => confirmarEscala(escala, v)}
+                                />
+                              </div>
+                            )}
+
                             <div className="flex gap-0.5 flex-shrink-0">
                               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => abrirDialog(escala)}>
                                 <Edit className="h-3.5 w-3.5" />
@@ -1173,6 +1263,25 @@ export default function EscalaPage() {
           </div>
         )
       )}
+
+      {/* ── Dialogs de lembrete pelo WhatsApp ───────────────────────────────── */}
+      <EnviarLembreteDialog
+        open={!!envioLembrete}
+        onClose={() => setEnvioLembrete(null)}
+        tipo={envioLembrete?.tipo ?? 'lembrete'}
+        variaveis={variaveisEnvio}
+        telefone={envioLembrete ? getProfTelefone(envioLembrete.escala.professorId) : null}
+        mensagens={mensagensWhatsApp}
+        onEnviado={() => { if (envioLembrete) registrarEnvioLembrete(envioLembrete.escala, envioLembrete.tipo) }}
+      />
+      <MensagensWhatsAppDialog
+        open={mensagensOpen}
+        onClose={() => setMensagensOpen(false)}
+        mensagens={mensagensWhatsApp}
+        onSalvo={setMensagensWhatsApp}
+        congregacaoNome={congregacaoAtiva?.nome}
+        somenteLeitura={!podeEditarEscala}
+      />
 
       {/* ── Dialog Config Sugestão ────────────────────────────────────────── */}
       <ConfigSugestaoDialog
