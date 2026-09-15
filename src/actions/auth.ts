@@ -25,6 +25,8 @@ export interface PerfilComPermissoes {
   congregacoes: CongregacaoResumo[]
   modulos: { modulo: string; nivel: string }[]
   turmas: string[]
+  /** Deve definir nova senha antes de usar o sistema */
+  deveTrocarSenha: boolean
 }
 
 // ─── Perfil do usuário logado (identificado pela sessão, nunca pelo cliente) ──
@@ -58,5 +60,6 @@ export async function buscarMeuPerfil(): Promise<PerfilComPermissoes | null> {
     congregacoes,
     modulos,
     turmas: s.turmas === '*' ? [] : s.turmas,
+    deveTrocarSenha: s.deveTrocarSenha,
   }
 }

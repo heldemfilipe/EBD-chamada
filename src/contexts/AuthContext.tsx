@@ -30,6 +30,8 @@ interface AuthContextType {
   trocarCongregacao: (id: string) => Promise<void>
   recarregarPerfil: () => Promise<void>
   podeGerenciarUsuarios: boolean
+  precisaTrocarSenha: boolean                  // deve definir nova senha antes de usar o sistema
+  concluirTrocaSenha: () => void
   modulosPermitidos: string[]   // lista de módulos acessíveis; admin = todos
   permissoesModulos: Record<string, NivelPermissao>  // modulo -> nivel
   turmasPermitidas: string[]    // lista de turma_ids; admin = ['*']
@@ -56,6 +58,8 @@ const AuthContext = createContext<AuthContextType>({
   trocarCongregacao: async () => {},
   recarregarPerfil: async () => {},
   podeGerenciarUsuarios: false,
+  precisaTrocarSenha: false,
+  concluirTrocaSenha: () => {},
   modulosPermitidos: [],
   permissoesModulos: {},
   turmasPermitidas: [],
@@ -78,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [congregacao, setCongregacao] = useState<CongregacaoResumo | null>(null)
   const [congregacaoAtiva, setCongregacaoAtiva] = useState<CongregacaoResumo | null>(null)
   const [congregacoes, setCongregacoes] = useState<CongregacaoResumo[]>([])
+  const [precisaTrocarSenha, setPrecisaTrocarSenha] = useState(false)
 
   async function loadPerfil(userId: string) {
     logger.info('Carregando perfil do usuário', { module: 'auth', userId })
@@ -143,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCongregacao(perfilData.congregacao)
     setCongregacaoAtiva(perfilData.congregacaoAtiva)
     setCongregacoes(perfilData.congregacoes)
+    setPrecisaTrocarSenha(perfilData.deveTrocarSenha)
 
     if (perfilData.role === 'admin') {
       setModulosPermitidos(TODOS_MODULOS)
@@ -185,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCongregacao(null)
     setCongregacaoAtiva(null)
     setCongregacoes([])
+    setPrecisaTrocarSenha(false)
   }
 
   useEffect(() => {
@@ -308,6 +315,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) await loadPerfil(user.id)
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Após trocar a senha, recarrega o perfil (as ações do servidor ficavam bloqueadas)
+  const concluirTrocaSenha = useCallback(() => {
+    setPrecisaTrocarSenha(false)
+    if (user) loadPerfil(user.id)
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const isAdmin = perfil?.role === 'admin'
   const podeGerenciarUsuarios = isAdmin || permissoesModulos['usuarios'] !== undefined
 
@@ -328,6 +341,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       trocarCongregacao,
       recarregarPerfil,
       podeGerenciarUsuarios,
+      precisaTrocarSenha,
+      concluirTrocaSenha,
       modulosPermitidos,
       permissoesModulos,
       turmasPermitidas,

@@ -16,7 +16,9 @@ import {
   ChevronDown, ChevronUp, ListFilter, Users, Sparkles, Link2, Save,
   Settings2, Unlink, SlidersHorizontal,
 } from 'lucide-react'
-import { ConfigSugestaoDialog, ConfigSugestao, CONFIG_PADRAO, carregarConfig } from './_ConfigSugestaoDialog'
+import { ConfigSugestaoDialog } from './_ConfigSugestaoDialog'
+import { CONFIG_SUGESTAO_VAZIA, contarRegras, type ConfigSugestao } from '@/lib/escala-sugestao'
+import { useAuth } from '@/contexts/AuthContext'
 import { buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction } from '@/actions/escala'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { toast } from '@/lib/toast'
@@ -115,32 +117,34 @@ function gerarEscalaSugerida(
   turmasData: Turma[],
   ano: number,
   trimestre: number,
-  cfg: ConfigSugestao = CONFIG_PADRAO,
+  cfg: ConfigSugestao = CONFIG_SUGESTAO_VAZIA,
 ): Array<{ data: string; turmaId: string; professorId: string }> {
-  const norm = (s: string) =>
-    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const pNome = (id: string) =>
-    norm(professoresData.find(p => p.id === id)?.nome ?? '')
-  const matchesAny = (n: string, list: string[]) => list.some(p => n.includes(p))
-
-  const isFilhas  = (id: string) => norm(turmasData.find(t => t.id === id)?.nome ?? '').includes('filha')
-  const isDynamo  = (id: string) => {
-    const n = norm(turmasData.find(t => t.id === id)?.nome ?? '')
-    return n.includes('dynamo') && !n.includes('pre')
+  // Regras vêm da configuração da congregação (IDs de professores e turmas)
+  const paridade      = new Set(cfg.paridadeProfessores)
+  const sem2Domingo   = new Set(cfg.semSegundoDomingo)
+  const sem1Aula      = new Set(cfg.semPrimeiraAula)
+  const excluidas     = new Set(cfg.turmasExcluidas)
+  const paridadeTrim  = cfg.paridadePorTrimestre[String(trimestre) as '1' | '2' | '3' | '4'] ?? 'par'
+  const chaveLimite   = (profId: string, turmaId: string) => `${profId}::${turmaId}`
+  const limites       = new Map(cfg.limitesPorTurma.map(l => [chaveLimite(l.professorId, l.turmaId), l.maxAulas]))
+  const incompativeis = new Map<string, Set<string>>()
+  for (const { a, b } of cfg.paresIncompativeis) {
+    if (!incompativeis.has(a)) incompativeis.set(a, new Set())
+    if (!incompativeis.has(b)) incompativeis.set(b, new Set())
+    incompativeis.get(a)!.add(b)
+    incompativeis.get(b)!.add(a)
   }
-
-  const paridadeTrim = cfg.paridadePorTrim[String(trimestre)] ?? 'par'
 
   const domingos = getDomingosTrimestre(trimestre, ano)
   const resultado: Array<{ data: string; turmaId: string; professorId: string }> = []
 
   const aulasPorProf = new Map<string, Set<number>>()
   const countPorTurma = new Map<string, Map<string, number>>()
-  let leandroDynamo = 0
+  const usoLimite = new Map<string, number>()
 
   const turmasGen = [...turmasData]
     .sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome))
-    .filter(t => !isFilhas(t.id))
+    .filter(t => !excluidas.has(t.id))
 
   for (const { aula, data } of domingos) {
     const isEven  = aula % 2 === 0
@@ -153,30 +157,25 @@ function gerarEscalaSugerida(
 
       const getEligible = (relaxConseq: boolean) =>
         pool.filter(pid => {
-          const n = pNome(pid)
           // Paridade configurável por trimestre
-          if (matchesAny(n, cfg.profParidade)) {
+          if (paridade.has(pid)) {
             if (paridadeTrim === 'par'   && !isEven) return false
             if (paridadeTrim === 'impar' && isEven)  return false
           }
           // Sem 2º domingo do mês
-          if (is2nd && matchesAny(n, cfg.semSegundoDomingo)) return false
+          if (is2nd && sem2Domingo.has(pid)) return false
           // Sem 1ª aula do trimestre
-          if (isFirst && matchesAny(n, cfg.semPrimeiraAula)) return false
-          // Leandro: máx 1 aula no Dynamo
-          if (isDynamo(turma.id) && n.includes('leandro') && leandroDynamo >= 1) return false
+          if (isFirst && sem1Aula.has(pid)) return false
+          // Limite de aulas do professor nesta turma
+          const limite = limites.get(chaveLimite(pid, turma.id))
+          if (limite !== undefined && (usoLimite.get(chaveLimite(pid, turma.id)) ?? 0) >= limite) return false
           // Não pode ensinar duas turmas no mesmo domingo
           if (aulaProfs.has(pid)) return false
           // Sem domingos seguidos
-          if (!relaxConseq && aulasPorProf.get(pid)?.has(aula - 1)) return false
-          // Restrições de par fixas
-          const jáEscalados = Array.from(aulaProfs.keys())
-          if (n.includes('adriana')  && jáEscalados.some(id => pNome(id).includes('eder')))      return false
-          if (n.includes('eder')     && jáEscalados.some(id => pNome(id).includes('adriana')))   return false
-          if (n.includes('fabio')    && jáEscalados.some(id => pNome(id).includes('gabriela')))  return false
-          if (n.includes('gabriela') && jáEscalados.some(id => pNome(id).includes('fabio')))     return false
-          if (n.includes('gabriela') && jáEscalados.some(id => pNome(id).includes('samantha')))  return false
-          if (n.includes('samantha') && jáEscalados.some(id => pNome(id).includes('gabriela')))  return false
+          if (cfg.semDomingosSeguidos && !relaxConseq && aulasPorProf.get(pid)?.has(aula - 1)) return false
+          // Pares que não podem ser escalados no mesmo domingo
+          const conflitos = incompativeis.get(pid)
+          if (conflitos && Array.from(aulaProfs.keys()).some(id => conflitos.has(id))) return false
           return true
         })
 
@@ -195,7 +194,8 @@ function gerarEscalaSugerida(
       aulaProfs.set(picked, turma.id)
       tc.set(picked, (tc.get(picked) ?? 0) + 1)
       countPorTurma.set(turma.id, tc)
-      if (isDynamo(turma.id) && pNome(picked).includes('leandro')) leandroDynamo++
+      const kLimite = chaveLimite(picked, turma.id)
+      if (limites.has(kLimite)) usoLimite.set(kLimite, (usoLimite.get(kLimite) ?? 0) + 1)
     }
   }
 
@@ -214,6 +214,7 @@ const FORM_VAZIO = {
 
 // ─── Componente ────────────────────────────────────────────────────────────────
 export default function EscalaPage() {
+  const { podeEditar, congregacaoAtiva } = useAuth()
   const [escalasData, setEscalasData]         = useState<Escala[]>([])
   const [professoresData, setProfessoresData]  = useState<Professor[]>([])
   const [turmasData, setTurmasData]            = useState<Turma[]>([])
@@ -243,10 +244,9 @@ export default function EscalaPage() {
   // Salas unidas per-aula: chave = "${turmaId}::${data}", valor = turmaId com quem está unida
   const [salasUnidasConfig, setSalasUnidasConfig] = useState<Record<string, string>>({})
 
-  // Config de sugestão (carregada do localStorage na montagem)
-  const [configSugestao, setConfigSugestao] = useState<ConfigSugestao>(CONFIG_PADRAO)
+  // Regras da sugestão (salvas no banco, por congregação)
+  const [configSugestao, setConfigSugestao] = useState<ConfigSugestao>(CONFIG_SUGESTAO_VAZIA)
   const [configOpen, setConfigOpen]         = useState(false)
-  useEffect(() => { setConfigSugestao(carregarConfig()) }, [])
 
   // Sugestão de escala
   const [profTurmasMap, setProfTurmasMap]         = useState<Record<string, string[]>>({})
@@ -306,7 +306,8 @@ export default function EscalaPage() {
   // ── Função de carga reutilizável ──────────────────────────────────────────────
   const carregarDados = useCallback(async () => {
     try {
-      const { escalas, professores, turmas, professorTurmas } = await fetchEscala()
+      const { escalas, professores, turmas, professorTurmas, configSugestao: cfg } = await fetchEscala()
+      setConfigSugestao(cfg)
 
       setEscalasData(escalas.map((e: any) => ({
         id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
@@ -540,7 +541,7 @@ export default function EscalaPage() {
     }
     setSugestaoEntradas(entradasComUnidas)
     setSugestaoOpen(true)
-  }, [profTurmasMap, professoresData, turmasData, filtroAno, filtroTrim, salasUnidasConfig])
+  }, [profTurmasMap, professoresData, turmasData, filtroAno, filtroTrim, salasUnidasConfig, configSugestao])
 
   const fecharSugestao = useCallback(() => {
     setSugestaoOpen(false)
@@ -636,8 +637,13 @@ export default function EscalaPage() {
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
-          <Button variant="outline" size="icon" title="Configurar restrições da sugestão" onClick={() => setConfigOpen(true)}>
+          <Button variant="outline" size="icon" title="Regras da sugestão desta congregação" onClick={() => setConfigOpen(true)} className="relative">
             <SlidersHorizontal className="h-4 w-4" />
+            {contarRegras(configSugestao) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+                {contarRegras(configSugestao)}
+              </span>
+            )}
           </Button>
           <Button variant="outline" onClick={abrirSugestao} className="flex-1 sm:flex-none" disabled={Object.keys(profTurmasMap).length === 0}>
             <Sparkles className="h-4 w-4 mr-2" />Gerar Sugestão
@@ -1174,6 +1180,10 @@ export default function EscalaPage() {
         onClose={() => setConfigOpen(false)}
         config={configSugestao}
         onSave={setConfigSugestao}
+        professores={professoresData}
+        turmas={turmasData}
+        congregacaoNome={congregacaoAtiva?.nome}
+        somenteLeitura={!podeEditar('escala')}
       />
 
       {/* ── Dialog Sugestão de Escala ──────────────────────────────────────── */}
@@ -1191,6 +1201,7 @@ export default function EscalaPage() {
         proximaData={proximaData}
         salasUnidasConfig={salasUnidasConfig}
         profTurmasMap={profTurmasMap}
+        config={configSugestao}
       />
 
       {/* ── Dialog Nova / Editar Escala ────────────────────────────────────── */}

@@ -19,11 +19,13 @@ import {
   Shield,
   Loader2,
   Church,
+  KeyRound,
 } from 'lucide-react'
 import { useState } from 'react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { useAuth } from '@/contexts/AuthContext'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { AlterarSenhaDialog } from '@/components/auth/AlterarSenhaDialog'
 
 const allMenuItems = [
   { title: 'Dashboard',   icon: LayoutDashboard, href: '/dashboard',   modulo: 'dashboard'   },
@@ -41,6 +43,7 @@ export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [trocando, setTrocando] = useState(false)
+  const [alterarSenhaOpen, setAlterarSenhaOpen] = useState(false)
   const {
     perfil, isAdmin, isAdminGeral, podeGerenciarUsuarios, modulosPermitidos, loading, signOut,
     congregacaoAtiva, congregacoes, trocarCongregacao,
@@ -238,6 +241,15 @@ export function Sidebar() {
                     </p>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setAlterarSenhaOpen(true)}
+                  title="Alterar senha"
+                  aria-label="Alterar senha"
+                  className="p-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <KeyRound className="h-4 w-4" />
+                </button>
                 <ThemeToggle />
               </div>
             )}
@@ -262,6 +274,8 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
+
+      <AlterarSenhaDialog open={alterarSenhaOpen} onOpenChange={setAlterarSenhaOpen} />
     </>
   )
 }

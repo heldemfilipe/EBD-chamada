@@ -22,6 +22,7 @@ export function withDbHandler(
 export async function exigirAdminNotificacoes(): Promise<{ s: Sessao; cid: string }> {
   const s = await obterSessao()
   if (!s) throw new AcessoNegadoError('Sessão expirada. Faça login novamente.')
+  if (s.deveTrocarSenha) throw new AcessoNegadoError('Defina uma nova senha para continuar.')
   if (s.role !== 'admin') throw new AcessoNegadoError('Apenas administradores podem gerenciar notificações.')
   if (!s.cid) throw new AcessoNegadoError('Nenhuma congregação selecionada.')
   return { s, cid: s.cid }

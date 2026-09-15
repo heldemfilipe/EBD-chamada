@@ -5,6 +5,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Sparkles, Link2, Save } from 'lucide-react'
+import type { ConfigSugestao } from '@/lib/escala-sugestao'
 
 interface Professor { id: string; nome: string }
 interface Turma { id: string; nome: string; cor: string; sala?: string | null }
@@ -72,12 +73,50 @@ interface SugestaoDialogProps {
   proximaData: string | null
   salasUnidasConfig: Record<string, string>
   profTurmasMap: Record<string, string[]>
+  config: ConfigSugestao
+}
+
+const PARIDADE_LABEL = { par: 'só aulas pares', impar: 'só aulas ímpares', todos: 'todas as aulas' }
+
+/** Resumo legível das regras aplicadas (legenda do topo). */
+function resumoRegras(config: ConfigSugestao, professores: Professor[], turmas: Turma[], trimestre: string) {
+  const nomes = (ids: string[], lista: { id: string; nome: string }[]) =>
+    ids.map(id => lista.find(x => x.id === id)?.nome).filter(Boolean).join(', ')
+  const itens: { cor: string; texto: string }[] = []
+
+  if (config.paridadeProfessores.length > 0) {
+    const p = config.paridadePorTrimestre[trimestre as '1' | '2' | '3' | '4'] ?? 'par'
+    itens.push({ cor: 'bg-violet-400', texto: `${nomes(config.paridadeProfessores, professores)}: ${PARIDADE_LABEL[p]}` })
+  }
+  if (config.semSegundoDomingo.length > 0) {
+    itens.push({ cor: 'bg-amber-400', texto: `${nomes(config.semSegundoDomingo, professores)}: sem 2º domingo` })
+  }
+  if (config.semPrimeiraAula.length > 0) {
+    itens.push({ cor: 'bg-orange-400', texto: `${nomes(config.semPrimeiraAula, professores)}: sem 1ª aula` })
+  }
+  for (const l of config.limitesPorTurma) {
+    itens.push({ cor: 'bg-blue-400', texto: `${nomes([l.professorId], professores)}: máx. ${l.maxAulas} aula(s) em ${nomes([l.turmaId], turmas)}` })
+  }
+  if (config.paresIncompativeis.length > 0) {
+    itens.push({
+      cor: 'bg-teal-400',
+      texto: 'Não juntos: ' + config.paresIncompativeis.map(p => `${nomes([p.a], professores)} e ${nomes([p.b], professores)}`).join('; '),
+    })
+  }
+  if (config.turmasExcluidas.length > 0) {
+    itens.push({ cor: 'bg-slate-400', texto: `Fora da geração: ${nomes(config.turmasExcluidas, turmas)}` })
+  }
+  if (config.semDomingosSeguidos) {
+    itens.push({ cor: 'bg-rose-400', texto: 'Sem domingos consecutivos' })
+  }
+  return itens
 }
 
 export function SugestaoDialog({
   open, onClose, sugestaoEntradas, onUpdateCell, isSalvando, onSalvar,
-  professores, turmas, filtroTrim, filtroAno, proximaData, salasUnidasConfig, profTurmasMap,
+  professores, turmas, filtroTrim, filtroAno, proximaData, salasUnidasConfig, profTurmasMap, config,
 }: SugestaoDialogProps) {
+  const regras = resumoRegras(config, professores, turmas, filtroTrim)
   const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
   const turmasGen = [...turmas].sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome))
 
@@ -110,10 +149,13 @@ export function SugestaoDialog({
 
         {/* Legenda das restrições */}
         <div className="px-5 py-2 bg-muted/30 border-b flex-shrink-0 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400 inline-block" />Viviana / Livys: paridade configurável</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Eder / Heldem / Leandro: sem 2º domingo nem 1ª aula</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Leandro: 1 aula no Dynamo</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />Sem domingos consecutivos</span>
+          {regras.length === 0 ? (
+            <span>Nenhuma regra configurada: distribuição apenas por rodízio entre os professores de cada turma.</span>
+          ) : regras.map(r => (
+            <span key={r.texto} className="flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full inline-block ${r.cor}`} />{r.texto}
+            </span>
+          ))}
         </div>
 
         {/* Tabela da sugestão */}

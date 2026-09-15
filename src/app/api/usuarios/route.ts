@@ -30,6 +30,7 @@ function responderErro(e: unknown) {
 async function exigirGestor(nivel: 'ver' | 'editar'): Promise<Sessao> {
   const s = await obterSessao()
   if (!s) throw new ErroApi(401, 'Sessão expirada')
+  if (s.deveTrocarSenha) throw new ErroApi(403, 'Defina uma nova senha para continuar.')
   if (!podeGerenciarUsuarios(s, nivel)) throw new ErroApi(403, 'Sem permissão')
   return s
 }
@@ -164,6 +165,7 @@ export async function GET() {
 
     const perfis = await sql`
       SELECT p.id, p.nome, p.role, p.ativo, p.created_at, p.congregacao_id, p.perfil_acesso_id,
+        p.deve_trocar_senha, p.senha_alterada_em,
         c.nome AS congregacao_nome, pa.nome AS perfil_acesso_nome,
         COALESCE((
           SELECT json_agg(json_build_object('modulo', m.modulo, 'nivel', m.nivel))
@@ -199,6 +201,8 @@ export async function GET() {
       role: p.role,
       ativo: p.ativo,
       created_at: p.created_at,
+      deve_trocar_senha: p.deve_trocar_senha,
+      senha_alterada_em: p.senha_alterada_em,
       email: emails[p.id] ?? '',
       congregacao_id: p.congregacao_id,
       congregacao_nome: s.adminGeral ? p.congregacao_nome : undefined,
@@ -225,6 +229,8 @@ export async function POST(req: NextRequest) {
     if (senha.length < 6) throw new ErroApi(400, 'A senha deve ter pelo menos 6 caracteres')
 
     const acesso = await resolverAcesso(s, body)
+    // Por padrão o novo usuário define a própria senha no primeiro acesso
+    const deveTrocarSenha = body.deve_trocar_senha !== false
     const db = createServiceClient() as any
 
     const { data: authUser, error: authError } = await db.auth.admin.createUser({
@@ -243,8 +249,8 @@ export async function POST(req: NextRequest) {
       await sql.begin(async t => {
         const tx = t as unknown as typeof sql // tipagem do postgres.js não expõe a assinatura de chamada
         await tx`
-          INSERT INTO perfis (id, nome, role, ativo, congregacao_id, perfil_acesso_id)
-          VALUES (${novoId}, ${nome}, ${acesso.role}, true, ${acesso.congregacaoId}, ${acesso.perfilAcessoId})
+          INSERT INTO perfis (id, nome, role, ativo, congregacao_id, perfil_acesso_id, deve_trocar_senha)
+          VALUES (${novoId}, ${nome}, ${acesso.role}, true, ${acesso.congregacaoId}, ${acesso.perfilAcessoId}, ${deveTrocarSenha})
         `
         await gravarPermissoes(tx, novoId, acesso)
       })
@@ -280,6 +286,14 @@ export async function PUT(req: NextRequest) {
     // Ninguém altera o próprio nível de acesso (evita auto-promoção e auto-bloqueio)
     const acesso = proprio ? null : await resolverAcesso(s, body)
 
+    // Exigir troca de senha no próximo acesso: ao redefinir a senha vale TRUE por
+    // padrão; sem nova senha, só muda se o gestor informar. Não se aplica à própria conta.
+    const deveTrocarSenha: boolean | null = proprio
+      ? null
+      : typeof body.deve_trocar_senha === 'boolean'
+        ? body.deve_trocar_senha
+        : novaSenha ? true : null
+
     await sql.begin(async t => {
       const tx = t as unknown as typeof sql
       if (acesso) {
@@ -291,6 +305,9 @@ export async function PUT(req: NextRequest) {
         await gravarPermissoes(tx, alvo.id, acesso)
       } else {
         await tx`UPDATE perfis SET nome = ${nome} WHERE id = ${alvo.id}`
+      }
+      if (deveTrocarSenha !== null) {
+        await tx`UPDATE perfis SET deve_trocar_senha = ${deveTrocarSenha} WHERE id = ${alvo.id}`
       }
     })
 
@@ -307,18 +324,21 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// ─── PATCH — Ativar/desativar usuário ─────────────────────────────────────────
+// ─── PATCH — Ativar/desativar ou exigir troca de senha ────────────────────────
 export async function PATCH(req: NextRequest) {
   try {
     const s = await exigirGestor('editar')
     const body = await req.json().catch(() => { throw new ErroApi(400, 'Body inválido') })
-    if (!body.id || typeof body.ativo !== 'boolean') throw new ErroApi(400, 'Parâmetros inválidos')
-    if (body.id === s.userId) throw new ErroApi(400, 'Você não pode desativar sua própria conta')
+    const temAtivo = typeof body.ativo === 'boolean'
+    const temTroca = typeof body.deve_trocar_senha === 'boolean'
+    if (!body.id || (!temAtivo && !temTroca)) throw new ErroApi(400, 'Parâmetros inválidos')
+    if (body.id === s.userId) throw new ErroApi(400, 'Você não pode alterar o status da sua própria conta')
 
     const alvo = await carregarAlvo(body.id)
     assertAlvoNoEscopo(s, alvo)
 
-    await sql`UPDATE perfis SET ativo = ${body.ativo} WHERE id = ${alvo.id}`
+    if (temAtivo) await sql`UPDATE perfis SET ativo = ${body.ativo} WHERE id = ${alvo.id}`
+    if (temTroca) await sql`UPDATE perfis SET deve_trocar_senha = ${body.deve_trocar_senha} WHERE id = ${alvo.id}`
     return NextResponse.json({ success: true })
   } catch (e) {
     return responderErro(e)

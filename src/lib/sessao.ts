@@ -35,6 +35,8 @@ export interface Sessao {
   modulos: Partial<Record<Modulo, Nivel>>
   /** Turmas liberadas na chamada ('*' = todas) */
   turmas: string[] | '*'
+  /** Precisa definir uma nova senha antes de usar o sistema */
+  deveTrocarSenha: boolean
 }
 
 export class AcessoNegadoError extends Error {
@@ -76,6 +78,7 @@ export const obterSessao = cache(async (): Promise<Sessao | null> => {
   const [row] = await sql`
     SELECT
       p.id, p.nome, p.role, p.ativo, p.congregacao_id, p.perfil_acesso_id,
+      COALESCE(p.deve_trocar_senha, false) AS deve_trocar_senha,
       c.ativa AS congregacao_ativa,
       COALESCE((
         SELECT json_agg(json_build_object('modulo', m.modulo, 'nivel', m.nivel))
@@ -133,6 +136,7 @@ export const obterSessao = cache(async (): Promise<Sessao | null> => {
     perfilAcessoId: row.perfil_acesso_id,
     modulos,
     turmas: row.role === 'admin' ? '*' : ((row.turmas ?? []) as string[]),
+    deveTrocarSenha: !!row.deve_trocar_senha,
   }
 })
 
@@ -156,6 +160,7 @@ export function podeAcessarTurma(s: Sessao, turmaId: string): boolean {
 export async function exigirSessao(): Promise<Sessao> {
   const s = await obterSessao()
   if (!s) throw new AcessoNegadoError('Sessão expirada. Faça login novamente.')
+  if (s.deveTrocarSenha) throw new AcessoNegadoError('Defina uma nova senha para continuar.')
   return s
 }
 

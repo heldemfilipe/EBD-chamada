@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
     // ─ Disparo manual por um administrador
     if (sessao) {
-      if (sessao.role !== 'admin' || !sessao.cid) {
+      if (sessao.role !== 'admin' || !sessao.cid || sessao.deveTrocarSenha) {
         return NextResponse.json({ error: 'Apenas administradores podem disparar notificações.' }, { status: 403 })
       }
       const { data: config } = await db

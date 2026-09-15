@@ -18,7 +18,7 @@ import {
 import {
   Plus, Shield, ShieldCheck, Users, UserCheck, Edit, Power, Trash2, Search, Church, Layers,
   LayoutDashboard, GraduationCap, BookOpen, ClipboardCheck, UserCog,
-  CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key, AlertTriangle, Globe, SlidersHorizontal,
+  CalendarDays, BarChart3, Eye, EyeOff, Loader2, Key, KeyRound, AlertTriangle, Globe, SlidersHorizontal,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -43,6 +43,7 @@ interface UsuarioDB {
   role: 'admin' | 'usuario'
   ativo: boolean
   created_at: string
+  deve_trocar_senha: boolean
   congregacao_id: string | null
   congregacao_nome?: string | null
   perfil_acesso_id: string | null
@@ -227,6 +228,7 @@ export default function UsuariosPage() {
     perfil_acesso_id: PERFIL_PERSONALIZADO,
     modulos: {} as Record<string, Nivel>,
     turmas: [] as string[],
+    deve_trocar_senha: true,
   })
 
   // Dialog perfil de acesso
@@ -309,6 +311,7 @@ export default function UsuariosPage() {
         ? filtroCongregacao
         : congregacaoAtiva?.id ?? '',
       perfil_acesso_id: PERFIL_PERSONALIZADO, modulos: {}, turmas: [],
+      deve_trocar_senha: true,
     })
     setShowPassword(false)
     setBuscaPerfil('')
@@ -326,6 +329,7 @@ export default function UsuariosPage() {
       perfil_acesso_id: u.perfil_acesso_id ?? PERFIL_PERSONALIZADO,
       modulos: u.perfil_acesso_id ? {} : paraRecord(u.modulos),
       turmas: u.turmas.map(t => t.id),
+      deve_trocar_senha: u.deve_trocar_senha,
     })
     setShowPassword(false)
     setBuscaPerfil('')
@@ -367,6 +371,7 @@ export default function UsuariosPage() {
         ? Object.entries(form.modulos).map(([modulo, nivel]) => ({ modulo, nivel }))
         : [],
       turmas: form.funcao === 'usuario' && 'chamada' in modulosEfetivos ? form.turmas : [],
+      deve_trocar_senha: editandoProprio ? undefined : form.deve_trocar_senha,
     }
 
     setSaving(true)
@@ -398,6 +403,22 @@ export default function UsuariosPage() {
     })
     if (res.ok) fetchUsuarios()
     else toast((await res.json()).error ?? 'Erro ao alterar status.', 'error')
+  }
+
+  async function handleExigirTrocaSenha(u: UsuarioDB) {
+    const exigir = !u.deve_trocar_senha
+    if (exigir && !confirm(`Exigir que "${u.nome}" defina uma nova senha no próximo acesso?`)) return
+    const res = await fetch('/api/usuarios', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, deve_trocar_senha: exigir }),
+    })
+    if (res.ok) {
+      toast(exigir ? 'O usuário definirá uma nova senha no próximo acesso.' : 'Exigência de troca de senha removida.', 'success')
+      fetchUsuarios()
+    } else {
+      toast((await res.json()).error ?? 'Erro ao atualizar.', 'error')
+    }
   }
 
   async function handleApagar() {
@@ -594,6 +615,11 @@ export default function UsuariosPage() {
                                 <div className="min-w-0">
                                   <p className="font-medium text-sm truncate">{u.nome}{proprio && <span className="text-xs text-muted-foreground font-normal"> (você)</span>}</p>
                                   <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                  {u.deve_trocar_senha && (
+                                    <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-medium text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">
+                                      <KeyRound className="h-2.5 w-2.5" />Troca de senha pendente
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>
@@ -645,6 +671,14 @@ export default function UsuariosPage() {
                                   </Button>
                                   {!proprio && (
                                     <>
+                                      <Button
+                                        variant="ghost" size="icon"
+                                        onClick={() => handleExigirTrocaSenha(u)}
+                                        title={u.deve_trocar_senha ? 'Remover exigência de troca de senha' : 'Exigir nova senha no próximo acesso'}
+                                        className={u.deve_trocar_senha ? 'text-amber-600 hover:text-amber-700' : 'hover:text-amber-600'}
+                                      >
+                                        <KeyRound className="h-4 w-4" />
+                                      </Button>
                                       <Button
                                         variant="ghost" size="icon"
                                         onClick={() => handleToggleAtivo(u)}
@@ -792,7 +826,11 @@ export default function UsuariosPage() {
                 <Input
                   type={showPassword ? 'text' : 'password'}
                   value={form.senha}
-                  onChange={e => setForm(f => ({ ...f, senha: e.target.value }))}
+                  onChange={e => {
+                    const senha = e.target.value
+                    // Ao redefinir a senha de alguém, sugere exigir a troca no próximo acesso
+                    setForm(f => ({ ...f, senha, deve_trocar_senha: editMode && senha && !f.senha ? true : f.deve_trocar_senha }))
+                  }}
                   placeholder={editMode ? '••••••••' : 'Mínimo 6 caracteres'}
                   className="pr-10"
                 />
@@ -810,6 +848,23 @@ export default function UsuariosPage() {
                 </p>
               )}
             </div>
+
+            {!editandoProprio && (
+              <label className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={form.deve_trocar_senha}
+                  onChange={e => setForm(f => ({ ...f, deve_trocar_senha: e.target.checked }))}
+                />
+                <span className="text-sm">
+                  <span className="font-medium flex items-center gap-1"><KeyRound className="h-3.5 w-3.5" />Exigir nova senha no próximo acesso</span>
+                  <span className="text-xs text-muted-foreground">
+                    O usuário entra com a senha informada por você e, antes de usar o sistema, precisa definir a própria senha.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {editandoProprio ? (
               <p className="text-xs text-muted-foreground rounded-lg border bg-muted/40 p-3">

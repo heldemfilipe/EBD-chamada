@@ -2,6 +2,9 @@
 
 import sql from '@/lib/db'
 import { exigirModulo, assertTurmasDaCongregacao, assertProfessoresDaCongregacao } from '@/lib/sessao'
+import {
+  normalizarConfigSugestao, filtrarConfigPorIds, CONFIG_SUGESTAO_VAZIA, type ConfigSugestao,
+} from '@/lib/escala-sugestao'
 
 export async function buscarDadosEscala() {
   const { cid } = await exigirModulo('escala')
@@ -14,6 +17,8 @@ export async function buscarDadosEscala() {
     JOIN turmas t ON t.id = pt.turma_id
     WHERE t.congregacao_id = ${cid}
   `
+  // Tolerante à ausência da tabela (migration 010 ainda não aplicada)
+  const [cfgRow] = await sql`SELECT config FROM escala_config_sugestao WHERE congregacao_id = ${cid}`.catch(() => [])
 
   return {
     escalas: escalas.map(e => ({
@@ -23,6 +28,32 @@ export async function buscarDadosEscala() {
     professores: professores.map(p => ({ id: p.id, nome: p.nome })),
     turmas: turmas.map(t => ({ id: t.id, nome: t.nome, cor: t.cor, sala: t.sala ?? null })),
     professorTurmas: professorTurmas.map(pt => ({ professor_id: pt.professor_id, turma_id: pt.turma_id })),
+    configSugestao: cfgRow ? normalizarConfigSugestao(cfgRow.config) : CONFIG_SUGESTAO_VAZIA,
+  }
+}
+
+/** Salva as regras do "Gerar Sugestão" da congregação ativa. */
+export async function salvarConfigSugestao(config: ConfigSugestao): Promise<{ success: boolean; config?: ConfigSugestao; error?: string }> {
+  try {
+    const { cid } = await exigirModulo('escala', 'editar')
+    const [profs, turmas] = await Promise.all([
+      sql`SELECT id FROM professores WHERE congregacao_id = ${cid}`,
+      sql`SELECT id FROM turmas WHERE congregacao_id = ${cid}`,
+    ])
+    // Descarta qualquer ID que não seja desta congregação
+    const limpa = filtrarConfigPorIds(
+      normalizarConfigSugestao(config),
+      new Set(profs.map(p => p.id as string)),
+      new Set(turmas.map(t => t.id as string)),
+    )
+    await sql`
+      INSERT INTO escala_config_sugestao (congregacao_id, config, updated_at)
+      VALUES (${cid}, ${sql.json(limpa as any)}, NOW())
+      ON CONFLICT (congregacao_id) DO UPDATE SET config = EXCLUDED.config, updated_at = NOW()
+    `
+    return { success: true, config: limpa }
+  } catch (e: any) {
+    return { success: false, error: e?.message }
   }
 }
 

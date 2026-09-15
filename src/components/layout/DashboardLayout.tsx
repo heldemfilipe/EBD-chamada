@@ -8,6 +8,7 @@ import { Sidebar } from './Sidebar'
 import { Toaster } from '@/components/ui/toaster'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
+import { TrocaSenhaObrigatoria } from '@/components/auth/TrocaSenhaObrigatoria'
 
 // Primeira parte da URL → módulo exigido
 const ROTAS_MODULO: Record<string, string> = {
@@ -24,7 +25,7 @@ const ORDEM_ROTAS = Object.keys(ROTAS_MODULO)
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const {
     user, loading, setupPendente, isAdmin, isAdminGeral, podeGerenciarUsuarios,
-    modulosPermitidos, congregacaoAtiva,
+    modulosPermitidos, congregacaoAtiva, precisaTrocarSenha,
   } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
@@ -52,10 +53,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   // Sem acesso à rota → leva para o primeiro módulo liberado
   useEffect(() => {
-    if (!loading && user && !permitido && primeiraRota) {
+    if (!loading && user && !precisaTrocarSenha && !permitido && primeiraRota) {
       router.replace(`/${primeiraRota}`)
     }
-  }, [loading, user, permitido, primeiraRota, router])
+  }, [loading, user, precisaTrocarSenha, permitido, primeiraRota, router])
 
   if (loading) {
     return (
@@ -69,6 +70,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) return null
+
+  // Senha provisória: bloqueia o sistema até o usuário definir uma nova
+  if (precisaTrocarSenha) {
+    return (
+      <>
+        <TrocaSenhaObrigatoria />
+        <Toaster />
+      </>
+    )
+  }
 
   let conteudo: React.ReactNode = children
 
