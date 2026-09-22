@@ -10,15 +10,13 @@ export interface MensagensWhatsApp {
 }
 
 export const MENSAGENS_PADRAO: MensagensWhatsApp = {
-  lembrete: `Paz do Senhor, {primeiro_nome}! Tudo bem?
+  lembrete: `Paz do Senhor, tudo bem?
 
-Passando para lembrar que você está na escala da EBD no próximo {dia_semana}, {data}, na turma *{turma}*.
-Lição {aula}: {licao}
+Tudo certo para a aula de {dia_semana} ({data}) da EBD para a turma {turma}?
+Lição {aula}: {licao}`,
+  reenvio: `Paz do Senhor!
 
-Posso contar com você?`,
-  reenvio: `Paz do Senhor, {primeiro_nome}!
-
-Tudo certo para a aula de {dia_semana} ({data}) com a turma *{turma}*?`,
+Conseguiu ver a mensagem? Tudo certo para a aula de {dia_semana} ({data}) da EBD para a turma {turma}?`,
 }
 
 export const VARIAVEIS_MENSAGEM: { chave: string; descricao: string }[] = [

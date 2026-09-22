@@ -1,11 +1,9 @@
 // ─── Constantes e helpers compartilhados de notificações WhatsApp ─────────────
 
-export const TEMPLATE_PADRAO = `Paz do Senhor, *{professor}*! Tudo bem? 🙏
+export const TEMPLATE_PADRAO = `Paz do Senhor, tudo bem?
 
-Lembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.
-Tema da lição: {tema}
-
-Pode contar com você? 😊`
+Tudo certo para a aula de {dia_semana} ({data}) da EBD para a turma {sala}?
+Lição {aula}: {tema}`
 
 /** Formata número para Z-API: 5511999999999 */
 export function formatarTelefone(tel: string): string {

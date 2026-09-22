@@ -20,6 +20,7 @@ import {
   ExternalLink, Wifi, WifiOff, Zap,
 } from 'lucide-react'
 import { toast } from '@/lib/toast'
+import { TEMPLATE_PADRAO } from '@/lib/notificacoes'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DIAS_SEMANA = [
@@ -34,8 +35,6 @@ const DIAS_SEMANA = [
 
 const DIAS_PT = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
 
-const TEMPLATE_PADRAO =
-  `Paz do Senhor, *{professor}*! Tudo bem? 🙏\n\nLembrete: você está escalado para a *Aula {aula}* no *{dia_semana} ({data})* na sala *{sala}*.\nTema da lição: {tema}\n\nPode contar com você? 😊`
 
 const VARIAVEIS = [
   { var: '{professor}', desc: 'Nome do professor'   },
