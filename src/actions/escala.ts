@@ -6,6 +6,7 @@ import {
   normalizarConfigSugestao, filtrarConfigPorIds, CONFIG_SUGESTAO_VAZIA, type ConfigSugestao,
 } from '@/lib/escala-sugestao'
 import { MENSAGENS_PADRAO, type MensagensWhatsApp } from '@/lib/lembrete-whatsapp'
+import { domingoReferencia } from '@/lib/escala-datas'
 
 export async function buscarDadosEscala() {
   const { cid } = await exigirModulo('escala')
@@ -193,6 +194,33 @@ export async function salvarEscala(dados: {
       `
       return { success: true, id: row.id }
     }
+  } catch (e: any) {
+    return { success: false, error: e?.message }
+  }
+}
+
+/** Muda o dia de uma aula (todas as turmas daquele domingo) dentro da mesma semana.
+ *  Lembrete e confirmação são reiniciados para o professor ser avisado da nova data. */
+export async function remarcarAula(ids: string[], novaData: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { cid } = await exigirModulo('escala', 'editar')
+    if (ids.length === 0) return { success: false, error: 'Nenhuma escala selecionada.' }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(novaData)) return { success: false, error: 'Data inválida.' }
+    const escalas = await sql`
+      SELECT id, to_char(data, 'YYYY-MM-DD') AS data FROM escalas
+      WHERE id = ANY(${ids}) AND congregacao_id = ${cid}
+    `
+    if (escalas.length !== ids.length) return { success: false, error: 'Escala não encontrada.' }
+    const domingo = domingoReferencia(novaData)
+    if (escalas.some(e => domingoReferencia(e.data) !== domingo)) {
+      return { success: false, error: 'A nova data precisa ficar na mesma semana da aula (de quinta antes a quarta depois do domingo).' }
+    }
+    await sql`
+      UPDATE escalas SET data = ${novaData}, confirmado = false, confirmado_em = NULL,
+        lembrete_enviado_em = NULL, lembrete_reenviado_em = NULL
+      WHERE id = ANY(${ids}) AND congregacao_id = ${cid} AND data <> ${novaData}
+    `
+    return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message }
   }

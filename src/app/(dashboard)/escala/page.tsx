@@ -21,8 +21,9 @@ import { CONFIG_SUGESTAO_VAZIA, contarRegras, type ConfigSugestao } from '@/lib/
 import { useAuth } from '@/contexts/AuthContext'
 import {
   buscarDadosEscala as fetchEscala, salvarEscala as salvarEscalaAction, excluirEscala as excluirEscalaAction,
-  registrarLembreteWhatsApp, definirConfirmacaoEscala,
+  registrarLembreteWhatsApp, definirConfirmacaoEscala, remarcarAula,
 } from '@/actions/escala'
+import { domingoReferencia, periodoDaAula, ehDomingo, diaDaSemana, limitesRemarcacao } from '@/lib/escala-datas'
 import { AcoesLembrete, EnviarLembreteDialog, MensagensWhatsAppDialog } from './_LembreteWhatsApp'
 import { MENSAGENS_PADRAO, type MensagensWhatsApp } from '@/lib/lembrete-whatsapp'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
@@ -35,6 +36,8 @@ import { SugestaoDialog } from './_SugestaoDialog'
 interface Escala {
   id: string
   data: string
+  /** Domingo ao qual a aula pertence (igual a `data` quando não foi remarcada) */
+  domingo: string
   turmaId: string
   professorId: string | null
   trimestre: number
@@ -88,10 +91,9 @@ function getDomingosTrimestre(trimestre: number, ano: number) {
 }
 
 function getAulaInfo(data: string) {
-  const d = new Date(data + 'T12:00:00')
-  const ano = d.getFullYear()
-  const trim = Math.floor(d.getMonth() / 3) + 1
-  const found = getDomingosTrimestre(trim, ano).find(dom => dom.data === data)
+  const domingo = domingoReferencia(data)
+  const { ano, trimestre: trim } = periodoDaAula(data)
+  const found = getDomingosTrimestre(trim, ano).find(dom => dom.data === domingo)
   return found ? { ano, trimestre: trim, aula: found.aula } : null
 }
 
@@ -273,11 +275,46 @@ export default function EscalaPage() {
   const [excluirTurmaDialogOpen, setExcluirTurmaDialogOpen] = useState(false)
   const [isDeletingTurma,        setIsDeletingTurma]        = useState(false)
 
+  // ── Remarcação: data real de cada aula (domingo → dia em que a aula acontece) ─
+  const dataRealPorDomingo = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const e of escalasData) if (e.data !== e.domingo || !map.has(e.domingo)) map.set(e.domingo, e.data)
+    return map
+  }, [escalasData])
+  const dataRealAula = useCallback((domingo: string) => dataRealPorDomingo.get(domingo) ?? domingo, [dataRealPorDomingo])
+
+  const [remarcar, setRemarcar]           = useState<{ domingo: string; aula: number; novaData: string } | null>(null)
+  const [isRemarcando, setIsRemarcando]   = useState(false)
+
+  async function confirmarRemarcacao() {
+    if (!remarcar || isRemarcando) return
+    const ids = escalasData.filter(e => e.domingo === remarcar.domingo).map(e => e.id)
+    const { min, max } = limitesRemarcacao(remarcar.domingo)
+    if (!remarcar.novaData || remarcar.novaData < min || remarcar.novaData > max) {
+      toast('Escolha uma data entre ' + fmtDataCurta(min) + ' e ' + fmtDataCurta(max) + '.', 'error'); return
+    }
+    setIsRemarcando(true)
+    try {
+      const res = await remarcarAula(ids, remarcar.novaData)
+      if (!res.success) { toast(res.error ?? 'Não foi possível alterar o dia.', 'error'); return }
+      toast(ehDomingo(remarcar.novaData)
+        ? `Aula ${remarcar.aula} de volta para domingo, ${fmtDataCurta(remarcar.novaData)}.`
+        : `Aula ${remarcar.aula} remarcada para ${diaDaSemana(remarcar.novaData)}, ${fmtDataCurta(remarcar.novaData)}. Reenvie o lembrete aos professores.`)
+      setRemarcar(null)
+      await carregarDados()
+    } finally {
+      setIsRemarcando(false)
+    }
+  }
+
   const domingosTrimForm = useMemo(
     () => getDomingosTrimestre(parseInt(formData.trimestre), parseInt(formData.ano)),
     [formData.trimestre, formData.ano]
   )
-  const dataComputada = domingosTrimForm.find(d => d.aula === parseInt(formData.aulaIdx))?.data ?? ''
+  const domingoForm = domingosTrimForm.find(d => d.aula === parseInt(formData.aulaIdx))?.data ?? ''
+  const dataComputada = !domingoForm ? ''
+    : editMode && selectedEscala?.domingo === domingoForm ? selectedEscala.data
+    : dataRealAula(domingoForm)
 
   // ── Próxima aula (para destaque) ──────────────────────────────────────────────
   const proximaData = useMemo(() => {
@@ -324,8 +361,8 @@ export default function EscalaPage() {
       setMensagensWhatsApp(msgs)
 
       setEscalasData(escalas.map((e: any) => ({
-        id: e.id, data: e.data, turmaId: e.turma_id, professorId: e.professor_id,
-        trimestre: e.trimestre ?? (Math.floor(new Date(e.data + 'T12:00:00').getMonth() / 3) + 1),
+        id: e.id, data: e.data, domingo: domingoReferencia(e.data), turmaId: e.turma_id, professorId: e.professor_id,
+        trimestre: periodoDaAula(e.data).trimestre,
         observacao: e.observacoes ?? '',
         tituloAula: e.titulo_aula ?? '',
         confirmado: !!e.confirmado,
@@ -421,7 +458,7 @@ export default function EscalaPage() {
   // ── Filtros base ──────────────────────────────────────────────────────────────
   const escalasPeriodo = useMemo(() =>
     escalasData
-      .filter(e => e.data.startsWith(filtroAno) && Number(e.trimestre) === parseInt(filtroTrim))
+      .filter(e => e.domingo.startsWith(filtroAno) && Number(e.trimestre) === parseInt(filtroTrim))
       .sort((a, b) => a.data.localeCompare(b.data)),
     [escalasData, filtroAno, filtroTrim]
   )
@@ -444,11 +481,12 @@ export default function EscalaPage() {
       turma,
       temaRevista,
       linhas: domingos.map(dom => {
-        const escala = escalasPeriodo.find(e => e.data === dom.data && e.turmaId === filtroTurma)
+        const escala = escalasPeriodo.find(e => e.domingo === dom.data && e.turmaId === filtroTurma)
         const temaLicao = escala?.tituloAula || getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula)
         return {
           aula: dom.aula,
           data: dom.data,
+          dataReal: dataRealAula(dom.data),
           escala: escala ?? null,
           professor: escala ? getProfNome(escala.professorId) : null,
           temaLicao,
@@ -458,7 +496,7 @@ export default function EscalaPage() {
         }
       }),
     }
-  }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData])
+  }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData, dataRealAula])
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
   const filhasDoReiId = useMemo(
@@ -472,10 +510,11 @@ export default function EscalaPage() {
       escalasPeriodo.some(e => e.turmaId === t.id)
     )
     const linhas = domingos.map(dom => {
-      const escalasNoDia = escalasPeriodo.filter(e => e.data === dom.data)
+      const escalasNoDia = escalasPeriodo.filter(e => e.domingo === dom.data)
       return {
         aula: dom.aula,
         data: dom.data,
+        dataReal: dataRealAula(dom.data),
         isProxima: dom.data === proximaData,
         is2nd: is2ndSunday(dom.data),
         temEscala: escalasNoDia.length > 0,
@@ -494,14 +533,14 @@ export default function EscalaPage() {
       }
     })
     return { turmas: turmasNaEscala, linhas }
-  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData, salasUnidasConfig])
+  }, [filtroTrim, filtroAno, turmasOrdenadas, escalasPeriodo, filtroProf, professoresData, proximaData, salasUnidasConfig, dataRealAula])
 
   // ── Visão Cards (agrupado por data) ───────────────────────────────────────────
   const cardsView = useMemo(() => {
     const map: Record<string, { aulaInfo: ReturnType<typeof getAulaInfo>; escalas: Escala[] }> = {}
     for (const e of escalasFiltradas) {
-      if (!map[e.data]) map[e.data] = { aulaInfo: getAulaInfo(e.data), escalas: [] }
-      map[e.data].escalas.push(e)
+      if (!map[e.domingo]) map[e.domingo] = { aulaInfo: getAulaInfo(e.data), escalas: [] }
+      map[e.domingo].escalas.push(e)
     }
     // Ordena escalas dentro de cada card pela ordem canônica das turmas
     for (const entry of Object.values(map)) {
@@ -621,7 +660,7 @@ export default function EscalaPage() {
     try {
       const resultados = await Promise.all(
         paraInserir.map(e => salvarEscalaAction({
-          data: e.data,
+          data: dataRealAula(e.data),
           turma_id: e.turmaId,
           professor_id: e.professorId,
           observacoes: '',
@@ -641,7 +680,7 @@ export default function EscalaPage() {
     } finally {
       setIsSalvandoSugestao(false)
     }
-  }, [sugestaoEntradas, isSalvandoSugestao, carregarDados])
+  }, [sugestaoEntradas, isSalvandoSugestao, carregarDados, dataRealAula])
 
   // ── Remover toda a escala de uma turma no período ────────────────────────────
   async function excluirEscalasTurma() {
@@ -650,7 +689,7 @@ export default function EscalaPage() {
     try {
       const datas = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno)).map(d => d.data)
       const idsParaExcluir = escalasData
-        .filter(e => e.turmaId === excluirTurmaId && datas.includes(e.data))
+        .filter(e => e.turmaId === excluirTurmaId && datas.includes(e.domingo))
         .map(e => e.id)
       const resultados = await Promise.all(
         idsParaExcluir.map(id => excluirEscalaAction(id))
@@ -850,7 +889,8 @@ export default function EscalaPage() {
                 {/* Data + Tema */}
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0">
-                    <span className="text-xs font-semibold capitalize">{fmtDataLonga(linha.data)}</span>
+                    <span className="text-xs font-semibold capitalize">{fmtDataLonga(linha.dataReal)}</span>
+                    <SeloDiaAula data={linha.dataReal} />
                     {linha.isProxima && (
                       <span className="text-[10px] text-primary font-semibold">Próxima aula</span>
                     )}
@@ -933,7 +973,7 @@ export default function EscalaPage() {
                   <tr className="border-b">
                     <th
                       className="sticky left-0 z-20 px-3 py-3 text-left font-semibold text-muted-foreground text-xs border-r whitespace-nowrap"
-                      style={{ background: 'hsl(var(--card))', minWidth: '90px', width: '90px' }}
+                      style={{ background: 'hsl(var(--card))', minWidth: '104px', width: '104px' }}
                     >
                       Aula
                     </th>
@@ -969,6 +1009,8 @@ export default function EscalaPage() {
                       ? 'ring-2 ring-inset ring-primary bg-primary/8'
                       : linha.isProxima
                       ? 'bg-primary/5 border-l-2 border-l-primary'
+                      : !ehDomingo(linha.dataReal)
+                      ? 'bg-orange-50/60 dark:bg-orange-950/20'
                       : linha.is2nd
                       ? 'bg-amber-50/40 dark:bg-amber-950/10'
                       : 'hover:bg-muted/20'
@@ -980,10 +1022,10 @@ export default function EscalaPage() {
                         {/* Coluna unica sticky: numero + data */}
                         <td
                           className="sticky left-0 z-10 px-3 py-2.5 border-r cursor-pointer"
-                          style={{ background: 'hsl(var(--card))', width: '90px', minWidth: '90px' }}
+                          style={{ background: 'hsl(var(--card))', width: '104px', minWidth: '104px' }}
                           onClick={() => setSelectedRow(prev => prev === linha.data ? null : linha.data)}
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 group/data">
                             <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-bold flex-shrink-0 transition-colors ${
                               isSelected || linha.isProxima
                                 ? 'bg-primary text-primary-foreground'
@@ -993,12 +1035,22 @@ export default function EscalaPage() {
                             </span>
                             <div className="flex flex-col min-w-0">
                               <span className={`text-xs font-medium leading-tight ${isSelected || linha.isProxima ? 'text-primary' : ''}`}>
-                                {fmtDataCurta(linha.data)}
+                                {fmtDataCurta(linha.dataReal)}
                               </span>
-                              {linha.is2nd && (
+                              <SeloDiaAula data={linha.dataReal} compacto />
+                              {linha.is2nd && ehDomingo(linha.dataReal) && (
                                 <span className="text-[9px] text-amber-500 font-bold leading-none">★ 2º dom</span>
                               )}
                             </div>
+                            {podeEditarEscala && linha.temEscala && (
+                              <button
+                                onClick={ev => { ev.stopPropagation(); setRemarcar({ domingo: linha.data, aula: linha.aula, novaData: linha.dataReal }) }}
+                                className="ml-auto p-1 rounded opacity-0 group-hover/data:opacity-100 focus:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+                                title="Alterar o dia desta aula"
+                              >
+                                <Calendar className="h-3 w-3" />
+                              </button>
+                            )}
                           </div>
                         </td>
                         {linha.celulas.map((c, colIdx) => {
@@ -1131,8 +1183,9 @@ export default function EscalaPage() {
             {cardsView.map(([data, { aulaInfo, escalas }]) => {
               const isExpanded = expandedDatas.has(data)
               const isProxima  = data === proximaData
-              const is2nd      = is2ndSunday(data)
-              const dataFmt    = fmtDataLonga(data)
+              const dataReal   = dataRealAula(data)
+              const is2nd      = is2ndSunday(data) && ehDomingo(dataReal)
+              const dataFmt    = fmtDataLonga(dataReal)
 
               return (
                 <div
@@ -1171,6 +1224,7 @@ export default function EscalaPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold capitalize text-sm">{dataFmt}</span>
+                        <SeloDiaAula data={dataReal} />
                         <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
                           {escalas.length} turma{escalas.length !== 1 ? 's' : ''}
                         </Badge>
@@ -1203,6 +1257,21 @@ export default function EscalaPage() {
                   {/* Turmas expandidas */}
                   {isExpanded && (
                     <div className="border-t divide-y">
+                      {podeEditarEscala && aulaInfo && (
+                        <div className="flex items-center justify-between gap-2 px-4 py-1.5 bg-muted/20 text-[11px] text-muted-foreground">
+                          <span>
+                            {ehDomingo(dataReal)
+                              ? 'Aula no domingo'
+                              : <>Aula remarcada (domingo seria {fmtDataCurta(data)})</>}
+                          </span>
+                          <button
+                            onClick={() => setRemarcar({ domingo: data, aula: aulaInfo.aula, novaData: dataReal })}
+                            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground transition-colors"
+                          >
+                            <Calendar className="h-3 w-3" />Alterar dia
+                          </button>
+                        </div>
+                      )}
                       {escalas.map(escala => {
                         const aulaNum       = aulaInfo?.aula ?? 0
                         const turmaNome     = getTurmaNome(escala.turmaId)
@@ -1332,6 +1401,62 @@ export default function EscalaPage() {
       />
 
       {/* ── Dialog Confirmar Exclusão ──────────────────────────────────────── */}
+      <Dialog open={!!remarcar} onOpenChange={v => { if (!v && !isRemarcando) setRemarcar(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Alterar dia da aula {remarcar?.aula}</DialogTitle>
+            <DialogDescription>
+              Vale para todas as turmas desta aula. A lição continua a mesma; só muda o dia.
+            </DialogDescription>
+          </DialogHeader>
+          {remarcar && (() => {
+            const { min, max } = limitesRemarcacao(remarcar.domingo)
+            const valida = !!remarcar.novaData && remarcar.novaData >= min && remarcar.novaData <= max
+            return (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="nova-data-aula">Nova data</Label>
+                  <Input
+                    id="nova-data-aula"
+                    type="date"
+                    min={min}
+                    max={max}
+                    value={remarcar.novaData}
+                    onChange={ev => setRemarcar(r => r && { ...r, novaData: ev.target.value })}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    De {fmtDataCurta(min)} a {fmtDataCurta(max)} (semana do domingo {fmtDataCurta(remarcar.domingo)}).
+                  </p>
+                </div>
+                {valida && (
+                  <p className={`text-sm font-medium capitalize ${ehDomingo(remarcar.novaData) ? '' : 'text-orange-600 dark:text-orange-400'}`}>
+                    {fmtDataLonga(remarcar.novaData)}
+                  </p>
+                )}
+                {!ehDomingo(remarcar.domingo) || remarcar.novaData !== remarcar.domingo ? (
+                  <button
+                    type="button"
+                    onClick={() => setRemarcar(r => r && { ...r, novaData: r.domingo })}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Voltar para o domingo ({fmtDataCurta(remarcar.domingo)})
+                  </button>
+                ) : null}
+                <p className="text-[11px] text-muted-foreground">
+                  Os lembretes e confirmações desta aula serão reiniciados, para os professores receberem a nova data.
+                </p>
+              </div>
+            )
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemarcar(null)} disabled={isRemarcando}>Cancelar</Button>
+            <Button onClick={confirmarRemarcacao} disabled={isRemarcando}>
+              {isRemarcando ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="w-[calc(100%-2rem)] sm:max-w-sm">
           <DialogHeader>
@@ -1374,6 +1499,21 @@ export default function EscalaPage() {
 }
 
 // ─── Componente auxiliar: estado vazio ─────────────────────────────────────────
+/** Destaque para aula que não acontece no domingo */
+function SeloDiaAula({ data, compacto }: { data: string; compacto?: boolean }) {
+  if (ehDomingo(data)) return null
+  const dia = diaDaSemana(data)
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300 w-fit"
+      title={`Aula remarcada para ${dia}`}
+    >
+      <Calendar className="h-2.5 w-2.5 flex-shrink-0" />
+      {compacto ? dia.slice(0, 3) : dia}
+    </span>
+  )
+}
+
 function EmptyEscala({ onNova }: { onNova: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl border bg-card">

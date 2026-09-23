@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select'
 import { Calendar, BookOpen, Link2, RotateCcw } from 'lucide-react'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
+import { domingoReferencia } from '@/lib/escala-datas'
 
 interface Professor { id: string; nome: string }
 interface Turma { id: string; nome: string; cor: string; sala?: string | null }
@@ -199,7 +200,7 @@ export function NovaEscalaDialog({
 
           {/* Sala Unida — configurado por aula específica */}
           {formData.turmaId && dataComputada && (() => {
-            const chave        = unidaChave(formData.turmaId, dataComputada)
+            const chave        = unidaChave(formData.turmaId, domingoReferencia(dataComputada))
             const isUnidaAtual = chave in salasUnidasConfig
             const unidaComId   = salasUnidasConfig[chave] ?? ''
             const outrasTurmas = turmasOrdenadas.filter(t => t.id !== formData.turmaId)

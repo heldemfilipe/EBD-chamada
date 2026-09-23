@@ -323,7 +323,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-primary" />
-                Próximo domingo
+                Próxima aula
               </CardTitle>
               {proximoDomingo && statusProximo.length > 0 && (
                 <Badge variant="secondary" className="text-[11px] gap-1">
@@ -331,7 +331,7 @@ export default function DashboardPage() {
                 </Badge>
               )}
             </div>
-            <CardDescription className="capitalize">
+            <CardDescription className={cn('capitalize', proximoDomingo && parseISO(proximoDomingo.data).getDay() !== 0 && 'text-orange-600 dark:text-orange-400 font-semibold')}>
               {proximoDomingo ? format(parseISO(proximoDomingo.data), "EEEE, dd 'de' MMMM", { locale: ptBR }) : 'Escala dos professores'}
             </CardDescription>
           </CardHeader>
