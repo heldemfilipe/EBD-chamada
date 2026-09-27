@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
       )
       const prof    = e.professores
       const turma   = e.turmas
-      const tema    = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum) ?? undefined
+      const tema    = getLicaoTema(turma?.nome ?? '', String(anoAula), trimAula, aulaNum, cid) ?? undefined
       const tel     = prof?.telefone ? formatarTelefone(prof.telefone) : null
       const mensagem = formatarMensagem(
         override?.mensagem_personalizada ?? template,

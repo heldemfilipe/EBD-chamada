@@ -58,6 +58,22 @@ export function getCargo(cargo: string) {
   return CARGOS.find(c => c.label === cargo) ?? null
 }
 
+// ─── Currículo restrito por congregação ────────────────────────────────────────
+// Algumas combinações ano/trimestre só têm o currículo (temas e títulos de aula)
+// cadastrado para uma congregação específica — outra congregação pode ter turma
+// com o mesmo nome seguindo um currículo diferente, então essas combinações só
+// aparecem para a congregação dona dos dados.
+export const CID_JARDIM_NOVO_1 = 'c84176df-27bf-4ef1-9b35-9f86ee79dda9'
+
+const CURRICULO_RESTRITO_A_CID: Record<string, string> = {
+  '2026-4': CID_JARDIM_NOVO_1,
+}
+
+function curriculoDisponivel(ano: string | number, trimestre: number, cid?: string | null): boolean {
+  const restrito = CURRICULO_RESTRITO_A_CID[`${ano}-${trimestre}`]
+  return !restrito || restrito === cid
+}
+
 // ─── Temas das revistas CPAD por ano/trimestre ────────────────────────────────
 export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>>> = {
   '2026': {
@@ -75,6 +91,9 @@ export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>
       pre_adolescentes: 'Servindo A Deus Com Meus Talentos',
       juniores:         'Tempo dos Juízes',
       primarios:        'As Crianças da Bíblia',
+    },
+    4: {
+      adolescentes:     'Espírito Santo: Deus Presente Em Nós',
     },
   },
 }
@@ -252,11 +271,104 @@ export const LICOES_REVISTA: Record<string, Record<number, Record<string, Record
         13: 'A Missão Continua em Nós',
       },
     },
+    4: {
+      primarios: {
+        1:  'Deus Criou o Mundo Perfeito!',
+        2:  'O Primeiro Pecado',
+        3:  'O Pecado Gera a Morte',
+        4:  'O Pecado Destrói o Mundo, mas Deus Deseja Salvá-lo',
+        5:  'Amigos de Deus São Inimigos do Pecado',
+        6:  'Deus Quer Nos Libertar da Escravidão do Pecado',
+        7:  'Como Ficar Longe do Mal do Pecado?',
+        8:  'A Obediência Traz Muitas Bênçãos',
+        9:  'O Povo de Deus Imita os Pecadores?',
+        10: 'Deus Envia o Salvador!',
+        11: 'Morrer para o Pecado, Viver para Jesus',
+        12: 'O Presente da Salvação',
+        13: 'Um Lugar Maravilhoso Está Sendo Preparado',
+      },
+      juniores: {
+        1:  'Davi, o Rei Amado',
+        2:  'Salomão, o Rei Mais Sábio',
+        3:  'Roboão Divide o Reino',
+        4:  'Jeroboão e a Falsa Fé',
+        5:  'Asa, um Rei Bom para Israel',
+        6:  'O Reino de Acabe e a Sua Idolatria',
+        7:  'Jeú Acaba com a Idolatria',
+        8:  'Josafá, um Rei Justo e Temente a Deus',
+        9:  'Acazias, um Rei Duro de Coração',
+        10: 'Oseias Reina e o Povo se Desvia',
+        11: 'Ezequias, um Rei de Oração',
+        12: 'Manassés, um Rei Arrependido',
+        13: 'Josias Reina e Renova a Aliança com Deus',
+      },
+      pre_adolescentes: {
+        1:  'O Bom Conselho dos Pais',
+        2:  'Sobre as Falsas Amizades',
+        3:  'A Sabedoria e o Temor do Senhor',
+        4:  'A Importância da Disciplina',
+        5:  'Aprendendo em Família',
+        6:  'Preservando Boas Amizades',
+        7:  'Fuja das Tentações!',
+        8:  'Diga Não à Preguiça!',
+        9:  'Diga Não à Mentira!',
+        10: 'O Cuidado com as Palavras',
+        11: 'O Perigo da Inveja',
+        12: 'O Valor da Humildade',
+        13: 'A Recompensa por Fazer o que É Certo',
+      },
+      adolescentes: {
+        1:  'A Natureza do Espírito Santo',
+        2:  'Os Nomes do Espírito Santo',
+        3:  'Os Símbolos do Espírito Santo',
+        4:  'O Espírito Santo no Antigo Testamento',
+        5:  'O Espírito Santo no Novo Testamento',
+        6:  'O Espírito Atuante em Cristo',
+        7:  'O Espírito Santo Atuando no Crente',
+        8:  'O Batismo no Espírito Santo',
+        9:  'Os Dons do Espírito Santo',
+        10: 'Conservando o Poder',
+        11: 'O Fruto do Espírito Santo',
+        12: 'Pecando Contra o Espírito Santo',
+        13: 'Busque o Batismo no Espírito Santo',
+      },
+      jovens: {
+        1:  'Carta aos Filipenses: um Chamado à Alegria',
+        2:  'Uma Vida Digna do Evangelho',
+        3:  'A Humildade de Cristo: o Exemplo Supremo',
+        4:  'Brilhe a Luz de Cristo em Meio à Geração Corrompida',
+        5:  'Exemplo de Servos Fiéis: Timóteo e Epafrodito',
+        6:  'Guardando-se dos Falsos Mestres',
+        7:  'O Alvo Supremo: Conhecer a Cristo',
+        8:  'Unidade e Alegria no Senhor',
+        9:  'A Paz de Deus Guarda o Coração',
+        10: 'O Pensar Cristão: o que Ocupa a Sua Mente?',
+        11: 'Contentamento em Toda e Qualquer Situação',
+        12: 'Generosidade e Cuidado com a Obra de Deus',
+        13: 'Saudações Finais, Comunhão e Bênçãos',
+      },
+      adultos: {
+        1:  'Deuteronômio: o Livro da Aliança',
+        2:  'Recapitulando a Jornada no Deserto',
+        3:  'A Fidelidade de Deus diante da Infidelidade de Israel',
+        4:  'O Chamado à Obediência',
+        5:  'O Grande Mandamento',
+        6:  'A Aliança e as Bênçãos da Obediência',
+        7:  'Maldições e Bênçãos da Aliança',
+        8:  'Escolhendo a Vida ou a Morte',
+        9:  'A Sucessão de Moisés',
+        10: 'O Cântico de Moisés: Advertência e Esperança',
+        11: 'A Bênção Final de Moisés',
+        12: 'A Morte de Moisés e a Continuidade da Promessa',
+        13: 'O Cumprimento de Deuteronômio em Cristo',
+      },
+    },
   },
 }
 
 /** Retorna o título da lição específica de uma turma em um período */
-export function getLicaoTema(turmaNome: string, ano: string | number, trimestre: number, aula: number): string | null {
+export function getLicaoTema(turmaNome: string, ano: string | number, trimestre: number, aula: number, cid?: string | null): string | null {
+  if (!curriculoDisponivel(ano, trimestre, cid)) return null
   const cat = getTurmaCategoria(turmaNome)
   if (!cat) return null
   return LICOES_REVISTA[String(ano)]?.[trimestre]?.[cat]?.[aula] ?? null
@@ -275,7 +387,8 @@ export function getTurmaCategoria(nome: string): string | null {
 }
 
 /** Retorna o tema da revista para uma turma em um período */
-export function getTemaRevista(turmaNome: string, ano: string | number, trimestre: number): string | null {
+export function getTemaRevista(turmaNome: string, ano: string | number, trimestre: number, cid?: string | null): string | null {
+  if (!curriculoDisponivel(ano, trimestre, cid)) return null
   const cat = getTurmaCategoria(turmaNome)
   if (!cat) return null
   return TEMAS_REVISTA[String(ano)]?.[trimestre]?.[cat] ?? null

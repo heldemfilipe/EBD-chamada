@@ -7,6 +7,7 @@ import {
 } from '@/lib/escala-sugestao'
 import { MENSAGENS_PADRAO, type MensagensWhatsApp } from '@/lib/lembrete-whatsapp'
 import { domingoReferencia } from '@/lib/escala-datas'
+import { CID_JARDIM_NOVO_1 } from '@/lib/constants'
 
 export async function buscarDadosEscala() {
   const { cid } = await exigirModulo('escala')
@@ -204,6 +205,9 @@ export async function salvarEscala(dados: {
 export async function remarcarAula(ids: string[], novaData: string): Promise<{ success: boolean; error?: string }> {
   try {
     const { cid } = await exigirModulo('escala', 'editar')
+    // Por enquanto, remarcar o dia da aula só está liberado para a congregação
+    // Jardim Novo 1 (ver CID_JARDIM_NOVO_1 em lib/constants.ts)
+    if (cid !== CID_JARDIM_NOVO_1) return { success: false, error: 'Esta função está disponível apenas para a congregação Jardim Novo 1 por enquanto.' }
     if (ids.length === 0) return { success: false, error: 'Nenhuma escala selecionada.' }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(novaData)) return { success: false, error: 'Data inválida.' }
     const escalas = await sql`

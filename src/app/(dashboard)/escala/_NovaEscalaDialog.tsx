@@ -13,6 +13,7 @@ import {
 import { Calendar, BookOpen, Link2, RotateCcw } from 'lucide-react'
 import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
 import { domingoReferencia } from '@/lib/escala-datas'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface Professor { id: string; nome: string }
 interface Turma { id: string; nome: string; cor: string; sala?: string | null }
@@ -81,6 +82,8 @@ export function NovaEscalaDialog({
   isSaving, editMode, domingosTrimForm, dataComputada, salasUnidasConfig, onSalvarSalasUnidas,
   profTurmasMap,
 }: NovaEscalaDialogProps) {
+  const { congregacaoAtiva } = useAuth()
+  const cid = congregacaoAtiva?.id
   const turmasOrdenadas = [...turmas].sort((a, b) => ordemTurma(a.sala, a.nome) - ordemTurma(b.sala, b.nome))
   const getTurmaNome = (id: string) => turmas.find(t => t.id === id)?.nome ?? '—'
   const unidaChave = (turmaId: string, data: string) => `${turmaId}::${data}`
@@ -88,7 +91,7 @@ export function NovaEscalaDialog({
   // Sugestão de título da revista para a combinação turma+aula atual
   const turmaNomeAtual  = formData.turmaId ? getTurmaNome(formData.turmaId) : ''
   const tituloSugerido  = turmaNomeAtual
-    ? getLicaoTema(turmaNomeAtual, formData.ano, parseInt(formData.trimestre), parseInt(formData.aulaIdx))
+    ? getLicaoTema(turmaNomeAtual, formData.ano, parseInt(formData.trimestre), parseInt(formData.aulaIdx), cid)
     : null
 
   // Auto-preenche o título quando o usuário seleciona turma ou aula, mas apenas se o campo estiver vazio
@@ -164,7 +167,7 @@ export function NovaEscalaDialog({
               <SelectTrigger className="h-9"><SelectValue placeholder="Selecione a turma" /></SelectTrigger>
               <SelectContent>
                 {turmasOrdenadas.map(t => {
-                  const tema = getTemaRevista(t.nome, formData.ano, parseInt(formData.trimestre))
+                  const tema = getTemaRevista(t.nome, formData.ano, parseInt(formData.trimestre), cid)
                   return (
                     <SelectItem key={t.id} value={t.id}>
                       <div className="flex items-center gap-2">
@@ -180,8 +183,8 @@ export function NovaEscalaDialog({
             {formData.turmaId && (() => {
               const nome      = getTurmaNome(formData.turmaId)
               const aulaNum   = parseInt(formData.aulaIdx)
-              const temaLicao = getLicaoTema(nome, formData.ano, parseInt(formData.trimestre), aulaNum)
-              const temaRev   = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre))
+              const temaLicao = getLicaoTema(nome, formData.ano, parseInt(formData.trimestre), aulaNum, cid)
+              const temaRev   = getTemaRevista(nome, formData.ano, parseInt(formData.trimestre), cid)
               return (temaLicao || temaRev) ? (
                 <div className="rounded-md bg-muted/40 border px-3 py-2 mt-1.5 flex items-start gap-2">
                   <BookOpen className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-muted-foreground" />

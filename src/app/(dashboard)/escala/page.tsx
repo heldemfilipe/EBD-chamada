@@ -26,7 +26,7 @@ import {
 import { domingoReferencia, periodoDaAula, ehDomingo, diaDaSemana, limitesRemarcacao } from '@/lib/escala-datas'
 import { AcoesLembrete, EnviarLembreteDialog, MensagensWhatsAppDialog } from './_LembreteWhatsApp'
 import { MENSAGENS_PADRAO, type MensagensWhatsApp } from '@/lib/lembrete-whatsapp'
-import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema } from '@/lib/constants'
+import { ANOS_DISPONIVEIS, getTemaRevista, getLicaoTema, CID_JARDIM_NOVO_1 } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 import { turmaCorRgba } from '@/lib/presence'
 import { NovaEscalaDialog } from './_NovaEscalaDialog'
@@ -408,6 +408,9 @@ export default function EscalaPage() {
   const getTurmaCor  = (id: string) => turmasData.find(t => t.id === id)?.cor ?? 'bg-gray-500'
   const getProfTelefone = (id: string | null) => id ? (professoresData.find(p => p.id === id)?.telefone ?? null) : null
   const podeEditarEscala = podeEditar('escala')
+  // Remarcar o dia da aula (e refletir na chamada) por enquanto só está liberado
+  // para a congregação Jardim Novo 1 — ver CID_JARDIM_NOVO_1 em lib/constants.ts
+  const podeAlterarDia = podeEditarEscala && congregacaoAtiva?.id === CID_JARDIM_NOVO_1
 
   // ── Lembretes de WhatsApp ─────────────────────────────────────────────────────
   function atualizarLembreteLocal(id: string, dados: { confirmado?: boolean; lembrete_enviado_em?: string | null; lembrete_reenviado_em?: string | null }) {
@@ -440,7 +443,7 @@ export default function EscalaPage() {
       turma: turmaNome,
       data: escala.data,
       aula: info?.aula ?? null,
-      licao: escala.tituloAula || (info ? getLicaoTema(turmaNome, String(info.ano), info.trimestre, info.aula) : null) || null,
+      licao: escala.tituloAula || (info ? getLicaoTema(turmaNome, String(info.ano), info.trimestre, info.aula, congregacaoAtiva?.id) : null) || null,
     }
   }
   // Estável enquanto a janela está aberta (não apaga o texto editado em re-renderizações)
@@ -476,13 +479,13 @@ export default function EscalaPage() {
     const turma = turmasData.find(t => t.id === filtroTurma)
     if (!turma) return null
     const domingos = getDomingosTrimestre(parseInt(filtroTrim), parseInt(filtroAno))
-    const temaRevista = getTemaRevista(turma.nome, filtroAno, parseInt(filtroTrim))
+    const temaRevista = getTemaRevista(turma.nome, filtroAno, parseInt(filtroTrim), congregacaoAtiva?.id)
     return {
       turma,
       temaRevista,
       linhas: domingos.map(dom => {
         const escala = escalasPeriodo.find(e => e.domingo === dom.data && e.turmaId === filtroTurma)
-        const temaLicao = escala?.tituloAula || getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula)
+        const temaLicao = escala?.tituloAula || getLicaoTema(turma.nome, filtroAno, parseInt(filtroTrim), dom.aula, congregacaoAtiva?.id)
         return {
           aula: dom.aula,
           data: dom.data,
@@ -496,7 +499,7 @@ export default function EscalaPage() {
         }
       }),
     }
-  }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData, dataRealAula])
+  }, [filtroTurma, filtroTrim, filtroAno, turmasData, escalasPeriodo, filtroProf, professoresData, proximaData, dataRealAula, congregacaoAtiva])
 
   // ── Visão Tabela (L# × Turma) ─────────────────────────────────────────────────
   const filhasDoReiId = useMemo(
@@ -978,7 +981,7 @@ export default function EscalaPage() {
                       Aula
                     </th>
                     {tabelaView.turmas.map((t, colIdx) => {
-                      const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim))
+                      const tema = getTemaRevista(t.nome, filtroAno, parseInt(filtroTrim), congregacaoAtiva?.id)
                       return (
                         <th key={t.id} className="px-3 py-0 text-left font-semibold" style={{ minWidth: '160px', maxWidth: '220px', backgroundColor: turmaCorRgba(t.cor, colIdx, 0.12) }}>
                           <div className={`h-2.5 -mx-3 mb-2 ${t.cor}`} />
@@ -1042,7 +1045,7 @@ export default function EscalaPage() {
                                 <span className="text-[9px] text-amber-500 font-bold leading-none">★ 2º dom</span>
                               )}
                             </div>
-                            {podeEditarEscala && linha.temEscala && (
+                            {podeAlterarDia && linha.temEscala && (
                               <button
                                 onClick={ev => { ev.stopPropagation(); setRemarcar({ domingo: linha.data, aula: linha.aula, novaData: linha.dataReal }) }}
                                 className="ml-auto p-1 rounded opacity-0 group-hover/data:opacity-100 focus:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
@@ -1054,7 +1057,7 @@ export default function EscalaPage() {
                           </div>
                         </td>
                         {linha.celulas.map((c, colIdx) => {
-                          const temaLicao = c.escala?.tituloAula || getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula)
+                          const temaLicao = c.escala?.tituloAula || getLicaoTema(getTurmaNome(c.turmaId), filtroAno, parseInt(filtroTrim), linha.aula, congregacaoAtiva?.id)
                           const turmaObj = tabelaView.turmas[colIdx]
                           return (
                           <td key={c.turmaId} className="px-3 py-2" style={{ backgroundColor: turmaCorRgba(turmaObj?.cor, colIdx, 0.05) }}>
@@ -1264,21 +1267,23 @@ export default function EscalaPage() {
                               ? 'Aula no domingo'
                               : <>Aula remarcada (domingo seria {fmtDataCurta(data)})</>}
                           </span>
-                          <button
-                            onClick={() => setRemarcar({ domingo: data, aula: aulaInfo.aula, novaData: dataReal })}
-                            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground transition-colors"
-                          >
-                            <Calendar className="h-3 w-3" />Alterar dia
-                          </button>
+                          {podeAlterarDia && (
+                            <button
+                              onClick={() => setRemarcar({ domingo: data, aula: aulaInfo.aula, novaData: dataReal })}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground transition-colors"
+                            >
+                              <Calendar className="h-3 w-3" />Alterar dia
+                            </button>
+                          )}
                         </div>
                       )}
                       {escalas.map(escala => {
                         const aulaNum       = aulaInfo?.aula ?? 0
                         const turmaNome     = getTurmaNome(escala.turmaId)
                         const turmaCor      = getTurmaCor(escala.turmaId)
-                        const temaLicaoBase = getLicaoTema(turmaNome, filtroAno, parseInt(filtroTrim), aulaNum)
+                        const temaLicaoBase = getLicaoTema(turmaNome, filtroAno, parseInt(filtroTrim), aulaNum, congregacaoAtiva?.id)
                         const temaLicao     = escala.tituloAula || temaLicaoBase
-                        const temaRev       = getTemaRevista(turmaNome, filtroAno, parseInt(filtroTrim))
+                        const temaRev       = getTemaRevista(turmaNome, filtroAno, parseInt(filtroTrim), congregacaoAtiva?.id)
                         const isProfDestac  = filtroProf !== 'todos' && escala.professorId === filtroProf
                         return (
                           <div key={escala.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors ${isProfDestac ? 'bg-primary/5' : ''}`}>
