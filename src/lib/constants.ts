@@ -93,7 +93,12 @@ export const TEMAS_REVISTA: Record<string, Record<number, Record<string, string>
       primarios:        'As Crianças da Bíblia',
     },
     4: {
+      adultos:          'O Deus da Aliança: Advertências, Promessas e Bênçãos no Livro de Deuteronômio',
+      jovens:           'Regozijai-vos no Senhor: Vivendo com Propósito à Luz da Carta aos Filipenses',
       adolescentes:     'Espírito Santo: Deus Presente Em Nós',
+      pre_adolescentes: 'Sábios Conselhos de Provérbios para o Pré-Adolescente Cristão',
+      juniores:         'Histórias dos Reis de Israel',
+      primarios:        'A História da Queda e Salvação',
     },
   },
 }
